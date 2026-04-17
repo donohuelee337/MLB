@@ -30,6 +30,21 @@ const MLB_TEAM_ABBREV = {
 function buildConfigTab() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   let sheet = ss.getSheetByName(CONFIG_TAB_NAME);
+  let prevSlate = '';
+  try {
+    const nr = ss.getRangeByName('CONFIG');
+    if (nr) {
+      nr.getValues().forEach(function (r) {
+        if (String(r[0]).trim() === 'SLATE_DATE' && r[1]) prevSlate = String(r[1]).trim();
+      });
+    }
+  } catch (e) {}
+  const tz = Session.getScriptTimeZone();
+  const defaultSlate =
+    prevSlate && /^\d{4}-\d{2}-\d{2}$/.test(prevSlate)
+      ? prevSlate
+      : Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+
   if (!sheet) sheet = ss.insertSheet(CONFIG_TAB_NAME);
   sheet.clearContents().clearFormats();
   sheet.getRange(1, 1, 1, 3).merge()
@@ -43,7 +58,7 @@ function buildConfigTab() {
     row++;
   }
   row_('RUN_WINDOW', 'MORNING', 'MORNING | MIDDAY | FINAL');
-  row_('SLATE_DATE', Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd'), 'Override with tomorrow for overnight prep');
+  row_('SLATE_DATE', defaultSlate, 'yyyy-MM-dd in script TZ — use menu "tomorrow" or set manually');
   row_('ODDS_BOOK', 'fanduel', 'the-odds-api bookmaker key');
   row_('ODDS_REGION', 'us', 'regions param');
   ss.getNamedRanges().forEach(function (nr) {
