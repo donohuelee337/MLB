@@ -29,13 +29,15 @@ League uses the **ABS challenge system** (human calls pitches; players may chall
 
 ## Repo / backup
 
-This repo is meant to be **separate** from `ai-boiz`. Initialize remote:
+This repo is meant to be **separate** from `ai-boiz`. Git is initialized locally (`main` branch, two commits). **GitHub CLI (`gh`) is not required** — create the empty repo in the browser, then:
 
 ```bash
-cd mlb-boiz
+cd C:\Users\Garage\Documents\Cursor\mlb-boiz
 git remote add origin https://github.com/YOUR_USER/mlb-boiz.git
 git push -u origin main
 ```
+
+If `git push` asks for credentials, use a **Personal Access Token** as the password (GitHub deprecated password auth).
 
 ## Legal
 
