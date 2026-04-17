@@ -9,8 +9,10 @@ function onOpen() {
   ui.createMenu('⚾ MLB-BOIZ')
     .addItem('0. Build Config tab', 'buildConfigTab')
     .addSeparator()
-    .addItem('🌅 Morning — Schedule + FanDuel odds', 'runMorningWindowMLB')
+    .addItem('🌅 Morning — Injuries + schedule + FanDuel odds', 'runMorningWindowMLB')
     .addItem('📆 Set SLATE_DATE to tomorrow (NY) + Morning', 'runMorningForTomorrowNY_')
+    .addSeparator()
+    .addItem('🚑 MLB injuries only', 'fetchMLBInjuryReport')
     .addToUi();
 }
 
@@ -47,6 +49,7 @@ function runMorningWindowMLB() {
       buildConfigTab();
     } catch (e) {}
   });
+  step('MLB injuries (ESPN)', fetchMLBInjuryReport);
   step('MLB schedule (statsapi)', fetchMLBScheduleForSlate);
   step('FanDuel MLB odds', fetchMLBFanDuelOdds);
 

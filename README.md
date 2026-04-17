@@ -5,10 +5,11 @@ Google Apps Script + Google Sheets pipeline in the **AI-BOIZ** spirit: slate-fir
 ## What works today (MVP)
 
 1. **⚙️ Config** — `SLATE_DATE` (defaults to today in `America/New_York`), book/region keys.
-2. **📅 MLB_Schedule** — games for `SLATE_DATE` with probable pitchers (`statsapi.mlb.com`).
-3. **✅ FanDuel_MLB_Odds** — player + core game markets for that slate (`baseball_mlb` + `fanduel`).
+2. **🚑 MLB_Injury_Report** — all teams from ESPN (`baseball/mlb/injuries`). Named range **`INJURY_DATA_MLB`**.
+3. **📅 MLB_Schedule** — games for `SLATE_DATE` with probable pitchers (`statsapi.mlb.com`).
+4. **✅ FanDuel_MLB_Odds** — player + core game markets for that slate (`baseball_mlb` + `fanduel`).
 
-Run from the menu: **⚾ MLB-BOIZ → Morning — Schedule + FanDuel odds**.
+Run from the menu: **⚾ MLB-BOIZ → Morning — Injuries + schedule + FanDuel odds** (or **MLB injuries only**).
 
 ## Setup (once)
 
