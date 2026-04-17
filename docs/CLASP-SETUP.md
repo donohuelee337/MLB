@@ -57,26 +57,13 @@ That creates a **new** Sheet + container-bound script and writes **`.clasp.json`
 
 ---
 
-## 4. Create `.clasp.json` in the repo folder
+## 4. `.clasp.json` in the repo folder
 
-`mlb-boiz` **gitignores** `.clasp.json` so your script ID stays local.
+This repo **tracks** `.clasp.json` so clones on other machines work with the same Apps Script project (after `clasp login` on each machine).
 
-1. Copy the example:
+- If you fork for a **new** script: copy `.clasp.json.example` → `.clasp.json` and set your own `scriptId`.
 
-   ```bash
-   copy .clasp.json.example .clasp.json
-   ```
-
-2. Edit **`.clasp.json`** and set:
-
-   ```json
-   {
-     "scriptId": "PASTE_YOUR_SCRIPT_ID_HERE",
-     "rootDir": ""
-   }
-   ```
-
-3. Optional but recommended — add a `.clasp.json` **rootDir** if you put script files in a subfolder later; for this repo, `""` means “this folder”.
+Optional: set **rootDir** if script files live in a subfolder; here `""` means this folder.
 
 ---
 
