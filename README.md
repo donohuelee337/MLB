@@ -13,9 +13,13 @@ Run from the menu: **⚾ MLB-BOIZ → Morning — Injuries + schedule + FanDuel 
 
 ## Setup (once)
 
+Full **clasp** walkthrough (including “Project not found”): see **[docs/CLASP-SETUP.md](docs/CLASP-SETUP.md)**.
+
+Short path:
+
 1. Create a **new Google Sheet** (recommended: separate workbook from NBA AI-BOIZ).
-2. **Extensions → Apps Script** — create a project bound to the sheet.
-3. Copy all `.js` files + `appsscript.json` into the Apps Script editor (or use **clasp**: copy `.clasp.json.example` → `.clasp.json`, set `scriptId`, then `clasp push`).
+2. **Extensions → Apps Script** — note the **script ID** in the URL (`script.google.com/home/projects/SCRIPT_ID/edit`).
+3. In this repo: `copy .clasp.json.example .clasp.json` → put that **SCRIPT_ID** in `scriptId` → run `clasp login` once → **`clasp push`** from `mlb-boiz`.
 4. **Project Settings → Script properties** — add:
    - `ODDS_API_KEY` — your key from [the-odds-api.com](https://the-odds-api.com/) (never commit this key).
 5. Reload the Sheet → **⚾ MLB-BOIZ** menu appears.

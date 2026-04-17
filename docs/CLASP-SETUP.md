@@ -1,0 +1,125 @@
+# clasp setup (fix “Project not found” on `clasp push`)
+
+`clasp` needs two things: **you are logged in as the Google account that owns the script**, and **`.clasp.json` contains the correct `scriptId`**.
+
+---
+
+## 1. Install clasp (once)
+
+```bash
+npm install -g @google/clasp
+```
+
+Check: `clasp --version`
+
+---
+
+## 2. Log in (once per machine / account)
+
+```bash
+clasp login
+```
+
+A browser opens; authorize **the same Google account** you use for the Sheet / Apps Script.
+
+If you use multiple accounts:
+
+```bash
+clasp login --creds creds.json
+```
+
+(Advanced; usually `clasp login` is enough.)
+
+---
+
+## 3. Get the correct `scriptId`
+
+### If you already have a Sheet + Apps Script
+
+1. Open the **Spreadsheet**.
+2. **Extensions → Apps Script**.
+3. Look at the URL in the browser. It will look like:
+
+   `https://script.google.com/home/projects/THIS_LONG_STRING_IS_THE_SCRIPT_ID/edit`
+
+   Copy **`THIS_LONG_STRING_IS_THE_SCRIPT_ID`** (letters, numbers, sometimes hyphens).
+
+### If you do not have a script yet
+
+Either create a Sheet and use step above, **or** from `mlb-boiz` folder:
+
+```bash
+cd C:\Users\Garage\Documents\Cursor\mlb-boiz
+clasp create --title "MLB-BOIZ" --type sheets
+```
+
+That creates a **new** Sheet + container-bound script and writes **`.clasp.json`** for you. Then copy your repo’s `.js` / `appsscript.json` into this folder (or merge) and `clasp push`.
+
+---
+
+## 4. Create `.clasp.json` in the repo folder
+
+`mlb-boiz` **gitignores** `.clasp.json` so your script ID stays local.
+
+1. Copy the example:
+
+   ```bash
+   copy .clasp.json.example .clasp.json
+   ```
+
+2. Edit **`.clasp.json`** and set:
+
+   ```json
+   {
+     "scriptId": "PASTE_YOUR_SCRIPT_ID_HERE",
+     "rootDir": ""
+   }
+   ```
+
+3. Optional but recommended — add a `.clasp.json` **rootDir** if you put script files in a subfolder later; for this repo, `""` means “this folder”.
+
+---
+
+## 5. Push
+
+From `C:\Users\Garage\Documents\Cursor\mlb-boiz`:
+
+```bash
+clasp push
+```
+
+First push may ask to enable the Apps Script API — follow the link clasp prints, enable it, wait a minute, retry.
+
+---
+
+## Why you see “Project not found”
+
+| Cause | Fix |
+|--------|-----|
+| No `.clasp.json` or empty `scriptId` | Create file, paste real ID from URL |
+| Wrong ID (typo, copied container ID from wrong place) | Re-copy from **script.google.com/home/projects/.../edit** |
+| Logged into clasp as **Account A**, script owned by **Account B** | `clasp logout` then `clasp login` with B |
+| Script was deleted | New Sheet → Apps Script → new ID → update `.clasp.json` |
+| Using **Drive file ID** or **Spreadsheet ID** instead of **Script ID** | Script ID is from **script.google.com** URL, **not** `docs.google.com/spreadsheets/d/...` |
+
+**Important:** The **Spreadsheet ID** is not the same as the **Apps Script project ID**. For container-bound scripts, open **Extensions → Apps Script** and use that project’s URL.
+
+---
+
+## 6. Pull remote changes (optional)
+
+If you edited code in the browser:
+
+```bash
+clasp pull
+```
+
+---
+
+## 7. Open the project in the browser
+
+```bash
+clasp open
+```
+
+Opens the correct Apps Script project for your `scriptId`.
