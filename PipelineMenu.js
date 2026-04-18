@@ -17,6 +17,7 @@ function onOpen() {
     .addSeparator()
     .addItem('🚑 MLB injuries only', 'fetchMLBInjuryReport')
     .addItem('🎯 Slate board only (join schedule + FD counts)', 'refreshMLBSlateBoard')
+    .addItem('📒 Pitcher game logs only (statsapi, warms cache)', 'refreshMLBPitcherGameLogs')
     .addItem('📋 Pitcher K queue only (schedule + FD K + game logs)', 'refreshPitcherKSlateQueue')
     .addItem('🎰 Pitcher K card only (Poisson + EV)', 'refreshPitcherKBetCard')
     .addItem('🃏 MLB Bet Card only (final plays)', 'refreshMLBBetCard')
@@ -56,6 +57,7 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const start = Date.now();
   resetPipelineLog_(windowTag);
+  mlbResetPitchGameLogFetchCache_();
   const outcomes = [];
 
   function step(name, fn) {
@@ -83,6 +85,7 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   }
 
   step('MLB schedule (statsapi)', fetchMLBScheduleForSlate);
+  step('Pitcher game logs (statsapi)', refreshMLBPitcherGameLogs);
   step('FanDuel MLB odds', fetchMLBFanDuelOdds);
   step('Slate board (join)', refreshMLBSlateBoard);
   step('Pitcher K queue', refreshPitcherKSlateQueue);
@@ -92,11 +95,12 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   const oCfg = outcomes[0] || { ok: true };
   const oInj = outcomes[1] || { ok: true };
   const oSch = outcomes[2] || { ok: true };
-  const oOdds = outcomes[3] || { ok: true };
-  const oSlate = outcomes[4] || { ok: true };
-  const oPk = outcomes[5] || { ok: true };
-  const oCard = outcomes[6] || { ok: true };
-  const oBet = outcomes[7] || { ok: true };
+  const oGameLogs = outcomes[3] || { ok: true };
+  const oOdds = outcomes[4] || { ok: true };
+  const oSlate = outcomes[5] || { ok: true };
+  const oPk = outcomes[6] || { ok: true };
+  const oCard = outcomes[7] || { ok: true };
+  const oBet = outcomes[8] || { ok: true };
 
   logStep_('Config', 1, oCfg.ok ? 1 : 0, oCfg.ok ? '' : oCfg.err || 'failed');
   logStep_(
@@ -110,6 +114,12 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
     0,
     oSch.ok ? mlbTabDataRowsBelowHeader3_(ss, MLB_SCHEDULE_TAB) : 0,
     oSch.ok ? '' : oSch.err || 'failed'
+  );
+  logStep_(
+    'Pitcher game logs',
+    0,
+    oGameLogs.ok ? mlbTabDataRowsBelowHeader3_(ss, MLB_PITCHER_GAME_LOGS_TAB) : 0,
+    oGameLogs.ok ? '' : oGameLogs.err || 'failed'
   );
   logStep_(
     'FanDuel MLB odds',

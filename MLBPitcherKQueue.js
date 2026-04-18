@@ -104,19 +104,13 @@ function mlbLoadInjuryLookup_(ss) {
 function mlbPitchingLogSummary_(playerId, season) {
   const id = parseInt(playerId, 10);
   if (!id) return { l3k: '', l3ip: '', k9: '', games: 0 };
-  const url =
-    'https://statsapi.mlb.com/api/v1/people/' + id + '/stats?stats=gameLog&group=pitching&season=' + encodeURIComponent(String(season));
+  const splits = mlbStatsApiGetPitchingGameSplits_(playerId, season);
+  let totK = 0;
+  let totIp = 0;
+  let l3k = 0;
+  let l3ip = 0;
+  const nL = Math.min(3, splits.length);
   try {
-    const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
-    if (res.getResponseCode() !== 200) return { l3k: '', l3ip: '', k9: '', games: 0 };
-    const payload = JSON.parse(res.getContentText());
-    const stats = payload.stats && payload.stats[0] ? payload.stats[0] : {};
-    const splits = stats.splits || [];
-    let totK = 0;
-    let totIp = 0;
-    let l3k = 0;
-    let l3ip = 0;
-    const nL = Math.min(3, splits.length);
     for (let i = 0; i < splits.length; i++) {
       const st = splits[i].stat || {};
       const k = parseInt(st.strikeOuts, 10) || 0;
@@ -217,7 +211,9 @@ function refreshPitcherKSlateQueue() {
       const pidNum = parseInt(sp.pid, 10);
       if (pidNum) {
         if (!seenIds[pidNum]) {
-          Utilities.sleep(100);
+          if (!mlbStatsApiPitchingSplitsCached_(pidNum, season)) {
+            Utilities.sleep(100);
+          }
           seenIds[pidNum] = mlbPitchingLogSummary_(pidNum, season);
         }
         const lg = seenIds[pidNum];

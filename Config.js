@@ -2,7 +2,7 @@
 // ⚙️ CONFIG — MLB-BOIZ (AI-BOIZ philosophy, MLB data)
 // ============================================================
 // Secrets: set Script Properties ODDS_API_KEY (the-odds-api.com).
-// Optional: STATSAPI_BASE (default https://statsapi.mlb.com/api/v1)
+// Optional: STATSAPI_BASE in Script Properties (default https://statsapi.mlb.com/api/v1).
 // ============================================================
 
 const CONFIG_TAB_NAME = '⚙️ Config';
