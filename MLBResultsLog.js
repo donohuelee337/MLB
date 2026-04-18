@@ -2,10 +2,50 @@
 // 📋 MLB Results Log — snapshot from 🃏 MLB_Bet_Card
 // ============================================================
 // Mirrors AI-BOIZ Results.js: append rows after each window so you
-// can grade later. Minimal columns; expand when you add grading.
+// can grade later. Columns include gamePk + pitcher_id for statsapi
+// boxscore grading (see MLBResultsGrader.js).
 // ============================================================
 
 const MLB_RESULTS_LOG_TAB = '📋 MLB_Results_Log';
+const MLB_RESULTS_LOG_NCOL = 18;
+
+const MLB_RESULTS_HEADERS = [
+  'Logged At',
+  'Slate',
+  'Rank',
+  'Player',
+  'Game',
+  'Market',
+  'Line',
+  'Side',
+  'Odds',
+  'Model P(Win)',
+  'EV ($1)',
+  'Window',
+  'Play',
+  'gamePk',
+  'pitcher_id',
+  'actual_K',
+  'result',
+  'grade_notes',
+];
+
+function mlbEnsureResultsLogLayout_(logSh) {
+  const HEADER_ROW = 3;
+  logSh.getRange(1, 1, 1, MLB_RESULTS_LOG_NCOL)
+    .merge()
+    .setValue('📋 MLB-BOIZ RESULTS LOG — snapshots + grading (statsapi boxscore)')
+    .setFontWeight('bold')
+    .setBackground('#1a73e8')
+    .setFontColor('#ffffff');
+  logSh
+    .getRange(HEADER_ROW, 1, 1, MLB_RESULTS_LOG_NCOL)
+    .setValues([MLB_RESULTS_HEADERS])
+    .setFontWeight('bold')
+    .setBackground('#1565C0')
+    .setFontColor('#ffffff');
+  logSh.setFrozenRows(HEADER_ROW);
+}
 
 /**
  * Append current bet card plays to MLB_Results_Log (one row per play).
@@ -20,7 +60,7 @@ function snapshotMLBBetCardToLog(windowTag) {
   }
 
   const last = bc.getLastRow();
-  const block = bc.getRange(4, 1, last, 17).getValues();
+  const block = bc.getRange(4, 1, last, 18).getValues();
   const window = windowTag || 'UNKNOWN';
   const now = new Date();
   const tz = Session.getScriptTimeZone();
@@ -35,36 +75,8 @@ function snapshotMLBBetCardToLog(windowTag) {
   }
 
   const HEADER_ROW = 3;
-  if (logSh.getLastRow() < HEADER_ROW || !String(logSh.getRange(HEADER_ROW, 1).getValue() || '').trim()) {
-    logSh.getRange(1, 1, 1, 13)
-      .merge()
-      .setValue('📋 MLB-BOIZ RESULTS LOG — snapshots from 🃏 MLB_Bet_Card (PENDING until graded)')
-      .setFontWeight('bold')
-      .setBackground('#1a73e8')
-      .setFontColor('#ffffff');
-    logSh
-      .getRange(HEADER_ROW, 1, 1, 13)
-      .setValues([
-        [
-          'Logged At',
-          'Slate',
-          'Rank',
-          'Player',
-          'Game',
-          'Market',
-          'Line',
-          'Side',
-          'Odds',
-          'Model P(Win)',
-          'EV ($1)',
-          'Window',
-          'Play',
-        ],
-      ])
-      .setFontWeight('bold')
-      .setBackground('#1565C0')
-      .setFontColor('#ffffff');
-    logSh.setFrozenRows(HEADER_ROW);
+  if (logSh.getLastRow() < HEADER_ROW || !String(logSh.getRange(HEADER_ROW, 14).getValue() || '').trim()) {
+    mlbEnsureResultsLogLayout_(logSh);
   }
 
   const out = [];
@@ -88,13 +100,18 @@ function snapshotMLBBetCardToLog(windowTag) {
       row[12],
       window,
       playText,
+      row[2],
+      row[16],
+      '',
+      'PENDING',
+      '',
     ]);
   });
 
   if (!out.length) return;
 
   const startRow = Math.max(logSh.getLastRow(), HEADER_ROW) + 1;
-  logSh.getRange(startRow, 1, out.length, 13).setValues(out);
+  logSh.getRange(startRow, 1, out.length, MLB_RESULTS_LOG_NCOL).setValues(out);
   try {
     ss.toast('Results log +' + out.length + ' · ' + window, 'MLB-BOIZ', 5);
   } catch (e) {}

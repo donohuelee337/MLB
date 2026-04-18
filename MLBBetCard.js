@@ -22,11 +22,12 @@ function refreshMLBBetCard() {
   }
 
   const last = src.getLastRow();
-  const vals = src.getRange(4, 1, last, 19).getValues();
+  const vals = src.getRange(4, 1, last, 20).getValues();
   const plays = [];
 
   vals.forEach(function (r) {
     const flags = String(r[18] || '');
+    const pitcherId = r[19];
     if (flags.indexOf('injury') !== -1) return;
 
     const bestSide = String(r[16] || '').trim();
@@ -57,6 +58,7 @@ function refreshMLBBetCard() {
       matchup: matchup,
       pickLabel: pickLabel,
       pitcher: pitcher,
+      pitcherId: pitcherId,
       side: bestSide,
       line: line,
       american: american,
@@ -106,6 +108,7 @@ function refreshMLBBetCard() {
       p.lambda,
       p.edge,
       p.flags,
+      p.pitcherId != null && p.pitcherId !== '' ? p.pitcherId : '',
       'Model: Poisson on λ=K9×proj_IP; EV vs list price; not devigged.',
     ];
   });
@@ -131,6 +134,7 @@ function refreshMLBBetCard() {
       '',
       '',
       '',
+      '',
     ]);
   }
 
@@ -143,11 +147,11 @@ function refreshMLBBetCard() {
   }
   sh.setTabColor('#00695c');
 
-  [88, 40, 72, 200, 280, 140, 130, 56, 56, 72, 72, 72, 56, 56, 56, 140, 340].forEach(function (w, i) {
+  [88, 40, 72, 200, 280, 140, 130, 56, 56, 72, 72, 72, 56, 56, 56, 140, 72, 340].forEach(function (w, i) {
     sh.setColumnWidth(i + 1, w);
   });
 
-  sh.getRange(1, 1, 1, 17)
+  sh.getRange(1, 1, 1, 18)
     .merge()
     .setValue(
       '🃏 MLB BET CARD — FanDuel pitcher K — ranked by EV ($1 risk). Injury-flagged plays omitted. Not betting advice.'
@@ -176,6 +180,7 @@ function refreshMLBBetCard() {
     'lambda_K',
     'edge_vs_line',
     'flags',
+    'pitcher_id',
     'disclaimer',
   ];
   sh.getRange(3, 1, 1, headers.length)

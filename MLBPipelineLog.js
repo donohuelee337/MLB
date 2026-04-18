@@ -291,7 +291,7 @@ function mlbAppendPitcherKNearMisses_(ss) {
   if (!pipelineLog_) return;
   const sh = ss.getSheetByName(MLB_PITCHER_K_CARD_TAB);
   if (!sh || sh.getLastRow() < 4) return;
-  const vals = sh.getRange(4, 1, sh.getLastRow(), 19).getValues();
+  const vals = sh.getRange(4, 1, sh.getLastRow(), 20).getValues();
   vals.forEach(function (r) {
     const flags = String(r[18] || '');
     if (flags.indexOf('injury') === -1) return;

@@ -88,6 +88,7 @@ function refreshPitcherKBetCard() {
     const matchup = r[1];
     const side = r[2];
     const pitcher = r[3];
+    const pitcherId = r[4];
     const line = r[5];
     const fdOver = r[6];
     const fdUnder = r[7];
@@ -167,6 +168,7 @@ function refreshPitcherKBetCard() {
       bestSide,
       bestEv,
       flags,
+      pitcherId,
     ]);
   });
 
@@ -187,11 +189,11 @@ function refreshPitcherKBetCard() {
     sh = ss.insertSheet(MLB_PITCHER_K_CARD_TAB);
   }
   sh.setTabColor('#c62828');
-  [72, 200, 52, 150, 56, 64, 64, 52, 52, 52, 52, 52, 52, 52, 52, 52, 64, 52, 200].forEach(function (w, i) {
+  [72, 200, 52, 150, 56, 64, 64, 52, 52, 52, 52, 52, 52, 52, 52, 52, 64, 52, 140, 88].forEach(function (w, i) {
     sh.setColumnWidth(i + 1, w);
   });
 
-  sh.getRange(1, 1, 1, 19)
+  sh.getRange(1, 1, 1, 20)
     .merge()
     .setValue(
       '🎰 Pitcher K card — Poisson λ from K9×proj_IP; EV = naive vs listed price (not vig-removed). Sort: best_ev desc.'
@@ -223,6 +225,7 @@ function refreshPitcherKBetCard() {
     'best_side',
     'best_ev_$1',
     'flags',
+    'pitcher_id',
   ];
   sh.getRange(3, 1, 1, headers.length)
     .setValues([headers])

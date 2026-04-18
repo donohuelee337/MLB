@@ -6,24 +6,29 @@
 
 const MLB_SCHEDULE_TAB = '📅 MLB_Schedule';
 
+/** @returns {Object|null} raw schedule JSON for yyyy-MM-dd (statsapi). */
+function mlbFetchScheduleJsonForDate_(dateStr) {
+  const url =
+    'https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=' +
+    encodeURIComponent(String(dateStr || '').trim()) +
+    '&hydrate=probablePitcher(note),venue';
+  try {
+    const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+    if (res.getResponseCode() !== 200) return null;
+    return JSON.parse(res.getContentText());
+  } catch (e) {
+    Logger.log('mlbFetchScheduleJsonForDate_: ' + e.message);
+    return null;
+  }
+}
+
 function fetchMLBScheduleForSlate() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const cfg = getConfig();
   const dateStr = getSlateDateString_(cfg);
-  const url =
-    'https://statsapi.mlb.com/api/v1/schedule?sportId=1&date=' +
-    encodeURIComponent(dateStr) +
-    '&hydrate=probablePitcher(note),venue';
-  let payload;
-  try {
-    const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
-    if (res.getResponseCode() !== 200) {
-      safeAlert_('Schedule failed', 'HTTP ' + res.getResponseCode());
-      return;
-    }
-    payload = JSON.parse(res.getContentText());
-  } catch (e) {
-    safeAlert_('Schedule error', e.message);
+  const payload = mlbFetchScheduleJsonForDate_(dateStr);
+  if (!payload) {
+    safeAlert_('Schedule failed', 'HTTP or parse error for ' + dateStr);
     return;
   }
 

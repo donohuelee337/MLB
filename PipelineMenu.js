@@ -21,6 +21,7 @@ function onOpen() {
     .addItem('📋 Pitcher K queue only (schedule + FD K + game logs)', 'refreshPitcherKSlateQueue')
     .addItem('🎰 Pitcher K card only (Poisson + EV)', 'refreshPitcherKBetCard')
     .addItem('🃏 MLB Bet Card only (final plays)', 'refreshMLBBetCard')
+    .addItem('📊 Grade pending MLB results (boxscore)', 'gradeMLBPendingResults_')
     .addItem('📋 Open Pipeline Log', 'mlbActivatePipelineLog_')
     .addToUi();
 }
@@ -57,6 +58,11 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const start = Date.now();
   resetPipelineLog_(windowTag);
+  try {
+    gradeMLBPendingResults_();
+  } catch (e) {
+    Logger.log('gradeMLBPendingResults_: ' + e);
+  }
   mlbResetPitchGameLogFetchCache_();
   const outcomes = [];
 
