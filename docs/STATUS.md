@@ -10,8 +10,8 @@
 | Odds pull (The Odds API) | `FetchMLBOdds.js` → `✅ FanDuel_MLB_Odds`, batched `baseball_mlb` markets |
 | Injury intel | `FetchMLBInjuries.js` → `🚑 MLB_Injury_Report`, `INJURY_DATA_MLB` |
 | Schedule / context | `MLBSchedule.js` → `📅 MLB_Schedule` (statsapi + probable pitchers) |
-| Morning window | `PipelineMenu.js` — injuries → schedule → odds |
-| Docs / research | `docs/2026-04-11-mlb-research-briefing.md`, `ABS-2026.md`, clasp setup, tomorrow checklist |
+| Morning window | `PipelineMenu.js` — injuries → schedule → odds → **`⚾ Pipeline_Log`** |
+| Docs / research | `docs/2026-04-11-mlb-research-briefing.md`, API + ABS research, `ABS-2026.md`, clasp setup, tomorrow checklist |
 | clasp | `.clasp.json` tracked for clone on other machines |
 
 ## Not built yet (NBA has these)
@@ -21,21 +21,15 @@
 - `StatEngine.js` analogue → **Poisson / binomial** by market (start with `pitcher_strikeouts`)
 - Sim + signal scoring → **v20-style** gates (or EV-first portfolio spec from ai-boiz docs)
 - Bet card + results log + **CLV** snapshots
-- Pipeline log tab (funnel) like `PipelineLog.js`
 - Multi-window (morning / midday / final) if you want parity with NBA
 
-## Two local MLB folders
+## Single repo (formerly two folders)
 
-| Folder | Role |
-|--------|------|
-| **`mlb-boiz`** | **Keep.** Live MVP + your Apps Script `scriptId` in `.clasp.json`. |
-| **`mlb-pitcher-k`** | Earlier **pitcher-K-only** experiment (stub pipeline, different menu). Overlaps conceptually. |
-
-**Recommendation:** Work only in **`mlb-boiz`**. The pitcher-K **design spec** is copied into `docs/2026-04-11-mlb-pitcher-k-pipeline-design.md` for reference. After you confirm you do not need the separate Apps Script project bound to `mlb-pitcher-k`, you can **delete or zip** `mlb-pitcher-k` locally to avoid confusion — no merge of two folders into one filesystem path is required; we **do not** copy stub `.js` files into `mlb-boiz` automatically (would duplicate `onOpen` / menu names).
+The old **`mlb-pitcher-k`** folder was merged into **`mlb-boiz`** (2026-04-18): pipeline-log helpers live in `MLBPipelineLog.js`, the morning runner writes **`⚾ Pipeline_Log`**, and extra research files sit in `docs/` (`2026-04-11-mlb-api-data-research.md`, `2026-04-11-abs-system-research.md`). Use **one** Google Sheet + the `scriptId` in this repo’s `.clasp.json`. Pitcher-K **design spec** remains `docs/2026-04-11-mlb-pitcher-k-pipeline-design.md`.
 
 ## Suggested next implementation order
 
 1. **Game logs ingest** (MLB Stats API) for pitchers on today’s slate → tab or lightweight cache.
 2. **Slate queue** — one row per (game, pitcher, FD K line) joined to schedule + injuries.
 3. **Stat layer** — Poisson on K for one market end-to-end; then bet card stub (top N by edge).
-4. **Pipeline log** — parity with AI-BOIZ observability.
+4. Extend **`⚾ Pipeline_Log`** — game coverage / near-miss sections once sim + card exist.

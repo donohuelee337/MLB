@@ -10,8 +10,11 @@ Google Apps Script + Google Sheets pipeline in the **AI-BOIZ** spirit: slate-fir
 2. **🚑 MLB_Injury_Report** — all teams from ESPN (`baseball/mlb/injuries`). Named range **`INJURY_DATA_MLB`**.
 3. **📅 MLB_Schedule** — games for `SLATE_DATE` with probable pitchers (`statsapi.mlb.com`).
 4. **✅ FanDuel_MLB_Odds** — player + core game markets for that slate (`baseball_mlb` + `fanduel`).
+5. **⚾ Pipeline_Log** — funnel row counts + warnings after each **Morning** run (`MLBPipelineLog.js`).
 
 Run from the menu: **⚾ MLB-BOIZ → Morning — Injuries + schedule + FanDuel odds** (or **MLB injuries only**).
+
+**Note:** The older **`mlb-pitcher-k`** folder was merged into this repo (same machine path used to hold a duplicate Apps Script stub). Work only here; use a single Sheet bound to `.clasp.json`.
 
 ## Setup (once)
 
