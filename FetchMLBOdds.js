@@ -199,10 +199,10 @@ function buildMLBFanDuelOddsTab_(ss, allRows, slateDate) {
     .setFontColor('#ffffff');
   sh.setFrozenRows(3);
   if (allRows.length > 0) {
-    sh.getRange(4, 1, allRows.length + 3, 8).setValues(allRows);
-    sh.getRange(4, 8, allRows.length + 3, 8).setNumberFormat('h:mm am/pm');
+    sh.getRange(4, 1, allRows.length, 8).setValues(allRows);
+    sh.getRange(4, 8, allRows.length, 1).setNumberFormat('h:mm am/pm');
     try {
-      ss.setNamedRange('FD_MLB_ODDS', sh.getRange(4, 1, Math.max(allRows.length, 1), 8));
+      ss.setNamedRange('FD_MLB_ODDS', sh.getRange(4, 1, allRows.length, 8));
     } catch (e) {}
   }
 }

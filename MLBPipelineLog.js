@@ -79,7 +79,7 @@ function buildPipelineToast_() {
   const warnCount = pipelineLog_.warnings.length;
   let cardStep = null;
   pipelineLog_.steps.forEach(function (s) {
-    if (s.name === 'Bet Card') cardStep = s;
+    if (s.name === 'MLB Bet Card') cardStep = s;
   });
   const playCount = cardStep ? cardStep.outputCount : 0;
   let gameCount = 0;
@@ -284,4 +284,48 @@ function mlbActivatePipelineLog_() {
   const sh = ss.getSheetByName(MLB_PIPELINE_LOG_TAB);
   if (sh) sh.activate();
   else ss.toast('Run the morning pipeline once to create ' + MLB_PIPELINE_LOG_TAB, 'MLB-BOIZ', 5);
+}
+
+/** After 🎰 Pitcher_K_Card is built: injury scratches that still had +EV on a side. */
+function mlbAppendPitcherKNearMisses_(ss) {
+  if (!pipelineLog_) return;
+  const sh = ss.getSheetByName(MLB_PITCHER_K_CARD_TAB);
+  if (!sh || sh.getLastRow() < 4) return;
+  const vals = sh.getRange(4, 1, sh.getLastRow(), 19).getValues();
+  vals.forEach(function (r) {
+    const flags = String(r[18] || '');
+    if (flags.indexOf('injury') === -1) return;
+    const pitcher = String(r[3] || '').trim();
+    const matchup = String(r[1] || '').trim();
+    if (!pitcher || !matchup) return;
+    const evO = parseFloat(String(r[14]));
+    const evU = parseFloat(String(r[15]));
+    let bestSide = '';
+    let score = 0;
+    if (!isNaN(evO) && evO > score) {
+      score = evO;
+      bestSide = 'Over';
+    }
+    if (!isNaN(evU) && evU > score) {
+      score = evU;
+      bestSide = 'Under';
+    }
+    if (score > 0) {
+      logNearMiss_(pitcher, matchup, 'pitcher_strikeouts', bestSide, score, flags, 'Injury — model still liked a side');
+    }
+  });
+}
+
+/** After 🃏 MLB_Bet_Card: fill GAME COVERAGE cardPicks counts (AI-BOIZ-style funnel). */
+function mlbAppendBetCardPipelineCoverage_(ss) {
+  if (!pipelineLog_) return;
+  const sh = ss.getSheetByName(MLB_BET_CARD_TAB);
+  if (!sh || sh.getLastRow() < 4) return;
+  const data = sh.getRange(4, 1, sh.getLastRow(), 5).getValues();
+  data.forEach(function (r) {
+    const matchup = String(r[3] || '').trim();
+    const play = String(r[4] || '');
+    if (!matchup || play.indexOf('No qualifying') !== -1) return;
+    logGameCoverage_(matchup, undefined, undefined, 0, 1);
+  });
 }

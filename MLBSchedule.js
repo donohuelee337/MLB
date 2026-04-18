@@ -49,6 +49,8 @@ function fetchMLBScheduleForSlate() {
         venue,
         status,
         g.seriesDescription || '',
+        awayProb.id || '',
+        homeProb.id || '',
       ]);
     });
   });
@@ -70,14 +72,16 @@ function fetchMLBScheduleForSlate() {
     'venue',
     'status',
     'series',
+    'awayProbablePitcherId',
+    'homeProbablePitcherId',
   ];
   sh.getRange(1, 1, 1, headers.length).merge().setValue('📅 MLB schedule — ' + dateStr).setFontWeight('bold');
   sh.getRange(3, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
   sh.setFrozenRows(3);
   if (rows.length) {
-    sh.getRange(4, 1, rows.length + 3, headers.length).setValues(rows);
+    sh.getRange(4, 1, rows.length, headers.length).setValues(rows);
     try {
-      ss.setNamedRange('MLB_SCHEDULE', sh.getRange(4, 1, rows.length + 3, headers.length));
+      ss.setNamedRange('MLB_SCHEDULE', sh.getRange(4, 1, rows.length, headers.length));
     } catch (e) {}
   }
   ss.toast(rows.length + ' games loaded', 'MLB Schedule', 5);

@@ -1,7 +1,8 @@
 // ============================================================
 // 🕐 MLB-BOIZ pipeline (MVP)
 // ============================================================
-// Mirrors AI-BOIZ windows in spirit: morning = full refresh for slate date.
+// Mirrors AI-BOIZ windows: morning = full refresh; midday = odds +
+// downstream without re-pulling injuries; final = full refresh + lock snapshot.
 // ============================================================
 
 function onOpen() {
@@ -11,8 +12,14 @@ function onOpen() {
     .addSeparator()
     .addItem('🌅 Morning — Injuries + schedule + FanDuel odds', 'runMorningWindowMLB')
     .addItem('📆 Set SLATE_DATE to tomorrow (NY) + Morning', 'runMorningForTomorrowNY_')
+    .addItem('🌤 Midday — Odds + slate + K pipeline (injuries unchanged)', 'runMiddayWindowMLB')
+    .addItem('🔒 Final — Full refresh + snapshot', 'runFinalWindowMLB')
     .addSeparator()
     .addItem('🚑 MLB injuries only', 'fetchMLBInjuryReport')
+    .addItem('🎯 Slate board only (join schedule + FD counts)', 'refreshMLBSlateBoard')
+    .addItem('📋 Pitcher K queue only (schedule + FD K + game logs)', 'refreshPitcherKSlateQueue')
+    .addItem('🎰 Pitcher K card only (Poisson + EV)', 'refreshPitcherKBetCard')
+    .addItem('🃏 MLB Bet Card only (final plays)', 'refreshMLBBetCard')
     .addItem('📋 Open Pipeline Log', 'mlbActivatePipelineLog_')
     .addToUi();
 }
@@ -30,10 +37,27 @@ function runMorningForTomorrowNY_() {
 }
 
 function runMorningWindowMLB() {
+  runMLBBallWindow_('MORNING', false);
+}
+
+function runMiddayWindowMLB() {
+  runMLBBallWindow_('MIDDAY', true);
+}
+
+function runFinalWindowMLB() {
+  runMLBBallWindow_('FINAL', false);
+}
+
+/**
+ * @param {string} windowTag MORNING | MIDDAY | FINAL
+ * @param {boolean} skipInjuriesFetch true for midday (AI-BOIZ spirit: lighter pass)
+ */
+function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const start = Date.now();
-  resetPipelineLog_('MORNING');
+  resetPipelineLog_(windowTag);
   const outcomes = [];
+
   function step(name, fn) {
     const t0 = Date.now();
     ss.toast('Running: ' + name, 'MLB-BOIZ', 8);
@@ -51,14 +75,28 @@ function runMorningWindowMLB() {
       buildConfigTab();
     } catch (e) {}
   });
-  step('MLB injuries (ESPN)', fetchMLBInjuryReport);
+
+  if (skipInjuriesFetch) {
+    step('MLB injuries (unchanged)', function () {});
+  } else {
+    step('MLB injuries (ESPN)', fetchMLBInjuryReport);
+  }
+
   step('MLB schedule (statsapi)', fetchMLBScheduleForSlate);
   step('FanDuel MLB odds', fetchMLBFanDuelOdds);
+  step('Slate board (join)', refreshMLBSlateBoard);
+  step('Pitcher K queue', refreshPitcherKSlateQueue);
+  step('Pitcher K card', refreshPitcherKBetCard);
+  step('MLB Bet Card', refreshMLBBetCard);
 
   const oCfg = outcomes[0] || { ok: true };
   const oInj = outcomes[1] || { ok: true };
   const oSch = outcomes[2] || { ok: true };
   const oOdds = outcomes[3] || { ok: true };
+  const oSlate = outcomes[4] || { ok: true };
+  const oPk = outcomes[5] || { ok: true };
+  const oCard = outcomes[6] || { ok: true };
+  const oBet = outcomes[7] || { ok: true };
 
   logStep_('Config', 1, oCfg.ok ? 1 : 0, oCfg.ok ? '' : oCfg.err || 'failed');
   logStep_(
@@ -79,6 +117,42 @@ function runMorningWindowMLB() {
     oOdds.ok ? mlbTabDataRowsBelowHeader3_(ss, MLB_ODDS_CONFIG.tabName) : 0,
     oOdds.ok ? '' : oOdds.err || 'failed'
   );
+  logStep_(
+    'Slate board',
+    0,
+    oSlate.ok ? mlbTabDataRowsBelowHeader3_(ss, MLB_SLATE_BOARD_TAB) : 0,
+    oSlate.ok ? '' : oSlate.err || 'failed'
+  );
+  logStep_(
+    'Pitcher K queue',
+    0,
+    oPk.ok ? mlbTabDataRowsBelowHeader3_(ss, MLB_PITCHER_K_QUEUE_TAB) : 0,
+    oPk.ok ? '' : oPk.err || 'failed'
+  );
+  logStep_(
+    'Pitcher K card',
+    0,
+    oCard.ok ? mlbTabDataRowsBelowHeader3_(ss, MLB_PITCHER_K_CARD_TAB) : 0,
+    oCard.ok ? '' : oCard.err || 'failed'
+  );
+  logStep_(
+    'MLB Bet Card',
+    0,
+    oBet.ok ? mlbTabDataRowsBelowHeader3_(ss, MLB_BET_CARD_TAB) : 0,
+    oBet.ok ? '' : oBet.err || 'failed'
+  );
+
+  mlbAppendPitcherKNearMisses_(ss);
+
+  if (oBet.ok) {
+    try {
+      snapshotMLBBetCardToLog(windowTag);
+    } catch (e) {
+      addPipelineWarning_('Results snapshot: ' + (e.message || e));
+    }
+  }
+
+  mlbAppendBetCardPipelineCoverage_(ss);
 
   outcomes.forEach(function (o) {
     if (!o.ok) addPipelineWarning_(o.name + ': ' + (o.err || 'failed'));
@@ -91,9 +165,14 @@ function runMorningWindowMLB() {
       return (o.ok ? 'OK ' : 'FAIL ') + o.name + ' (' + o.sec.toFixed(1) + 's)' + (o.ok ? '' : ': ' + o.err);
     })
     .join('\n');
-  Logger.log('Morning MLB window:\n' + msg);
-  ss.toast('Done in ' + ((Date.now() - start) / 1000).toFixed(1) + 's', 'MLB-BOIZ', 8);
+  Logger.log('MLB window ' + windowTag + ':\n' + msg);
   try {
-    ss.getSheetByName('✅ FanDuel_MLB_Odds').activate();
+    const tip = buildPipelineToast_();
+    ss.toast('Done ' + windowTag + ' in ' + ((Date.now() - start) / 1000).toFixed(1) + 's — ' + tip, 'MLB-BOIZ', 10);
+  } catch (e) {
+    ss.toast('Done in ' + ((Date.now() - start) / 1000).toFixed(1) + 's', 'MLB-BOIZ', 8);
+  }
+  try {
+    ss.getSheetByName(MLB_BET_CARD_TAB).activate();
   } catch (e) {}
 }
