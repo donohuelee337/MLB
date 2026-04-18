@@ -2,6 +2,8 @@
 
 Google Apps Script + Google Sheets pipeline in the **AI-BOIZ** spirit: slate-first, FanDuel lines via **The Odds API**, free **MLB Stats API** context, script-menu windows.
 
+**Roadmap / parity checklist / two-folder note:** [docs/STATUS.md](docs/STATUS.md).
+
 ## What works today (MVP)
 
 1. **⚙️ Config** — `SLATE_DATE` (defaults to today in `America/New_York`), book/region keys.
