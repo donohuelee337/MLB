@@ -22,6 +22,7 @@ function onOpen() {
     .addItem('🎰 Pitcher K card only (Poisson + EV)', 'refreshPitcherKBetCard')
     .addItem('🃏 MLB Bet Card only (final plays)', 'refreshMLBBetCard')
     .addItem('📊 Grade pending MLB results (boxscore)', 'gradeMLBPendingResults_')
+    .addItem('📈 Backfill closing K (Results Log)', 'mlbBackfillClosingMenu_')
     .addItem('📋 Open Pipeline Log', 'mlbActivatePipelineLog_')
     .addToUi();
 }
@@ -50,6 +51,15 @@ function runFinalWindowMLB() {
   runMLBBallWindow_('FINAL', false);
 }
 
+/** Menu: fill close_line / close_odds / clv_note from current ✅ tab for this slate’s log rows. */
+function mlbBackfillClosingMenu_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const n = mlbBackfillResultsLogClosingK_(ss);
+  try {
+    ss.toast('Results log: updated ' + n + ' row(s) from FanDuel K tab', 'MLB-BOIZ', 7);
+  } catch (e) {}
+}
+
 /**
  * @param {string} windowTag MORNING | MIDDAY | FINAL
  * @param {boolean} skipInjuriesFetch true for midday (AI-BOIZ spirit: lighter pass)
@@ -64,6 +74,7 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
     Logger.log('gradeMLBPendingResults_: ' + e);
   }
   mlbResetPitchGameLogFetchCache_();
+  mlbResetPitchHandCache_();
   const outcomes = [];
 
   function step(name, fn) {
@@ -165,6 +176,14 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
       snapshotMLBBetCardToLog(windowTag);
     } catch (e) {
       addPipelineWarning_('Results snapshot: ' + (e.message || e));
+    }
+  }
+
+  if (windowTag === 'FINAL' && oOdds.ok) {
+    try {
+      mlbBackfillResultsLogClosingK_(ss);
+    } catch (e) {
+      addPipelineWarning_('Closing K backfill: ' + (e.message || e));
     }
   }
 

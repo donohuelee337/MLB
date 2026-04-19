@@ -61,6 +61,9 @@ function buildConfigTab() {
   row_('SLATE_DATE', defaultSlate, 'yyyy-MM-dd in script TZ — use menu "tomorrow" or set manually');
   row_('ODDS_BOOK', 'fanduel', 'the-odds-api bookmaker key');
   row_('ODDS_REGION', 'us', 'regions param');
+  row_('K9_BLEND_L7_WEIGHT', '0.35', '0..1 blend of L3 K/9 vs season K9 for 🎰 λ (needs L3_IP in queue)');
+  row_('MIN_EV_BET_CARD', '0', 'Min EV per $1 on 🃏 card; 0 = any positive EV; e.g. 0.03 for 3¢ floor');
+  row_('HP_UMP_LAMBDA_MULT', '1', 'Multiply 🎰 λ when hp_umpire listed (1=no change; try 1.02–1.05 cautiously)');
   ss.getNamedRanges().forEach(function (nr) {
     if (nr.getName() === 'CONFIG') nr.remove();
   });

@@ -4,15 +4,21 @@ Google Apps Script + Google Sheets pipeline in the **AI-BOIZ** spirit: slate-fir
 
 **Roadmap / parity checklist / two-folder note:** [docs/STATUS.md](docs/STATUS.md).
 
-## What works today (MVP)
+## What works today (MVP+)
 
-1. **⚙️ Config** — `SLATE_DATE` (defaults to today in `America/New_York`), book/region keys.
-2. **🚑 MLB_Injury_Report** — all teams from ESPN (`baseball/mlb/injuries`). Named range **`INJURY_DATA_MLB`**.
-3. **📅 MLB_Schedule** — games for `SLATE_DATE` with probable pitchers (`statsapi.mlb.com`).
-4. **✅ FanDuel_MLB_Odds** — player + core game markets for that slate (`baseball_mlb` + `fanduel`).
-5. **⚾ Pipeline_Log** — funnel row counts + warnings after each **Morning** run (`MLBPipelineLog.js`).
+1. **⚙️ Config** — `SLATE_DATE`, book/region, **`K9_BLEND_L7_WEIGHT`**, **`MIN_EV_BET_CARD`**, **`HP_UMP_LAMBDA_MULT`** (after **0. Build Config tab**).
+2. **🚑 MLB_Injury_Report** — ESPN MLB injuries (**`INJURY_DATA_MLB`**).
+3. **📅 MLB_Schedule** — statsapi slate + probables + home-plate umpire when assigned.
+4. **📒 Pitcher_Game_Logs** — statsapi game logs for probables (cache for queue).
+5. **✅ FanDuel_MLB_Odds** — The Odds API `baseball_mlb` + FanDuel.
+6. **🎯 MLB_Slate_Board** — per-game FD line counts joined to schedule (flexible game keys).
+7. **📋 Pitcher_K_Queue** — schedule × FD K (`pitcher_strikeouts`) + L3 / season K9 + **throws** (R/L) + HP umpire.
+8. **🎰 Pitcher_K_Card** — Poisson + naive EV from queue.
+9. **🃏 MLB_Bet_Card** — ranked plays from the K card (EV floor optional).
+10. **📋 MLB_Results_Log** + **📊** grading — boxscore K vs pending rows; **🔒 Final** run (after odds) fills **close_line / close_odds / clv_note** for that slate (or use **📈 Backfill closing K** anytime).
+11. **⚾ Pipeline_Log** — funnel, warnings, near-misses, game coverage after **Morning / Midday / Final**.
 
-Run from the menu: **⚾ MLB-BOIZ → Morning — Injuries + schedule + FanDuel odds** (or **MLB injuries only**).
+**Menus:** **🌅 Morning**, **🌤 Midday**, **🔒 Final**, **📆 Set SLATE_DATE to tomorrow (NY) + Morning**, per-stage “only” items, **📋 Open Pipeline Log**.
 
 **Note:** The older **`mlb-pitcher-k`** folder was merged into this repo (same machine path used to hold a duplicate Apps Script stub). Work only here; use a single Sheet bound to `.clasp.json`.
 

@@ -8,14 +8,6 @@
 
 const MLB_SLATE_BOARD_TAB = '🎯 MLB_Slate_Board';
 
-function mlbNormalizeGameLabel_(s) {
-  return String(s || '')
-    .toLowerCase()
-    .replace(/\s+/g, ' ')
-    .replace(/\s*@\s*/g, ' @ ')
-    .trim();
-}
-
 function mlbLineCountMapsFromOddsTab_(ss) {
   const byExact = {};
   const byNorm = {};
@@ -33,11 +25,17 @@ function mlbLineCountMapsFromOddsTab_(ss) {
   return { byExact: byExact, byNorm: byNorm };
 }
 
-function mlbLookupLineCount_(maps, matchup) {
+/** Best FD row count among schedule↔odds label variants (same physical game). */
+function mlbLookupLineCountForScheduleRow_(maps, matchup, awayAbbr, homeAbbr) {
   const m = String(matchup || '').trim();
   if (maps.byExact[m] != null) return maps.byExact[m];
-  const n = mlbNormalizeGameLabel_(m);
-  return maps.byNorm[n] || 0;
+  const keys = mlbCandidateGameKeys_(matchup, awayAbbr, homeAbbr);
+  let best = 0;
+  for (let i = 0; i < keys.length; i++) {
+    const c = maps.byNorm[keys[i]] || 0;
+    if (c > best) best = c;
+  }
+  return best;
 }
 
 /**
@@ -70,7 +68,7 @@ function refreshMLBSlateBoard() {
     } catch (e) {
       firstPitch = String(r[2] || '');
     }
-    const lineCount = mlbLookupLineCount_(maps, matchup);
+    const lineCount = mlbLookupLineCountForScheduleRow_(maps, matchup, r[3], r[4]);
     let matchNote = '';
     if (lineCount === 0 && (maps.byExact && Object.keys(maps.byExact).length > 0)) {
       matchNote = 'no FD rows matched label';
@@ -85,6 +83,7 @@ function refreshMLBSlateBoard() {
       r[7],
       r[8],
       r[9],
+      String(r[13] || '').trim(),
       lineCount,
       matchNote,
     ]);
@@ -98,13 +97,13 @@ function refreshMLBSlateBoard() {
     sh = ss.insertSheet(MLB_SLATE_BOARD_TAB);
   }
   sh.setTabColor('#2e7d32');
-  [72, 130, 260, 52, 52, 160, 160, 180, 120, 72, 200].forEach(function (w, i) {
+  [72, 130, 260, 52, 52, 160, 160, 180, 120, 140, 72, 200].forEach(function (w, i) {
     sh.setColumnWidth(i + 1, w);
   });
 
-  sh.getRange(1, 1, 1, 11)
+  sh.getRange(1, 1, 1, 12)
     .merge()
-    .setValue('🎯 MLB Slate Board — ' + slateDate + ' — one row per game (FD line counts from ✅ tab)')
+    .setValue('🎯 MLB Slate Board — ' + slateDate + ' — schedule + HP umpire + FD line counts')
     .setFontWeight('bold')
     .setBackground('#1b5e20')
     .setFontColor('#ffffff')
@@ -120,6 +119,7 @@ function refreshMLBSlateBoard() {
     'home_probable_pitcher',
     'venue',
     'status',
+    'hp_umpire',
     'fanduel_lines',
     'notes',
   ];

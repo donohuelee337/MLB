@@ -2,34 +2,60 @@
 
 **Canonical repo:** `Documents\Cursor\mlb-boiz` — use this folder in Cursor and for `clasp push`.
 
-## Done (MVP, AI-BOIZ spirit)
+## Done (MVP+, AI-BOIZ spirit)
 
 | AI-BOIZ idea | MLB-BOIZ today |
 |--------------|----------------|
-| Config + slate date | `Config.js`, `⚙️ Config` tab, `SLATE_DATE`, tomorrow menu helper |
-| Odds pull (The Odds API) | `FetchMLBOdds.js` → `✅ FanDuel_MLB_Odds`, batched `baseball_mlb` markets |
-| Injury intel | `FetchMLBInjuries.js` → `🚑 MLB_Injury_Report`, `INJURY_DATA_MLB` |
-| Schedule / context | `MLBSchedule.js` → `📅 MLB_Schedule` (statsapi + probable pitchers) |
-| Morning window | `PipelineMenu.js` — injuries → schedule → odds → **`⚾ Pipeline_Log`** |
-| Docs / research | `docs/2026-04-11-mlb-research-briefing.md`, API + ABS research, `ABS-2026.md`, clasp setup, tomorrow checklist |
-| clasp | `.clasp.json` tracked for clone on other machines |
+| Config + slate date | `Config.js`, **`⚙️ Config`**, `SLATE_DATE`, menu **`📆 Set SLATE_DATE to tomorrow (NY) + Morning`** |
+| Odds pull (The Odds API) | `FetchMLBOdds.js` → **`✅ FanDuel_MLB_Odds`**, `baseball_mlb` + FanDuel |
+| Injury intel | `FetchMLBInjuries.js` → **`🚑 MLB_Injury_Report`**, `INJURY_DATA_MLB` |
+| Schedule / context | `MLBSchedule.js` → **`📅 MLB_Schedule`** (statsapi + probables + **home plate umpire** via `officials` hydrate) |
+| Pitcher game logs (Stats API) | `MLBPitcherGameLogs.js` → **`📒 Pitcher_Game_Logs`** (warms cache for queue) |
+| Slate / line density | `MLBSlateBoard.js` → **`🎯 MLB_Slate_Board`** (join uses flexible game keys vs FD labels) |
+| Schedule ↔ FD join | `MLBMatchKeys.js` — normalized labels + abbr→Odds team names for fewer `fd_k_miss` rows |
+| Pitcher K slate | `MLBPitcherKQueue.js` → **`📋 Pitcher_K_Queue`** (+ **`throws`** R/L from statsapi `/people/{id}`) |
+| Poisson + EV (K) | `MLBPitcherKBetCard.js` → **`🎰 Pitcher_K_Card`** (blended K/9 via **`K9_BLEND_L7_WEIGHT`**) |
+| Bet card | `MLBBetCard.js` → **`🃏 MLB_Bet_Card`** (optional **`MIN_EV_BET_CARD`** floor) |
+| Results log + grading | `MLBResultsLog.js` / **`📋 MLB_Results_Log`**; `MLBResultsGrader.js` — menu grader; runs at start of each ball window |
+| CLV proxy (close line) | **`close_line` / `close_odds` / `clv_note`** — `mlbBackfillResultsLogClosingK_` on **FINAL** (after odds) + menu **📈 Backfill closing K** (join tries log **Game** then schedule **`gamePk`** matchup) |
+| Umpire → λ (optional) | **`⚙️ HP_UMP_LAMBDA_MULT`** — scales 🎰 λ when **`hp_umpire`** present (default **1** = off) |
+| Pipeline observability | `MLBPipelineLog.js` → **`⚾ Pipeline_Log`** (funnel, warnings, near-miss append, bet-card game coverage) |
+| Multi-window | **`🌅 Morning`**, **`🌤 Midday`** (skips injury HTTP), **`🔒 Final`** — `runMLBBallWindow_` in `PipelineMenu.js` |
+| Docs / clasp | `docs/*`, `.clasp.json` |
 
-## Not built yet (NBA has these)
+## Orchestrator (truth source)
 
-- `🗄️ Game_Logs` / BallDontLie-style ingest → **MLB Stats API** game logs per player
-- Slate queue + projection blend (L7 / platoon / park) → **minutes → PA/IP model**
-- `StatEngine.js` analogue → **Poisson / binomial** by market (start with `pitcher_strikeouts`)
-- Sim + signal scoring → **v20-style** gates (or EV-first portfolio spec from ai-boiz docs)
-- Bet card + results log + **CLV** snapshots
-- Multi-window (morning / midday / final) if you want parity with NBA
+**Menu:** **`⚾ MLB-BOIZ`** (`PipelineMenu.js`).
+
+**`runMLBBallWindow_(windowTag, skipInjuriesFetch)`** — order of work:
+
+1. `gradeMLBPendingResults_` (best-effort)
+2. `mlbResetPitchGameLogFetchCache_`
+3. Config (`buildConfigTab`)
+4. MLB injuries (ESPN) — **skipped when Midday**
+5. MLB schedule (statsapi)
+6. Pitcher game logs (statsapi)
+7. FanDuel MLB odds
+8. Slate board (join)
+9. Pitcher K queue
+10. Pitcher K card
+11. MLB Bet Card
+12. `mlbAppendPitcherKNearMisses_` → `snapshotMLBBetCardToLog` (if bet card OK) → **`mlbBackfillResultsLogClosingK_` when `FINAL` + odds OK** → `mlbAppendBetCardPipelineCoverage_` → step warnings → `writePipelineLogTab_` → toast; activates **`🃏 MLB_Bet_Card`**
+
+One-off menu items mirror those stages (e.g. **`📒 Pitcher game logs only`**, **`🎰 Pitcher K card only (Poisson + EV)`**, **`📋 Open Pipeline Log`**).
+
+## Not built yet (still fair gaps vs NBA / spec)
+
+- Broader **StatEngine** beyond pitcher-K Poisson; **v20-style sim** gates; **CLV** snapshots
+- Full multi-market breadth if you want NBA-style `Game_Logs` for every prop type
+- Richer projection blend (platoon / park / umpire) wired into λ — see `docs/2026-04-11-mlb-pitcher-k-pipeline-design.md`
+
+## Suggested next product steps
+
+1. Tune **`K9_BLEND_L7_WEIGHT`** / **`MIN_EV_BET_CARD`** on **`⚙️ Config`** after a few slates (re-run **0. Build Config tab** if those keys are missing).
+2. Extend **`MLB_ABBR_ODDS_TEAM_ALTERNATES`** / Odds name map in `MLBMatchKeys.js` when a team rebrands or the Odds API changes strings.
+3. Pick one backlog theme: CLV, sim layer, or non-K markets.
 
 ## Single repo (formerly two folders)
 
-The old **`mlb-pitcher-k`** folder was merged into **`mlb-boiz`** (2026-04-18): pipeline-log helpers live in `MLBPipelineLog.js`, the morning runner writes **`⚾ Pipeline_Log`**, and extra research files sit in `docs/` (`2026-04-11-mlb-api-data-research.md`, `2026-04-11-abs-system-research.md`). Use **one** Google Sheet + the `scriptId` in this repo’s `.clasp.json`. Pitcher-K **design spec** remains `docs/2026-04-11-mlb-pitcher-k-pipeline-design.md`.
-
-## Suggested next implementation order
-
-1. **Game logs ingest** (MLB Stats API) for pitchers on today’s slate → tab or lightweight cache.
-2. **Slate queue** — one row per (game, pitcher, FD K line) joined to schedule + injuries.
-3. **Stat layer** — Poisson on K for one market end-to-end; then bet card stub (top N by edge).
-4. Extend **`⚾ Pipeline_Log`** — game coverage / near-miss sections once sim + card exist.
+The old **`mlb-pitcher-k`** folder was merged into **`mlb-boiz`** (2026-04-18). Use **one** Google Sheet + the `scriptId` in this repo’s `.clasp.json`. Pitcher-K **design spec:** `docs/2026-04-11-mlb-pitcher-k-pipeline-design.md`.

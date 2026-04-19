@@ -14,6 +14,8 @@ const MLB_BET_CARD_MAX_PER_GAME = 2;
 function refreshMLBBetCard() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const cfg = getConfig();
+  const minEvCfg = parseFloat(String(cfg['MIN_EV_BET_CARD'] != null ? cfg['MIN_EV_BET_CARD'] : '0').trim(), 10);
+  const minEvFloor = !isNaN(minEvCfg) && minEvCfg > 0 ? minEvCfg : 0;
   const slateDate = getSlateDateString_(cfg);
   const src = ss.getSheetByName(MLB_PITCHER_K_CARD_TAB);
   if (!src || src.getLastRow() < 4) {
@@ -22,12 +24,14 @@ function refreshMLBBetCard() {
   }
 
   const last = src.getLastRow();
-  const vals = src.getRange(4, 1, last, 20).getValues();
+  const vals = src.getRange(4, 1, last, 22).getValues();
   const plays = [];
 
   vals.forEach(function (r) {
     const flags = String(r[18] || '');
     const pitcherId = r[19];
+    const hpUmp = String(r[20] || '').trim();
+    const throws = String(r[21] || '').trim();
     if (flags.indexOf('injury') !== -1) return;
 
     const bestSide = String(r[16] || '').trim();
@@ -47,11 +51,21 @@ function refreshMLBBetCard() {
     const evRaw = r[17];
     const ev = parseFloat(String(evRaw));
     if (isNaN(ev) || ev <= 0) return;
+    if (minEvFloor > 0 && ev < minEvFloor) return;
 
     const pWin = bestSide === 'Over' ? r[10] : r[11];
     const matchup = r[1];
     const gamePk = r[0];
-    const pickLabel = pitcher + ' — K ' + bestSide + ' ' + String(line);
+    const hand =
+      throws.toUpperCase() === 'R' ? 'RHP' : throws.toUpperCase() === 'L' ? 'LHP' : throws ? throws : '';
+    const pickLabel =
+      pitcher +
+      (hand ? ' (' + hand + ')' : '') +
+      ' — K ' +
+      bestSide +
+      ' ' +
+      String(line) +
+      (hpUmp ? ' · HP ' + hpUmp : '');
 
     plays.push({
       gamePk: gamePk,
@@ -109,17 +123,23 @@ function refreshMLBBetCard() {
       p.edge,
       p.flags,
       p.pitcherId != null && p.pitcherId !== '' ? p.pitcherId : '',
-      'Model: Poisson on λ=K9×proj_IP; EV vs list price; not devigged.',
+      'Model: Poisson on λ=blended K/9×proj_IP; EV vs list; MIN_EV_BET_CARD from ⚙️ Config; not devigged.',
     ];
   });
 
   if (rows.length === 0) {
+    const evHint =
+      minEvFloor > 0
+        ? 'EV≥' + minEvFloor + ' per $1 (⚙️ MIN_EV_BET_CARD), '
+        : 'positive EV, ';
     rows.push([
       slateDate,
       '',
       '',
       '',
-      'No qualifying plays — need 🎰 Pitcher_K_Card with EV>0, both FD prices, no injury flag (max ' +
+      'No qualifying plays — need 🎰 Pitcher_K_Card with ' +
+        evHint +
+        'both FD prices, no injury flag (max ' +
         MLB_BET_CARD_MAX_PER_GAME +
         ' per game).',
       '',
