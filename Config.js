@@ -77,14 +77,24 @@ function buildConfigTab() {
   row_('HP_UMP_LAMBDA_MULT', '1', 'Multiply 🎰 λ when hp_umpire listed (1=no change; try 1.02–1.05 cautiously)');
   row_('LHP_K_LAMBDA_MULT', '1', 'Extra λ mult when pitcher throws L (1=no change)');
   row_('RHP_K_LAMBDA_MULT', '1', 'Extra λ mult when pitcher throws R (1=no change)');
-  row_('LEAGUE_HITTING_K_PA', '0.225', 'league prior SO/PA for MLB hitters (~recent seasons); used with opp team K% when OPP_K_RATE_LAMBDA_STRENGTH > 0.');
+  row_('LEAGUE_HITTING_K_PA', '0.225', 'League prior SO/PA (all PA); fallback when vs-hand priors blank or when using season opp_k_pa only.');
+  row_(
+    'LEAGUE_HITTING_K_PA_VS_L',
+    '0.226',
+    'League SO/PA for hitters vs LHP (tune yearly). Used for OPP_K ratio when opp_k_pa_vs is present and starter throws L; else falls back to LEAGUE_HITTING_K_PA.'
+  );
+  row_(
+    'LEAGUE_HITTING_K_PA_VS_R',
+    '0.224',
+    'League SO/PA for hitters vs RHP (tune yearly). Used when opp_k_pa_vs is present and starter throws R; else falls back to LEAGUE_HITTING_K_PA.'
+  );
   row_('OPP_K_RATE_LAMBDA_STRENGTH', '0', '0 = off. Try 0.15–0.35: scales 🎰 λ from opponent team season K% vs LEAGUE_HITTING_K_PA (whiff-heavier lineups → higher λ). Tune with Pipeline_Log.');
   row_('ABS_K_LAMBDA_MULT', '1', 'reserved for future Savant/ABS team K environment; 1 = neutral until wired.');
   row_('SAVANT_INGEST_ENABLED', 'false', 'true | false — when true, pipeline probes SAVANT_ABS_CSV_URL (best-effort; see MLBSavantIngest.js)');
   row_(
     'SAVANT_ABS_CSV_URL',
     '',
-    'Optional public CSV URL for future ABS team map; leave blank unless testing Savant hook'
+    'Public CSV: columns team_id + abs_k_mult (or abbr + factor). Example row: 121,1.02 — loads per-team λ mult when SAVANT_INGEST_ENABLED is true.'
   );
   ss.getNamedRanges().forEach(function (nr) {
     if (nr.getName() === 'CONFIG') nr.remove();

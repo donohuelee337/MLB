@@ -76,6 +76,7 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   mlbResetPitchGameLogFetchCache_();
   mlbResetPitchHandCache_();
   mlbResetTeamHittingSeasonCache_();
+  mlbResetSavantAbsCache_();
   const outcomes = [];
 
   function step(name, fn) {

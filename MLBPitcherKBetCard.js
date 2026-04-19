@@ -154,14 +154,31 @@ function refreshPitcherKBetCard() {
       if (Math.abs(handMult - 1) > 1e-9) {
         lamNum = Math.round(lamNum * handMult * 100) / 100;
       }
-      const leagueK = parseFloat(
+      const baseLeagueK = parseFloat(
         String(cfg['LEAGUE_HITTING_K_PA'] != null ? cfg['LEAGUE_HITTING_K_PA'] : '0.225').trim(),
+        10
+      );
+      const leagueVsL = parseFloat(
+        String(cfg['LEAGUE_HITTING_K_PA_VS_L'] != null ? cfg['LEAGUE_HITTING_K_PA_VS_L'] : '').trim(),
+        10
+      );
+      const leagueVsR = parseFloat(
+        String(cfg['LEAGUE_HITTING_K_PA_VS_R'] != null ? cfg['LEAGUE_HITTING_K_PA_VS_R'] : '').trim(),
         10
       );
       const oppKpaVs = parseFloat(String(oppKpaVsRaw != null ? oppKpaVsRaw : '').trim(), 10);
       const oppKpaAll = parseFloat(String(oppKpaRaw != null ? oppKpaRaw : '').trim(), 10);
+      const usingVsHand = !isNaN(oppKpaVs) && oppKpaVs > 0;
       const oppKpa =
-        !isNaN(oppKpaVs) && oppKpaVs > 0 ? oppKpaVs : !isNaN(oppKpaAll) && oppKpaAll > 0 ? oppKpaAll : NaN;
+        usingVsHand ? oppKpaVs : !isNaN(oppKpaAll) && oppKpaAll > 0 ? oppKpaAll : NaN;
+      let leagueK = !isNaN(baseLeagueK) && baseLeagueK > 0 ? baseLeagueK : NaN;
+      if (usingVsHand) {
+        if (tw === 'L' && !isNaN(leagueVsL) && leagueVsL > 0) {
+          leagueK = leagueVsL;
+        } else if (tw === 'R' && !isNaN(leagueVsR) && leagueVsR > 0) {
+          leagueK = leagueVsR;
+        }
+      }
       const oppStr = parseFloat(
         String(cfg['OPP_K_RATE_LAMBDA_STRENGTH'] != null ? cfg['OPP_K_RATE_LAMBDA_STRENGTH'] : '0').trim(),
         10
@@ -181,14 +198,24 @@ function refreshPitcherKBetCard() {
         const capped = Math.max(-0.12, Math.min(0.12, bump));
         lamNum = Math.round(lamNum * (1 + capped) * 100) / 100;
       }
-      const absRaw = parseFloat(
-        String(cfg['ABS_K_LAMBDA_MULT'] != null ? cfg['ABS_K_LAMBDA_MULT'] : '1').trim(),
-        10
-      );
-      if (!isNaN(lamNum) && lamNum > 0 && !isNaN(absRaw) && absRaw > 0) {
-        const am = Math.max(0.95, Math.min(1.05, absRaw));
-        if (Math.abs(am - 1) > 1e-6) {
-          lamNum = Math.round(lamNum * am * 100) / 100;
+      const oppTeamId = mlbTeamIdFromAbbr_(oppAbbr);
+      const savMult = !isNaN(oppTeamId) ? mlbGetAbsTeamLambdaMult_(oppTeamId) : null;
+      let appliedAbs = false;
+      if (!isNaN(lamNum) && lamNum > 0 && savMult != null && !isNaN(savMult) && savMult > 0) {
+        const sm = Math.max(0.92, Math.min(1.08, savMult));
+        lamNum = Math.round(lamNum * sm * 100) / 100;
+        appliedAbs = true;
+      }
+      if (!appliedAbs) {
+        const absRaw = parseFloat(
+          String(cfg['ABS_K_LAMBDA_MULT'] != null ? cfg['ABS_K_LAMBDA_MULT'] : '1').trim(),
+          10
+        );
+        if (!isNaN(lamNum) && lamNum > 0 && !isNaN(absRaw) && absRaw > 0) {
+          const am = Math.max(0.95, Math.min(1.05, absRaw));
+          if (Math.abs(am - 1) > 1e-6) {
+            lamNum = Math.round(lamNum * am * 100) / 100;
+          }
         }
       }
       const umpMultRaw = parseFloat(

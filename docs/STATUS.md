@@ -21,7 +21,8 @@
 | CLV proxy (close line) | **`close_line` / `close_odds` / `clv_note`** (line move + **implied Δpp** vs open when odds parse) — `mlbBackfillResultsLogClosingK_` on **FINAL** + menu **📈 Backfill closing K** |
 | Umpire → λ (optional) | **`⚙️ HP_UMP_LAMBDA_MULT`** — scales 🎰 λ when **`hp_umpire`** present (default **1** = off) |
 | Pipeline observability | `MLBPipelineLog.js` → **`⚾ Pipeline_Log`** (funnel, warnings, near-miss append, bet-card game coverage) |
-| Savant hook (optional) | `MLBSavantIngest.js` — **`SAVANT_INGEST_ENABLED`** / **`SAVANT_ABS_CSV_URL`**; best-effort URL probe after odds (**`PipelineMenu.js`**) |
+| Savant / ABS CSV (optional) | `MLBSavantIngest.js` — fetch **`SAVANT_ABS_CSV_URL`** when enabled; parse **`team_id,abs_k_mult`** or **`abbr,factor`** into per-team map; 🎰 λ uses **`mlbGetAbsTeamLambdaMult_`** before **`ABS_K_LAMBDA_MULT`** fallback |
+| League priors (platoon) | **`LEAGUE_HITTING_K_PA`** + **`LEAGUE_HITTING_K_PA_VS_L`** / **`LEAGUE_HITTING_K_PA_VS_R`** for OPP_K ratio when **`opp_k_pa_vs`** is present |
 | Multi-window | **`🌅 Morning`**, **`🌤 Midday`** (skips injury HTTP), **`🔒 Final`** — `runMLBBallWindow_` in `PipelineMenu.js` |
 | Docs / clasp | `docs/*`, `.clasp.json` |
 
@@ -51,13 +52,13 @@ One-off menu items mirror those stages (e.g. **`📒 Pitcher game logs only`**, 
 
 - Broader **StatEngine** beyond pitcher-K Poisson; **v20-style sim** gates
 - Full multi-market breadth if you want NBA-style `Game_Logs` for every prop type
-- **Savant** parsed into team maps (ump K env, catcher framing, **ABS** team factors) — hook exists; **`ABS_K_LAMBDA_MULT`** still manual until CSV/schema is defined
-- **True league priors** split by vs L / vs R for **`LEAGUE_HITTING_K_PA`** (today one prior vs both platoon and season totals)
+- **Savant** umpire / catcher framing leaderboards (non-CSV) and richer ABS fields beyond a single **λ** multiplier column
+- **CSV quality**: quoted commas / non-UTF8 encodings not handled in the simple parser
 
 ## Suggested next product steps
 
 1. Tune **`K9_BLEND_L7_WEIGHT`**, **`MIN_EV_BET_CARD`**, **`OPP_K_RATE_LAMBDA_STRENGTH`**, **`LEAGUE_HITTING_K_PA`** after several slates (re-run **0. Build Config tab** when keys are missing).
-2. When ready to experiment: set **`SAVANT_INGEST_ENABLED`** true and a stable **`SAVANT_ABS_CSV_URL`**, then teach `MLBSavantIngest.js` to parse and join **`ABS_K_LAMBDA_MULT`** (or a new column) by team id.
+2. Host a small **public CSV** (`team_id,abs_k_mult` or `abbr,factor`), set **`SAVANT_INGEST_ENABLED`** true + **`SAVANT_ABS_CSV_URL`**, then tune multipliers from **`Pipeline_Log`** + results.
 3. Pick one larger theme: **StatEngine/sim**, **non-K markets**, or **split league priors** for platoon λ.
 
 ## Single repo (formerly two folders)
