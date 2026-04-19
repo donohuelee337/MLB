@@ -129,6 +129,28 @@ function refreshPitcherKBetCard() {
     let edge = '';
     if (!isNaN(k9eff) && k9eff > 0) {
       lamNum = Math.round(((k9eff / 9) * projIp) * 100) / 100;
+      const homeAbbr = mlbScheduleHomeAbbrForGamePk_(ss, gamePk);
+      const pk = mlbParkKLambdaMultForHomeAbbr_(homeAbbr);
+      lamNum = Math.round(lamNum * pk * 100) / 100;
+      const tw = String(throws || '').trim().toUpperCase();
+      const lhpM = parseFloat(
+        String(cfg['LHP_K_LAMBDA_MULT'] != null ? cfg['LHP_K_LAMBDA_MULT'] : '1').trim(),
+        10
+      );
+      const rhpM = parseFloat(
+        String(cfg['RHP_K_LAMBDA_MULT'] != null ? cfg['RHP_K_LAMBDA_MULT'] : '1').trim(),
+        10
+      );
+      let handMult = 1;
+      if (tw === 'L' && !isNaN(lhpM)) {
+        handMult *= Math.max(0.92, Math.min(1.12, lhpM));
+      }
+      if (tw === 'R' && !isNaN(rhpM)) {
+        handMult *= Math.max(0.92, Math.min(1.12, rhpM));
+      }
+      if (Math.abs(handMult - 1) > 1e-9) {
+        lamNum = Math.round(lamNum * handMult * 100) / 100;
+      }
       const umpMultRaw = parseFloat(
         String(cfg['HP_UMP_LAMBDA_MULT'] != null ? cfg['HP_UMP_LAMBDA_MULT'] : '1').trim(),
         10
@@ -230,7 +252,7 @@ function refreshPitcherKBetCard() {
   sh.getRange(1, 1, 1, 22)
     .merge()
     .setValue(
-      '🎰 Pitcher K card — Poisson λ (K9 blend + optional ⚙️ HP_UMP_LAMBDA_MULT when HP listed); EV naive. Sort: best_ev desc.'
+      '🎰 Pitcher K card — λ: K9 blend × park(home) × L/R (⚙️) × HP ump; EV naive. Sort: best_ev desc.'
     )
     .setFontWeight('bold')
     .setBackground('#b71c1c')

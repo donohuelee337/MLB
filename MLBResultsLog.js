@@ -7,7 +7,7 @@
 // ============================================================
 
 const MLB_RESULTS_LOG_TAB = '📋 MLB_Results_Log';
-const MLB_RESULTS_LOG_NCOL = 21;
+const MLB_RESULTS_LOG_NCOL = 24;
 
 const MLB_RESULTS_HEADERS = [
   'Logged At',
@@ -31,7 +31,62 @@ const MLB_RESULTS_HEADERS = [
   'close_line',
   'close_odds',
   'clv_note',
+  'bet_key',
+  'open_line',
+  'open_odds',
 ];
+
+function mlbBetResultKey_(slate, gamePk, pitcherId, side, line) {
+  return [
+    String(slate || '').trim(),
+    String(gamePk != null ? gamePk : '').trim(),
+    String(pitcherId != null ? pitcherId : '').trim(),
+    String(side || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, ''),
+    String(line != null ? line : '').trim(),
+  ].join('|');
+}
+
+/** Sheet row index (1-based) or -1; prefers latest matching row. */
+function mlbFindResultsLogSheetRowForUpsert_(logSh, slateWant, betKey, gamePk, pitcherId, side, line) {
+  const last = logSh.getLastRow();
+  if (last < 4) return -1;
+  const nc = Math.max(MLB_RESULTS_LOG_NCOL, logSh.getLastColumn());
+  const data = logSh.getRange(4, 1, last, nc).getValues();
+  const wantG = parseInt(gamePk, 10);
+  const wantP = parseInt(pitcherId, 10);
+  const sideN = String(side || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '');
+  const lineS = String(line != null ? line : '').trim();
+  for (let i = data.length - 1; i >= 0; i--) {
+    if (String(data[i][1] || '').trim() !== slateWant) continue;
+    const stored = String(data[i][21] || '').trim();
+    if (stored && stored === betKey) {
+      return 4 + i;
+    }
+    const g = parseInt(data[i][13], 10);
+    const p = parseInt(data[i][14], 10);
+    const sd = String(data[i][7] || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, '');
+    if (
+      g === wantG &&
+      !isNaN(g) &&
+      p === wantP &&
+      !isNaN(p) &&
+      sd === sideN &&
+      String(data[i][6] != null ? data[i][6] : '').trim() === lineS
+    ) {
+      return 4 + i;
+    }
+  }
+  return -1;
+}
 
 /** One-line CLV summary: line move vs open + price at close (FanDuel tab). */
 function mlbClvNoteFromOpenClose_(openLine, openOdds, closeLine, closeOdds, side) {
@@ -104,19 +159,19 @@ function mlbBackfillResultsLogClosingK_(ss) {
     const player = String(row[3] || '').trim();
     const game = String(row[4] || '').trim();
     const side = String(row[7] || '').trim();
-    const openLine = row[6];
-    const openOdds = row[8];
+    const openLine = row[22] !== '' && row[22] != null ? row[22] : row[6];
+    const openOdds = row[23] !== '' && row[23] != null ? row[23] : row[8];
     const gamePkLog = row[13];
     if (!player) continue;
     if (!String(game || '').trim() && !parseInt(gamePkLog, 10)) continue;
 
     const cl = mlbLookupClosingPitcherK_(ss, game, player, side, gamePkLog);
     if (!cl) {
-      logSh.getRange(4 + i, 19, 4 + i, 21).setValues([['', '', 'no FD K match at close']]);
+      logSh.getRange(4 + i, 19, 1, 3).setValues([['', '', 'no FD K match at close']]);
       continue;
     }
     const note = mlbClvNoteFromOpenClose_(openLine, openOdds, cl.line, cl.american, side);
-    logSh.getRange(4 + i, 19, 4 + i, 21).setValues([[cl.line, cl.american, note]]);
+    logSh.getRange(4 + i, 19, 1, 3).setValues([[cl.line, cl.american, note]]);
     n++;
   }
   return n;
@@ -170,46 +225,102 @@ function snapshotMLBBetCardToLog(windowTag) {
   if (logSh.getLastRow() < HEADER_ROW || !String(logSh.getRange(HEADER_ROW, 14).getValue() || '').trim()) {
     mlbEnsureResultsLogLayout_(logSh);
   } else if (String(logSh.getRange(HEADER_ROW, 19).getValue() || '').trim() !== 'close_line') {
-    logSh.getRange(HEADER_ROW, 19, HEADER_ROW, MLB_RESULTS_LOG_NCOL).setValues([['close_line', 'close_odds', 'clv_note']]);
+    logSh.getRange(HEADER_ROW, 19, 1, 3).setValues([['close_line', 'close_odds', 'clv_note']]);
+  }
+  if (String(logSh.getRange(HEADER_ROW, 22).getValue() || '').trim() !== 'bet_key') {
+    logSh.getRange(HEADER_ROW, 22, 1, 3).setValues([['bet_key', 'open_line', 'open_odds']]);
   }
 
-  const out = [];
+  let appended = 0;
+  let updated = 0;
+
   block.forEach(function (row) {
     const playText = String(row[4] || '');
     if (!playText || playText.indexOf('No qualifying') !== -1) return;
     const player = String(row[5] || '').trim();
     if (!player) return;
 
-    out.push([
-      loggedAt,
-      row[0] || slateFallback,
-      row[1],
-      player,
-      String(row[3] || '').trim(),
-      String(row[6] || '').trim(),
-      row[8],
-      String(row[7] || '').trim(),
-      row[9],
-      row[11],
-      row[12],
-      window,
-      playText,
-      row[2],
-      row[16],
-      '',
-      'PENDING',
-      '',
-      '',
-      '',
-      '',
-    ]);
+    const slate = row[0] || slateFallback;
+    const line = row[8];
+    const odds = row[9];
+    const betKey = mlbBetResultKey_(slate, row[2], row[16], row[7], line);
+    const hitRow = mlbFindResultsLogSheetRowForUpsert_(logSh, slate, betKey, row[2], row[16], row[7], line);
+
+    if (hitRow > 0) {
+      const nc = Math.max(MLB_RESULTS_LOG_NCOL, logSh.getLastColumn());
+      const prev = logSh.getRange(hitRow, 1, 1, nc).getValues()[0];
+      let openL = prev[22];
+      let openO = prev[23];
+      if (openL === '' || openL == null) {
+        openL = prev[6];
+        openO = prev[8];
+        logSh.getRange(hitRow, 23).setValue(openL);
+        logSh.getRange(hitRow, 24).setValue(openO);
+      }
+      if (!String(prev[21] || '').trim()) {
+        logSh.getRange(hitRow, 22).setValue(betKey);
+      }
+      const clv = mlbClvNoteFromOpenClose_(openL, openO, line, odds, row[7]);
+      logSh.getRange(hitRow, 1, 1, 12).setValues([
+        [
+          loggedAt,
+          slate,
+          row[1],
+          player,
+          String(row[3] || '').trim(),
+          String(row[6] || '').trim(),
+          line,
+          String(row[7] || '').trim(),
+          odds,
+          row[11],
+          row[12],
+          window,
+        ],
+      ]);
+      logSh.getRange(hitRow, 13).setValue(playText);
+      logSh.getRange(hitRow, 14).setValue(row[2]);
+      logSh.getRange(hitRow, 15).setValue(row[16]);
+      logSh.getRange(hitRow, 19, 1, 3).setValues([[line, odds, clv]]);
+      updated++;
+      return;
+    }
+
+    const nextRow = Math.max(logSh.getLastRow(), HEADER_ROW) + 1;
+    logSh
+      .getRange(nextRow, 1, 1, MLB_RESULTS_LOG_NCOL)
+      .setValues([
+        [
+          loggedAt,
+          slate,
+          row[1],
+          player,
+          String(row[3] || '').trim(),
+          String(row[6] || '').trim(),
+          line,
+          String(row[7] || '').trim(),
+          odds,
+          row[11],
+          row[12],
+          window,
+          playText,
+          row[2],
+          row[16],
+          '',
+          'PENDING',
+          '',
+          '',
+          '',
+          '',
+          betKey,
+          line,
+          odds,
+        ],
+      ]);
+    appended++;
   });
 
-  if (!out.length) return;
-
-  const startRow = Math.max(logSh.getLastRow(), HEADER_ROW) + 1;
-  logSh.getRange(startRow, 1, out.length, MLB_RESULTS_LOG_NCOL).setValues(out);
+  if (appended === 0 && updated === 0) return;
   try {
-    ss.toast('Results log +' + out.length + ' · ' + window, 'MLB-BOIZ', 5);
+    ss.toast('Results log +' + appended + ' new · ' + updated + ' updated · ' + window, 'MLB-BOIZ', 6);
   } catch (e) {}
 }

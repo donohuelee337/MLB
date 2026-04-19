@@ -216,8 +216,8 @@ function gradeMLBPendingResults_() {
     }
 
     const g = mlbGradePitcherKRow_(line, side, kActual);
-    logSh.getRange(4 + i, 13).setValue(gamePk);
-    logSh.getRange(4 + i, 14).setValue(pid);
+    logSh.getRange(4 + i, 14).setValue(gamePk);
+    logSh.getRange(4 + i, 15).setValue(pid);
     logSh.getRange(4 + i, 16).setValue(kActual);
     logSh.getRange(4 + i, 17).setValue(g.result);
     logSh.getRange(4 + i, 18).setValue('statsapi boxscore · ' + g.note);

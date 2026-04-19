@@ -39,7 +39,6 @@ const MLB_ODDS_CONFIG = {
       'batter_first_home_run',
     ],
     [
-      'pitcher_strikeouts_alternate',
       'pitcher_hits_allowed_alternate',
       'pitcher_walks_alternate',
       'batter_total_bases_alternate',

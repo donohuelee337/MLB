@@ -15,7 +15,7 @@ Google Apps Script + Google Sheets pipeline in the **AI-BOIZ** spirit: slate-fir
 7. **📋 Pitcher_K_Queue** — schedule × FD K (`pitcher_strikeouts`) + L3 / season K9 + **throws** (R/L) + HP umpire.
 8. **🎰 Pitcher_K_Card** — Poisson + naive EV from queue.
 9. **🃏 MLB_Bet_Card** — ranked plays from the K card (EV floor optional).
-10. **📋 MLB_Results_Log** + **📊** grading — boxscore K vs pending rows; **🔒 Final** run (after odds) fills **close_line / close_odds / clv_note** for that slate (or use **📈 Backfill closing K** anytime).
+10. **📋 MLB_Results_Log** + **📊** grading — upsert by **`bet_key`** (open_line / open_odds frozen on first sight); each window updates **close_** from card; **🔒 Final** + **📈 Backfill** refresh close from ✅ FD tab.
 11. **⚾ Pipeline_Log** — funnel, warnings, near-misses, game coverage after **Morning / Midday / Final**.
 
 **Menus:** **🌅 Morning**, **🌤 Midday**, **🔒 Final**, **📆 Set SLATE_DATE to tomorrow (NY) + Morning**, per-stage “only” items, **📋 Open Pipeline Log**.

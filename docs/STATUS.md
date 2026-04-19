@@ -46,9 +46,9 @@ One-off menu items mirror those stages (e.g. **`📒 Pitcher game logs only`**, 
 
 ## Not built yet (still fair gaps vs NBA / spec)
 
-- Broader **StatEngine** beyond pitcher-K Poisson; **v20-style sim** gates; **CLV** snapshots
+- Broader **StatEngine** beyond pitcher-K Poisson; **v20-style sim** gates
 - Full multi-market breadth if you want NBA-style `Game_Logs` for every prop type
-- Richer projection blend (platoon / park / umpire) wired into λ — see `docs/2026-04-11-mlb-pitcher-k-pipeline-design.md`
+- **Savant** ump/catcher framing, **ABS** team signals, opponent platoon from team stats API — see `docs/2026-04-11-mlb-pitcher-k-pipeline-design.md` (not wired; park table is a small static v1 in `MLBParkFactors.js` only)
 
 ## Suggested next product steps
 

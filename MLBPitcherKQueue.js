@@ -16,6 +16,51 @@ function mlbResetPitchHandCache_() {
 }
 
 /** R / L from GET /people/{id} (cached per run). */
+/** Batch-warm pitchHand.code for many person ids (one HTTP per chunk). */
+function mlbPrefetchPitchHandsForIds_(idList) {
+  const raw = idList || [];
+  const ids = [];
+  const seen = {};
+  for (let i = 0; i < raw.length; i++) {
+    const n = parseInt(raw[i], 10);
+    if (!n || seen[n]) continue;
+    seen[n] = true;
+    ids.push(n);
+  }
+  const chunk = 45;
+  for (let c = 0; c < ids.length; c += chunk) {
+    const slice = ids.slice(c, c + chunk);
+    if (!slice.length) continue;
+    if (c > 0) Utilities.sleep(80);
+    const url =
+      mlbStatsApiBaseUrl_() +
+      '/people?personIds=' +
+      slice.join(',') +
+      '&fields=people,id,pitchHand';
+    try {
+      const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+      if (res.getResponseCode() !== 200) continue;
+      const payload = JSON.parse(res.getContentText());
+      const people = payload.people || [];
+      for (let p = 0; p < people.length; p++) {
+        const person = people[p];
+        const pid = person.id;
+        const code =
+          person.pitchHand && person.pitchHand.code ? String(person.pitchHand.code).trim() : '';
+        if (pid != null) __mlbPitchHandCache[String(pid)] = code;
+      }
+      for (let s = 0; s < slice.length; s++) {
+        const k = String(slice[s]);
+        if (!Object.prototype.hasOwnProperty.call(__mlbPitchHandCache, k)) {
+          __mlbPitchHandCache[k] = '';
+        }
+      }
+    } catch (e) {
+      Logger.log('mlbPrefetchPitchHandsForIds_: ' + e.message);
+    }
+  }
+}
+
 function mlbStatsApiGetPitchHand_(playerId) {
   const id = parseInt(playerId, 10);
   if (!id) return '';
@@ -25,7 +70,7 @@ function mlbStatsApiGetPitchHand_(playerId) {
   }
   const url = mlbStatsApiBaseUrl_() + '/people/' + id;
   try {
-    Utilities.sleep(60);
+    Utilities.sleep(40);
     const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
     if (res.getResponseCode() !== 200) {
       __mlbPitchHandCache[key] = '';
@@ -184,6 +229,15 @@ function refreshPitcherKSlateQueue() {
   const schLast = sch.getLastRow();
   const schCols = sch.getLastColumn();
   const scheduleRows = sch.getRange(4, 1, schLast, schCols).getValues();
+  const pitcherIdsToPrefetch = {};
+  scheduleRows.forEach(function (r) {
+    [r[11], r[12]].forEach(function (pid) {
+      const n = parseInt(pid, 10);
+      if (n) pitcherIdsToPrefetch[n] = true;
+    });
+  });
+  mlbPrefetchPitchHandsForIds_(Object.keys(pitcherIdsToPrefetch));
+
   const oddsIdx = mlbBuildPitcherKOddsIndex_(ss);
   const inj = mlbLoadInjuryLookup_(ss);
 

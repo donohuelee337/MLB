@@ -46,6 +46,22 @@ function mlbFetchScheduleJsonForDate_(dateStr) {
 }
 
 /** Matchup string from 📅 MLB_Schedule for a gamePk (for odds joins / CLV backfill). */
+/** Home team abbreviation from schedule row (col `home`). */
+function mlbScheduleHomeAbbrForGamePk_(ss, gamePk) {
+  const g = parseInt(gamePk, 10);
+  if (!g) return '';
+  const sh = ss.getSheetByName(MLB_SCHEDULE_TAB);
+  if (!sh || sh.getLastRow() < 4) return '';
+  const last = sh.getLastRow();
+  const block = sh.getRange(4, 1, last, 5).getValues();
+  for (let i = 0; i < block.length; i++) {
+    if (parseInt(block[i][0], 10) === g) {
+      return String(block[i][4] || '').trim();
+    }
+  }
+  return '';
+}
+
 function mlbScheduleMatchupForGamePk_(ss, gamePk) {
   const g = parseInt(gamePk, 10);
   if (!g) return '';
