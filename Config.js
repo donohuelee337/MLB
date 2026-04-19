@@ -80,6 +80,12 @@ function buildConfigTab() {
   row_('LEAGUE_HITTING_K_PA', '0.225', 'league prior SO/PA for MLB hitters (~recent seasons); used with opp team K% when OPP_K_RATE_LAMBDA_STRENGTH > 0.');
   row_('OPP_K_RATE_LAMBDA_STRENGTH', '0', '0 = off. Try 0.15–0.35: scales 🎰 λ from opponent team season K% vs LEAGUE_HITTING_K_PA (whiff-heavier lineups → higher λ). Tune with Pipeline_Log.');
   row_('ABS_K_LAMBDA_MULT', '1', 'reserved for future Savant/ABS team K environment; 1 = neutral until wired.');
+  row_('SAVANT_INGEST_ENABLED', 'false', 'true | false — when true, pipeline probes SAVANT_ABS_CSV_URL (best-effort; see MLBSavantIngest.js)');
+  row_(
+    'SAVANT_ABS_CSV_URL',
+    '',
+    'Optional public CSV URL for future ABS team map; leave blank unless testing Savant hook'
+  );
   ss.getNamedRanges().forEach(function (nr) {
     if (nr.getName() === 'CONFIG') nr.remove();
   });

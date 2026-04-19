@@ -75,6 +75,7 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   }
   mlbResetPitchGameLogFetchCache_();
   mlbResetPitchHandCache_();
+  mlbResetTeamHittingSeasonCache_();
   const outcomes = [];
 
   function step(name, fn) {
@@ -104,6 +105,9 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   step('MLB schedule (statsapi)', fetchMLBScheduleForSlate);
   step('Pitcher game logs (statsapi)', refreshMLBPitcherGameLogs);
   step('FanDuel MLB odds', fetchMLBFanDuelOdds);
+  step('Savant ingest (optional)', function () {
+    mlbSavantAbsIngestBestEffort_();
+  });
   step('Slate board (join)', refreshMLBSlateBoard);
   step('Pitcher K queue', refreshPitcherKSlateQueue);
   step('Pitcher K card', refreshPitcherKBetCard);
@@ -114,10 +118,11 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   const oSch = outcomes[2] || { ok: true };
   const oGameLogs = outcomes[3] || { ok: true };
   const oOdds = outcomes[4] || { ok: true };
-  const oSlate = outcomes[5] || { ok: true };
-  const oPk = outcomes[6] || { ok: true };
-  const oCard = outcomes[7] || { ok: true };
-  const oBet = outcomes[8] || { ok: true };
+  const oSavant = outcomes[5] || { ok: true };
+  const oSlate = outcomes[6] || { ok: true };
+  const oPk = outcomes[7] || { ok: true };
+  const oCard = outcomes[8] || { ok: true };
+  const oBet = outcomes[9] || { ok: true };
 
   logStep_('Config', 1, oCfg.ok ? 1 : 0, oCfg.ok ? '' : oCfg.err || 'failed');
   logStep_(
@@ -143,6 +148,12 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
     0,
     oOdds.ok ? mlbTabDataRowsBelowHeader3_(ss, MLB_ODDS_CONFIG.tabName) : 0,
     oOdds.ok ? '' : oOdds.err || 'failed'
+  );
+  logStep_(
+    'Savant ingest (optional)',
+    1,
+    oSavant.ok ? 1 : 0,
+    oSavant.ok ? '' : oSavant.err || 'failed'
   );
   logStep_(
     'Slate board',

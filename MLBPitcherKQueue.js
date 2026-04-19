@@ -265,6 +265,7 @@ function refreshPitcherKSlateQueue() {
     ];
     sides.forEach(function (sp) {
       if (!sp.name) {
+        const oaMiss = sp.side === 'Away' ? homeAbbr : awayAbbr;
         out.push([
           gamePk,
           matchup,
@@ -281,6 +282,7 @@ function refreshPitcherKSlateQueue() {
           '',
           hpUmp,
           '',
+          oaMiss,
           '',
           '',
         ]);
@@ -325,9 +327,18 @@ function refreshPitcherKSlateQueue() {
       const oppAbbr = sp.side === 'Away' ? homeAbbr : awayAbbr;
       const oppTeamId = mlbTeamIdFromAbbr_(oppAbbr);
       let oppKpa = '';
+      let oppKpaVs = '';
       if (!isNaN(oppTeamId)) {
         const kpa = mlbTeamSeasonHittingKPerPa_(oppTeamId, season);
         oppKpa = !isNaN(kpa) ? kpa : '';
+        const tw0 = String(throws || '')
+          .trim()
+          .toUpperCase()
+          .slice(0, 1);
+        if (tw0 === 'L' || tw0 === 'R') {
+          const kv = mlbTeamHittingKPerPaVsPitcherHand_(oppTeamId, season, tw0);
+          oppKpaVs = !isNaN(kv) ? kv : '';
+        }
       }
 
       out.push([
@@ -348,6 +359,7 @@ function refreshPitcherKSlateQueue() {
         throws,
         oppAbbr,
         oppKpa,
+        oppKpaVs,
       ]);
     });
   });
@@ -360,14 +372,14 @@ function refreshPitcherKSlateQueue() {
     sh = ss.insertSheet(MLB_PITCHER_K_QUEUE_TAB);
   }
   sh.setTabColor('#6a1b9a');
-  [72, 220, 56, 160, 88, 56, 72, 72, 52, 52, 52, 220, 88, 140, 44, 56, 72].forEach(function (w, i) {
+  [72, 220, 56, 160, 88, 56, 72, 72, 52, 52, 52, 220, 88, 140, 44, 56, 72, 72].forEach(function (w, i) {
     sh.setColumnWidth(i + 1, w);
   });
 
-  sh.getRange(1, 1, 1, 17)
+  sh.getRange(1, 1, 1, 18)
     .merge()
     .setValue(
-      '📋 Pitcher K queue — FD K + L3/season K9 + opp team SO/PA (statsapi) — season ' + season
+      '📋 Pitcher K queue — FD K + L3/season K9 + opp SO/PA + vs-hand SO/PA (statsapi) — season ' + season
     )
     .setFontWeight('bold')
     .setBackground('#4a148c')
@@ -392,6 +404,7 @@ function refreshPitcherKSlateQueue() {
     'throws',
     'opp_abbr',
     'opp_k_pa',
+    'opp_k_pa_vs',
   ];
   sh.getRange(3, 1, 1, headers.length)
     .setValues([headers])

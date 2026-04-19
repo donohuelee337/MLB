@@ -100,7 +100,7 @@ function refreshPitcherKBetCard() {
   }
 
   const last = q.getLastRow();
-  const raw = q.getRange(4, 1, last, 17).getValues();
+  const raw = q.getRange(4, 1, last, 18).getValues();
   const out = [];
 
   raw.forEach(function (r) {
@@ -121,6 +121,7 @@ function refreshPitcherKBetCard() {
     const throws = String(r[14] || '').trim();
     const oppAbbr = String(r[15] || '').trim();
     const oppKpaRaw = r[16];
+    const oppKpaVsRaw = r[17];
 
     if (!String(pitcher || '').trim()) return;
 
@@ -157,7 +158,10 @@ function refreshPitcherKBetCard() {
         String(cfg['LEAGUE_HITTING_K_PA'] != null ? cfg['LEAGUE_HITTING_K_PA'] : '0.225').trim(),
         10
       );
-      const oppKpa = parseFloat(String(oppKpaRaw != null ? oppKpaRaw : '').trim(), 10);
+      const oppKpaVs = parseFloat(String(oppKpaVsRaw != null ? oppKpaVsRaw : '').trim(), 10);
+      const oppKpaAll = parseFloat(String(oppKpaRaw != null ? oppKpaRaw : '').trim(), 10);
+      const oppKpa =
+        !isNaN(oppKpaVs) && oppKpaVs > 0 ? oppKpaVs : !isNaN(oppKpaAll) && oppKpaAll > 0 ? oppKpaAll : NaN;
       const oppStr = parseFloat(
         String(cfg['OPP_K_RATE_LAMBDA_STRENGTH'] != null ? cfg['OPP_K_RATE_LAMBDA_STRENGTH'] : '0').trim(),
         10
@@ -263,6 +267,7 @@ function refreshPitcherKBetCard() {
       throws,
       oppAbbr,
       oppKpaRaw === '' || oppKpaRaw == null ? '' : oppKpaRaw,
+      oppKpaVsRaw === '' || oppKpaVsRaw == null ? '' : oppKpaVsRaw,
     ]);
   });
 
@@ -283,14 +288,14 @@ function refreshPitcherKBetCard() {
     sh = ss.insertSheet(MLB_PITCHER_K_CARD_TAB);
   }
   sh.setTabColor('#c62828');
-  [72, 200, 52, 150, 56, 64, 64, 52, 52, 52, 52, 52, 52, 52, 52, 52, 64, 52, 140, 88, 140, 44, 56, 72].forEach(function (w, i) {
+  [72, 200, 52, 150, 56, 64, 64, 52, 52, 52, 52, 52, 52, 52, 52, 52, 64, 52, 140, 88, 140, 44, 56, 72, 72].forEach(function (w, i) {
     sh.setColumnWidth(i + 1, w);
   });
 
-  sh.getRange(1, 1, 1, 24)
+  sh.getRange(1, 1, 1, 25)
     .merge()
     .setValue(
-      '🎰 Pitcher K card — λ: K9 blend × park × L/R × opp K% (⚙️ OPP_*) × ABS stub × HP ump; EV naive. Sort: best_ev desc.'
+      '🎰 Pitcher K card — λ: K9 blend × park × L/R × opp K% (vs-hand if present) × ABS × HP ump; EV naive. Sort: best_ev desc.'
     )
     .setFontWeight('bold')
     .setBackground('#b71c1c')
@@ -324,6 +329,7 @@ function refreshPitcherKBetCard() {
     'throws',
     'opp_abbr',
     'opp_k_pa',
+    'opp_k_pa_vs',
   ];
   sh.getRange(3, 1, 1, headers.length)
     .setValues([headers])
