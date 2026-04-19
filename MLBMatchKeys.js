@@ -40,9 +40,30 @@ const MLB_ABBR_TO_ODDS_TEAM_NAME = {
   WSN: 'Washington Nationals',
 };
 
-/** Extra odds-style strings for the same club (relocation / branding). */
+/** Extra odds-style strings for the same club (relocation, legacy names, abbreviations). */
 const MLB_ABBR_ODDS_TEAM_ALTERNATES = {
-  OAK: ['Las Vegas Athletics', 'Athletics'],
+  ARI: ['Arizona D-backs', 'Arizona Dbacks'],
+  CHC: ['Chi Cubs'],
+  CLE: ['Cleveland Indians'],
+  CWS: ['Chi White Sox', 'Chi Sox'],
+  KC: ['KC Royals'],
+  LAA: ['LA Angels', 'Los Angeles Angels of Anaheim', 'Anaheim Angels'],
+  LAD: ['LA Dodgers'],
+  MIA: ['Florida Marlins'],
+  NYM: ['NY Mets'],
+  NYY: ['NY Yankees'],
+  OAK: [
+    'Las Vegas Athletics',
+    'Athletics',
+    'Oakland A\'s',
+    'Oakland As',
+    'Las Vegas A\'s',
+  ],
+  SD: ['SD Padres'],
+  SF: ['SF Giants'],
+  STL: ['St Louis Cardinals', 'Saint Louis Cardinals'],
+  TB: ['Tampa Bay Devil Rays', 'Devil Rays'],
+  WSN: ['Washington Nats', 'Washington DC Nationals'],
 };
 
 function mlbNormalizeGameLabel_(s) {

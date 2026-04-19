@@ -24,7 +24,7 @@ function refreshMLBBetCard() {
   }
 
   const last = src.getLastRow();
-  const vals = src.getRange(4, 1, last, 22).getValues();
+  const vals = src.getRange(4, 1, last, 24).getValues();
   const plays = [];
 
   vals.forEach(function (r) {

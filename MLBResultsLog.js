@@ -88,22 +88,52 @@ function mlbFindResultsLogSheetRowForUpsert_(logSh, slateWant, betKey, gamePk, p
   return -1;
 }
 
-/** One-line CLV summary: line move vs open + price at close (FanDuel tab). */
+/** American odds → break-even implied prob for that price (0..1); ignores vig. */
+function mlbAmericanToImpliedProb_(american) {
+  const a = parseInt(String(american != null ? american : '').replace(/[^0-9+-]/g, ''), 10);
+  if (isNaN(a) || a === 0) return NaN;
+  if (a > 0) return 100 / (a + 100);
+  const b = Math.abs(a);
+  return b / (b + 100);
+}
+
+/** One-line CLV summary: line move vs open + price at close (FanDuel tab) + implied Δ. */
 function mlbClvNoteFromOpenClose_(openLine, openOdds, closeLine, closeOdds, side) {
   const oL = parseFloat(String(openLine), 10);
   const cL = parseFloat(String(closeLine), 10);
   const sl = String(side || '').toLowerCase();
-  if (isNaN(oL) || isNaN(cL)) return 'close lookup ok; line compare n/a';
-  const d = Math.round((cL - oL) * 100) / 100;
   let hint = '';
-  if (sl.indexOf('over') !== -1) {
-    hint = d > 0 ? 'line rose vs open (harder Over)' : d < 0 ? 'line fell vs open (easier Over)' : 'line flat';
-  } else if (sl.indexOf('under') !== -1) {
-    hint = d > 0 ? 'line rose vs open (easier Under)' : d < 0 ? 'line fell vs open (harder Under)' : 'line flat';
+  if (isNaN(oL) || isNaN(cL)) {
+    hint = 'close lookup ok; line compare n/a';
   } else {
-    hint = 'Δline ' + (d >= 0 ? '+' : '') + d;
+    const d = Math.round((cL - oL) * 100) / 100;
+    if (sl.indexOf('over') !== -1) {
+      hint = d > 0 ? 'line rose vs open (harder Over)' : d < 0 ? 'line fell vs open (easier Over)' : 'line flat';
+    } else if (sl.indexOf('under') !== -1) {
+      hint = d > 0 ? 'line rose vs open (easier Under)' : d < 0 ? 'line fell vs open (harder Under)' : 'line flat';
+    } else {
+      hint = 'Δline ' + (d >= 0 ? '+' : '') + d;
+    }
   }
-  return hint + ' · open ' + String(openLine) + '@' + String(openOdds) + ' → close ' + String(closeLine) + '@' + String(closeOdds);
+  const pO = mlbAmericanToImpliedProb_(openOdds);
+  const pC = mlbAmericanToImpliedProb_(closeOdds);
+  let priceBit = '';
+  if (!isNaN(pO) && !isNaN(pC)) {
+    const dpp = Math.round((pC - pO) * 1000) / 10;
+    priceBit = ' · implied Δ' + (dpp >= 0 ? '+' : '') + dpp + 'pp (this side @ FD)';
+  }
+  return (
+    hint +
+    ' · open ' +
+    String(openLine) +
+    '@' +
+    String(openOdds) +
+    ' → close ' +
+    String(closeLine) +
+    '@' +
+    String(closeOdds) +
+    priceBit
+  );
 }
 
 /**

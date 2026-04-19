@@ -100,7 +100,7 @@ function refreshPitcherKBetCard() {
   }
 
   const last = q.getLastRow();
-  const raw = q.getRange(4, 1, last, 15).getValues();
+  const raw = q.getRange(4, 1, last, 17).getValues();
   const out = [];
 
   raw.forEach(function (r) {
@@ -119,6 +119,8 @@ function refreshPitcherKBetCard() {
     const inj = r[12];
     const hpUmp = String(r[13] || '').trim();
     const throws = String(r[14] || '').trim();
+    const oppAbbr = String(r[15] || '').trim();
+    const oppKpaRaw = r[16];
 
     if (!String(pitcher || '').trim()) return;
 
@@ -150,6 +152,40 @@ function refreshPitcherKBetCard() {
       }
       if (Math.abs(handMult - 1) > 1e-9) {
         lamNum = Math.round(lamNum * handMult * 100) / 100;
+      }
+      const leagueK = parseFloat(
+        String(cfg['LEAGUE_HITTING_K_PA'] != null ? cfg['LEAGUE_HITTING_K_PA'] : '0.225').trim(),
+        10
+      );
+      const oppKpa = parseFloat(String(oppKpaRaw != null ? oppKpaRaw : '').trim(), 10);
+      const oppStr = parseFloat(
+        String(cfg['OPP_K_RATE_LAMBDA_STRENGTH'] != null ? cfg['OPP_K_RATE_LAMBDA_STRENGTH'] : '0').trim(),
+        10
+      );
+      if (
+        !isNaN(lamNum) &&
+        lamNum > 0 &&
+        !isNaN(oppKpa) &&
+        oppKpa > 0 &&
+        !isNaN(leagueK) &&
+        leagueK > 0 &&
+        !isNaN(oppStr) &&
+        oppStr > 0
+      ) {
+        const ratio = oppKpa / leagueK - 1;
+        const bump = oppStr * ratio;
+        const capped = Math.max(-0.12, Math.min(0.12, bump));
+        lamNum = Math.round(lamNum * (1 + capped) * 100) / 100;
+      }
+      const absRaw = parseFloat(
+        String(cfg['ABS_K_LAMBDA_MULT'] != null ? cfg['ABS_K_LAMBDA_MULT'] : '1').trim(),
+        10
+      );
+      if (!isNaN(lamNum) && lamNum > 0 && !isNaN(absRaw) && absRaw > 0) {
+        const am = Math.max(0.95, Math.min(1.05, absRaw));
+        if (Math.abs(am - 1) > 1e-6) {
+          lamNum = Math.round(lamNum * am * 100) / 100;
+        }
       }
       const umpMultRaw = parseFloat(
         String(cfg['HP_UMP_LAMBDA_MULT'] != null ? cfg['HP_UMP_LAMBDA_MULT'] : '1').trim(),
@@ -225,6 +261,8 @@ function refreshPitcherKBetCard() {
       pitcherId,
       hpUmp,
       throws,
+      oppAbbr,
+      oppKpaRaw === '' || oppKpaRaw == null ? '' : oppKpaRaw,
     ]);
   });
 
@@ -245,14 +283,14 @@ function refreshPitcherKBetCard() {
     sh = ss.insertSheet(MLB_PITCHER_K_CARD_TAB);
   }
   sh.setTabColor('#c62828');
-  [72, 200, 52, 150, 56, 64, 64, 52, 52, 52, 52, 52, 52, 52, 52, 52, 64, 52, 140, 88, 140, 44].forEach(function (w, i) {
+  [72, 200, 52, 150, 56, 64, 64, 52, 52, 52, 52, 52, 52, 52, 52, 52, 64, 52, 140, 88, 140, 44, 56, 72].forEach(function (w, i) {
     sh.setColumnWidth(i + 1, w);
   });
 
-  sh.getRange(1, 1, 1, 22)
+  sh.getRange(1, 1, 1, 24)
     .merge()
     .setValue(
-      '🎰 Pitcher K card — λ: K9 blend × park(home) × L/R (⚙️) × HP ump; EV naive. Sort: best_ev desc.'
+      '🎰 Pitcher K card — λ: K9 blend × park × L/R × opp K% (⚙️ OPP_*) × ABS stub × HP ump; EV naive. Sort: best_ev desc.'
     )
     .setFontWeight('bold')
     .setBackground('#b71c1c')
@@ -284,6 +322,8 @@ function refreshPitcherKBetCard() {
     'pitcher_id',
     'hp_umpire',
     'throws',
+    'opp_abbr',
+    'opp_k_pa',
   ];
   sh.getRange(3, 1, 1, headers.length)
     .setValues([headers])

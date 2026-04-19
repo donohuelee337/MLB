@@ -218,6 +218,7 @@ function mlbSlateSeasonYear_(cfg) {
 function refreshPitcherKSlateQueue() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   mlbResetPitchHandCache_();
+  mlbResetTeamHittingSeasonCache_();
   const cfg = getConfig();
   const season = mlbSlateSeasonYear_(cfg);
   const sch = ss.getSheetByName(MLB_SCHEDULE_TAB);
@@ -280,6 +281,8 @@ function refreshPitcherKSlateQueue() {
           '',
           hpUmp,
           '',
+          '',
+          '',
         ]);
         return;
       }
@@ -319,6 +322,14 @@ function refreshPitcherKSlateQueue() {
 
       const injSt = inj[mlbNormalizePersonName_(sp.name)] || '';
 
+      const oppAbbr = sp.side === 'Away' ? homeAbbr : awayAbbr;
+      const oppTeamId = mlbTeamIdFromAbbr_(oppAbbr);
+      let oppKpa = '';
+      if (!isNaN(oppTeamId)) {
+        const kpa = mlbTeamSeasonHittingKPerPa_(oppTeamId, season);
+        oppKpa = !isNaN(kpa) ? kpa : '';
+      }
+
       out.push([
         gamePk,
         matchup,
@@ -335,6 +346,8 @@ function refreshPitcherKSlateQueue() {
         injSt,
         hpUmp,
         throws,
+        oppAbbr,
+        oppKpa,
       ]);
     });
   });
@@ -347,13 +360,15 @@ function refreshPitcherKSlateQueue() {
     sh = ss.insertSheet(MLB_PITCHER_K_QUEUE_TAB);
   }
   sh.setTabColor('#6a1b9a');
-  [72, 220, 56, 160, 88, 56, 72, 72, 52, 52, 52, 220, 88, 140, 44].forEach(function (w, i) {
+  [72, 220, 56, 160, 88, 56, 72, 72, 52, 52, 52, 220, 88, 140, 44, 56, 72].forEach(function (w, i) {
     sh.setColumnWidth(i + 1, w);
   });
 
-  sh.getRange(1, 1, 1, 15)
+  sh.getRange(1, 1, 1, 17)
     .merge()
-    .setValue('📋 Pitcher K queue — FanDuel main K line + L3 / season K9 (statsapi) — season ' + season)
+    .setValue(
+      '📋 Pitcher K queue — FD K + L3/season K9 + opp team SO/PA (statsapi) — season ' + season
+    )
     .setFontWeight('bold')
     .setBackground('#4a148c')
     .setFontColor('#ffffff')
@@ -375,6 +390,8 @@ function refreshPitcherKSlateQueue() {
     'injury_status',
     'hp_umpire',
     'throws',
+    'opp_abbr',
+    'opp_k_pa',
   ];
   sh.getRange(3, 1, 1, headers.length)
     .setValues([headers])
