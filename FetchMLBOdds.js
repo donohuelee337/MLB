@@ -13,14 +13,14 @@ const MLB_ODDS_CONFIG = {
   tabName: '✅ FanDuel_MLB_Odds',
   tabColor: '#0d47a1',
   marketBatches: [
+    // FanDuel often posts props on main and/or alternate keys — fetch both for joins.
     [
       'pitcher_strikeouts',
-      'pitcher_outs',
-      'pitcher_hits_allowed',
+      'pitcher_strikeouts_alternate',
       'pitcher_walks',
-      'pitcher_earned_runs',
-      'pitcher_record_a_win',
+      'pitcher_walks_alternate',
     ],
+    ['pitcher_outs', 'pitcher_hits_allowed', 'pitcher_earned_runs', 'pitcher_record_a_win'],
     [
       'batter_hits',
       'batter_total_bases',
@@ -40,7 +40,6 @@ const MLB_ODDS_CONFIG = {
     ],
     [
       'pitcher_hits_allowed_alternate',
-      'pitcher_walks_alternate',
       'batter_total_bases_alternate',
       'batter_hits_alternate',
       'batter_home_runs_alternate',
@@ -124,6 +123,21 @@ function getMLEventIdsForDate_(apiKey, slateDate) {
   }
 }
 
+/** Player label for prop row: Odds API usually puts O/U in name and player in description (but not always). */
+function mlbOddsPlayerLabelFromOutcome_(outcome) {
+  const nm = String((outcome && outcome.name) || '').trim();
+  const desc = String((outcome && outcome.description) || '').trim();
+  const low = nm.toLowerCase();
+  if (low === 'over' || low === 'under' || low === 'yes' || low === 'no') {
+    return desc || nm;
+  }
+  const dlow = desc.toLowerCase();
+  if (dlow === 'over' || dlow === 'under') {
+    return nm || desc;
+  }
+  return desc || nm;
+}
+
 function fetchMLEventMarkets_(apiKey, region, bookmaker, eventId, gameLabel, markets) {
   const marketsStr = markets.join(',');
   const url =
@@ -153,7 +167,7 @@ function fetchMLEventMarkets_(apiKey, region, bookmaker, eventId, gameLabel, mar
     fdBook.markets.forEach(function (market) {
       market.outcomes.forEach(function (outcome) {
         rows.push([
-          outcome.description || outcome.name || '',
+          mlbOddsPlayerLabelFromOutcome_(outcome),
           gameLabel,
           market.key,
           outcome.name,

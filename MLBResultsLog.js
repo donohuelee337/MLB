@@ -121,15 +121,15 @@ function mlbClvNoteFromOpenClose_(openLine, openOdds, closeLine, closeOdds, side
  * @returns {{ line: *, american: * }|null}
  */
 function mlbLookupClosingPitcherK_(ss, gameStr, playerStr, betSide, gamePk) {
-  return mlbLookupClosingPitcherProp_(ss, gameStr, playerStr, betSide, gamePk, 'pitcher_strikeouts');
+  return mlbLookupClosingPitcherPropWithIdx_(ss, mlbBuildPitcherKOddsIndex_(ss), gameStr, playerStr, betSide, gamePk);
 }
 
 function mlbLookupClosingPitcherWalks_(ss, gameStr, playerStr, betSide, gamePk) {
-  return mlbLookupClosingPitcherProp_(ss, gameStr, playerStr, betSide, gamePk, 'pitcher_walks');
+  return mlbLookupClosingPitcherPropWithIdx_(ss, mlbBuildPitcherWalkOddsIndex_(ss), gameStr, playerStr, betSide, gamePk);
 }
 
-function mlbLookupClosingPitcherProp_(ss, gameStr, playerStr, betSide, gamePk, marketKey) {
-  const oddsIdx = mlbBuildPitcherOddsIndexForMarket_(ss, marketKey);
+/** Closing line from a pre-built odds index (main + alternate markets merged). */
+function mlbLookupClosingPitcherPropWithIdx_(ss, oddsIdx, gameStr, playerStr, betSide, gamePk) {
   const pNorm = mlbNormalizePersonName_(playerStr);
   const labels = [];
   const a = String(gameStr || '').trim();

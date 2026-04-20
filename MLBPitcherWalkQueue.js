@@ -32,7 +32,7 @@ function refreshPitcherWalkSlateQueue() {
   });
   mlbPrefetchPitchHandsForIds_(Object.keys(pitcherIdsToPrefetch));
 
-  const oddsIdx = mlbBuildPitcherOddsIndexForMarket_(ss, 'pitcher_walks');
+  const oddsIdx = mlbBuildPitcherWalkOddsIndex_(ss);
   const inj = mlbLoadInjuryLookup_(ss);
 
   const out = [];
@@ -154,7 +154,9 @@ function refreshPitcherWalkSlateQueue() {
 
   sh.getRange(1, 1, 1, 15)
     .merge()
-    .setValue('📋 Pitcher BB queue — FanDuel pitcher_walks main line + L3 / season BB9 — season ' + season)
+    .setValue(
+      '📋 Pitcher BB queue — FD pitcher_walks (+ alternate merged) + L3 / season BB9 — season ' + season
+    )
     .setFontWeight('bold')
     .setBackground('#0d47a1')
     .setFontColor('#ffffff')

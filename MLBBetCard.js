@@ -1,14 +1,37 @@
 // ============================================================
-// 🃏 MLB Bet Card — pitcher K + pitcher walks (ranked by EV)
+// 🃏 MLB Bet Card — single ranked sheet (NBA-style product)
 // ============================================================
-// AI-BOIZ spirit: one actionable card; injury-flagged plays omitted.
-// Sources: 🎰 Pitcher_K_Card, 🎰 Pitcher_BB_Card.
+// Staging tabs 🎰 Pitcher_K_Card / 🎰 Pitcher_BB_Card are rebuilt
+// automatically when you run this from the menu. Pipeline calls
+// merge-only to avoid double work.
 // ============================================================
 
 const MLB_BET_CARD_TAB = '🃏 MLB_Bet_Card';
 const MLB_BET_CARD_MAX_PLAYS = 30;
 /** Same spirit as AI-BOIZ: cap straights per game across all markets on this card. */
 const MLB_BET_CARD_MAX_PER_GAME = 2;
+
+/**
+ * Rebuild K/BB queues + Poisson cards when schedule + odds exist.
+ * @returns {boolean} false if prerequisites missing
+ */
+function mlbRebuildPitcherStagingForBetCard_(ss) {
+  const sch = ss.getSheetByName(MLB_SCHEDULE_TAB);
+  const odds = ss.getSheetByName(MLB_ODDS_CONFIG.tabName);
+  if (!sch || sch.getLastRow() < 4) {
+    safeAlert_('MLB Bet Card', 'Need 📅 MLB_Schedule — run Morning or 📅 MLB schedule only first.');
+    return false;
+  }
+  if (!odds || odds.getLastRow() < 4) {
+    safeAlert_('MLB Bet Card', 'Need ✅ FanDuel_MLB_Odds — run FanDuel MLB odds first.');
+    return false;
+  }
+  refreshPitcherKSlateQueue();
+  refreshPitcherWalkSlateQueue();
+  refreshPitcherKBetCard();
+  refreshPitcherWalkBetCard();
+  return true;
+}
 
 /**
  * @param {string} srcTab MLB_PITCHER_K_CARD_TAB | MLB_PITCHER_BB_CARD_TAB
@@ -88,7 +111,15 @@ function mlbCollectPlaysFromPitcherOddsCard_(ss, cfg, srcTab, marketLabel, statV
   return plays;
 }
 
+/** Menu + manual: refresh staging, then write the single 🃏 sheet. */
 function refreshMLBBetCard() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!mlbRebuildPitcherStagingForBetCard_(ss)) return;
+  refreshMLBBetCardMergeOnly_();
+}
+
+/** Called from PipelineMenu after queues/cards already ran. */
+function refreshMLBBetCardMergeOnly_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const cfg = getConfig();
   const minEvCfg = parseFloat(String(cfg['MIN_EV_BET_CARD'] != null ? cfg['MIN_EV_BET_CARD'] : '0').trim(), 10);
@@ -98,7 +129,10 @@ function refreshMLBBetCard() {
   const kTab = ss.getSheetByName(MLB_PITCHER_K_CARD_TAB);
   const bbTab = ss.getSheetByName(MLB_PITCHER_BB_CARD_TAB);
   if ((!kTab || kTab.getLastRow() < 4) && (!bbTab || bbTab.getLastRow() < 4)) {
-    safeAlert_('MLB Bet Card', 'Run Pitcher K card and/or Pitcher BB card first (Morning includes both).');
+    safeAlert_(
+      'MLB Bet Card',
+      'No 🎰 staging rows — run Morning (or Pitcher K/BB queue + card steps) first.'
+    );
     return;
   }
 
@@ -222,7 +256,7 @@ function refreshMLBBetCard() {
   sh.getRange(1, 1, 1, 18)
     .merge()
     .setValue(
-      '🃏 MLB BET CARD — FanDuel pitcher K + walks — ranked by EV ($1 risk). Injury-flagged omitted. Not betting advice.'
+      '🃏 MLB BET CARD — ALL PICKS (K + walks today) — ranked by EV. 🎰 tabs are detail. Not betting advice.'
     )
     .setFontWeight('bold')
     .setBackground('#004d40')

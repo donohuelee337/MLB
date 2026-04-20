@@ -103,23 +103,27 @@ function mlbParseInningsString_(s) {
 
 /**
  * @returns {Object} keyed by norm(game)||norm(player) → { pt: { Over, Under } }
- * @param {string} marketFilter e.g. pitcher_strikeouts | pitcher_walks
+ * @param {string[]} marketFilters e.g. ['pitcher_strikeouts','pitcher_strikeouts_alternate']
  */
-function mlbBuildPitcherOddsIndexForMarket_(ss, marketFilter) {
+function mlbBuildPitcherOddsIndexForMarkets_(ss, marketFilters) {
   const byPitcherGame = {};
   const sh = ss.getSheetByName(MLB_ODDS_CONFIG.tabName);
   if (!sh || sh.getLastRow() < 4) return byPitcherGame;
   const last = sh.getLastRow();
   const block = sh.getRange(4, 1, last, 6).getValues();
-  const want = String(marketFilter || '').trim();
+  const want = {};
+  (marketFilters || []).forEach(function (k) {
+    const t = String(k || '').trim().toLowerCase();
+    if (t) want[t] = true;
+  });
   for (let i = 0; i < block.length; i++) {
     const player = block[i][0];
     const gameLabel = block[i][1];
-    const market = String(block[i][2] || '');
+    const market = String(block[i][2] || '').trim().toLowerCase();
     const side = String(block[i][3] || '');
     const lineRaw = block[i][4];
     const price = block[i][5];
-    if (market !== want) continue;
+    if (!want[market]) continue;
     const g = mlbNormalizeGameLabel_(gameLabel);
     const p = mlbNormalizePersonName_(player);
     if (!g || !p) continue;
@@ -135,8 +139,17 @@ function mlbBuildPitcherOddsIndexForMarket_(ss, marketFilter) {
   return byPitcherGame;
 }
 
+/** @param {string} marketFilter single key */
+function mlbBuildPitcherOddsIndexForMarket_(ss, marketFilter) {
+  return mlbBuildPitcherOddsIndexForMarkets_(ss, [marketFilter]);
+}
+
 function mlbBuildPitcherKOddsIndex_(ss) {
-  return mlbBuildPitcherOddsIndexForMarket_(ss, 'pitcher_strikeouts');
+  return mlbBuildPitcherOddsIndexForMarkets_(ss, ['pitcher_strikeouts', 'pitcher_strikeouts_alternate']);
+}
+
+function mlbBuildPitcherWalkOddsIndex_(ss) {
+  return mlbBuildPitcherOddsIndexForMarkets_(ss, ['pitcher_walks', 'pitcher_walks_alternate']);
 }
 
 function mlbPickMainKPoint_(pointMap) {

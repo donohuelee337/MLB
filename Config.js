@@ -60,7 +60,7 @@ function buildConfigTab() {
   row_('RUN_WINDOW', 'MORNING', 'MORNING | MIDDAY | FINAL');
   row_('SLATE_DATE', defaultSlate, 'yyyy-MM-dd in script TZ — use menu "tomorrow" or set manually');
   row_('ODDS_BOOK', 'fanduel', 'the-odds-api bookmaker key');
-  row_('ODDS_REGION', 'us', 'regions param');
+  row_('ODDS_REGION', 'us', 'regions param (try us2 if FD player props sparse in ✅ tab)');
   row_('K9_BLEND_L7_WEIGHT', '0.35', '0..1 blend of L3 K/9 vs season K9 for 🎰 λ (needs L3_IP in queue)');
   row_('BB9_BLEND_L3_WEIGHT', '', 'Optional; blank = use K9_BLEND for 🎰 Pitcher BB λ (L3 BB9 vs season)');
   row_('MIN_EV_BET_CARD', '0', 'Min EV per $1 on 🃏 card; 0 = any positive EV; e.g. 0.03 for 3¢ floor');

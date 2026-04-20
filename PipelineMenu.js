@@ -23,7 +23,7 @@ function onOpen() {
     .addItem('📋 Pitcher BB queue only (schedule + FD walks)', 'refreshPitcherWalkSlateQueue')
     .addItem('🎰 Pitcher K card only (Poisson + EV)', 'refreshPitcherKBetCard')
     .addItem('🎰 Pitcher BB card only (Poisson + EV)', 'refreshPitcherWalkBetCard')
-    .addItem('🃏 MLB Bet Card only (final plays)', 'refreshMLBBetCard')
+    .addItem('🃏 MLB Bet Card only (all picks — primary sheet)', 'refreshMLBBetCard')
     .addItem('📊 Grade pending MLB results (boxscore)', 'gradeMLBPendingResults_')
     .addItem('📈 Backfill closing lines (Results Log)', 'mlbBackfillClosingMenu_')
     .addItem('📋 Open Pipeline Log', 'mlbActivatePipelineLog_')
@@ -112,7 +112,7 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   step('Pitcher K card', refreshPitcherKBetCard);
   step('Pitcher BB queue', refreshPitcherWalkSlateQueue);
   step('Pitcher BB card', refreshPitcherWalkBetCard);
-  step('MLB Bet Card', refreshMLBBetCard);
+  step('MLB Bet Card', refreshMLBBetCardMergeOnly_);
 
   const oCfg = outcomes[0] || { ok: true };
   const oInj = outcomes[1] || { ok: true };
