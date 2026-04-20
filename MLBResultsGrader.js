@@ -99,6 +99,69 @@ function mlbBatterHitsFromBoxscore_(payload, batterId) {
   return null;
 }
 
+/** IP string like "6.1" → total outs recorded (19). */
+function mlbOutsFromInningsPitchedString_(s) {
+  const t = String(s || '0').trim();
+  if (!t) return 0;
+  const parts = t.split('.');
+  const whole = parseInt(parts[0], 10) || 0;
+  const third = parts.length < 2 ? 0 : parseInt(parts[1], 10);
+  return whole * 3 + (third === 1 ? 1 : third === 2 ? 2 : 0);
+}
+
+/** Pitching stats object or null for this MLB person id. */
+function mlbPitchingLineFromBoxscore_(payload, pitcherId) {
+  const teams = mlbBoxscoreTeams_(payload);
+  if (!teams) return null;
+  const pid = 'ID' + parseInt(pitcherId, 10);
+  const sides = ['away', 'home'];
+  for (let s = 0; s < sides.length; s++) {
+    const t = teams[sides[s]];
+    const pl = t && t.players && t.players[pid];
+    const pit = pl && pl.stats && pl.stats.pitching;
+    if (pit && String(pit.inningsPitched || '').trim() !== '') return pit;
+  }
+  return null;
+}
+
+/** @returns {number|null} outs pitched (prefer statsapi outs; else from IP string). */
+function mlbPitcherOutsFromBoxscore_(payload, pitcherId) {
+  const pit = mlbPitchingLineFromBoxscore_(payload, pitcherId);
+  if (!pit) return null;
+  if (pit.outs != null && String(pit.outs).trim() !== '') return parseInt(pit.outs, 10) || 0;
+  return mlbOutsFromInningsPitchedString_(pit.inningsPitched);
+}
+
+function mlbPitcherWalksFromBoxscore_(payload, pitcherId) {
+  const pit = mlbPitchingLineFromBoxscore_(payload, pitcherId);
+  if (!pit) return null;
+  if (pit.baseOnBalls != null) return parseInt(pit.baseOnBalls, 10) || 0;
+  return null;
+}
+
+function mlbPitcherHitsAllowedFromBoxscore_(payload, pitcherId) {
+  const pit = mlbPitchingLineFromBoxscore_(payload, pitcherId);
+  if (!pit) return null;
+  if (pit.hits != null) return parseInt(pit.hits, 10) || 0;
+  return null;
+}
+
+/** @returns {number|null} HR from batting line */
+function mlbBatterHrFromBoxscore_(payload, batterId) {
+  const teams = mlbBoxscoreTeams_(payload);
+  if (!teams) return null;
+  const pid = 'ID' + parseInt(batterId, 10);
+  const sides = ['away', 'home'];
+  for (let s = 0; s < sides.length; s++) {
+    const t = teams[sides[s]];
+    const pl = t && t.players && t.players[pid];
+    const bat = pl && pl.stats && pl.stats.batting;
+    if (!bat) continue;
+    if (bat.homeRuns != null) return parseInt(bat.homeRuns, 10) || 0;
+  }
+  return null;
+}
+
 function mlbResolveGamePkFromSchedule_(slateYmd, matchupStr, playerName) {
   const payload = mlbFetchScheduleJsonForDate_(slateYmd);
   if (!payload) return null;
@@ -220,15 +283,22 @@ function gradeMLBPendingResults_() {
     }
 
     const isK = market.indexOf('strikeout') !== -1;
+    const isPitcherOuts = market.indexOf('pitcher outs') !== -1;
+    const isPitcherWalks = market.indexOf('pitcher walks') !== -1;
+    const isPitcherHa = market.indexOf('pitcher hits allowed') !== -1;
     const isTb = market.indexOf('total base') !== -1;
-    const isHits = market.indexOf('batter hits') !== -1;
-    if (!isK && !isTb && !isHits) continue;
+    const isBatterHits = market.indexOf('batter hits') !== -1;
+    const isHr = market.indexOf('home run') !== -1;
+    if (!isK && !isPitcherOuts && !isPitcherWalks && !isPitcherHa && !isTb && !isBatterHits && !isHr) {
+      continue;
+    }
 
-    if (isK) {
+    const isPitcherSide = isK || isPitcherOuts || isPitcherWalks || isPitcherHa;
+    if (isPitcherSide) {
       if ((!pid || isNaN(pid)) && slateStr && matchup && player) {
         pid = mlbResolvePitcherIdFromSchedule_(slateStr, matchup, player);
       }
-    } else if (isTb || isHits) {
+    } else {
       if ((!pid || isNaN(pid)) && player) {
         pid = mlbStatsApiResolvePlayerIdFromName_(player);
       }
@@ -270,6 +340,63 @@ function gradeMLBPendingResults_() {
       continue;
     }
 
+    if (isPitcherOuts) {
+      const act = mlbPitcherOutsFromBoxscore_(box, pid);
+      if (act === null) {
+        logSh.getRange(4 + i, 16).setValue('');
+        logSh.getRange(4 + i, 17).setValue('VOID');
+        logSh.getRange(4 + i, 18).setValue('No pitching outs line');
+        graded++;
+        continue;
+      }
+      const g = mlbGradePitcherKRow_(line, side, act);
+      logSh.getRange(4 + i, 14).setValue(gamePk);
+      logSh.getRange(4 + i, 15).setValue(pid);
+      logSh.getRange(4 + i, 16).setValue(act);
+      logSh.getRange(4 + i, 17).setValue(g.result);
+      logSh.getRange(4 + i, 18).setValue('statsapi outs · ' + g.note);
+      graded++;
+      continue;
+    }
+
+    if (isPitcherWalks) {
+      const act = mlbPitcherWalksFromBoxscore_(box, pid);
+      if (act === null) {
+        logSh.getRange(4 + i, 16).setValue('');
+        logSh.getRange(4 + i, 17).setValue('VOID');
+        logSh.getRange(4 + i, 18).setValue('No pitching walks line');
+        graded++;
+        continue;
+      }
+      const g = mlbGradePitcherKRow_(line, side, act);
+      logSh.getRange(4 + i, 14).setValue(gamePk);
+      logSh.getRange(4 + i, 15).setValue(pid);
+      logSh.getRange(4 + i, 16).setValue(act);
+      logSh.getRange(4 + i, 17).setValue(g.result);
+      logSh.getRange(4 + i, 18).setValue('statsapi BB · ' + g.note);
+      graded++;
+      continue;
+    }
+
+    if (isPitcherHa) {
+      const act = mlbPitcherHitsAllowedFromBoxscore_(box, pid);
+      if (act === null) {
+        logSh.getRange(4 + i, 16).setValue('');
+        logSh.getRange(4 + i, 17).setValue('VOID');
+        logSh.getRange(4 + i, 18).setValue('No pitching hits line');
+        graded++;
+        continue;
+      }
+      const g = mlbGradePitcherKRow_(line, side, act);
+      logSh.getRange(4 + i, 14).setValue(gamePk);
+      logSh.getRange(4 + i, 15).setValue(pid);
+      logSh.getRange(4 + i, 16).setValue(act);
+      logSh.getRange(4 + i, 17).setValue(g.result);
+      logSh.getRange(4 + i, 18).setValue('statsapi pitcher H · ' + g.note);
+      graded++;
+      continue;
+    }
+
     if (isTb) {
       const tbActual = mlbBatterTbFromBoxscore_(box, pid);
       if (tbActual === null) {
@@ -286,6 +413,25 @@ function gradeMLBPendingResults_() {
       logSh.getRange(4 + i, 16).setValue(tbActual);
       logSh.getRange(4 + i, 17).setValue(gt.result);
       logSh.getRange(4 + i, 18).setValue('statsapi boxscore TB · ' + gt.note);
+      graded++;
+      continue;
+    }
+
+    if (isHr) {
+      const hrAct = mlbBatterHrFromBoxscore_(box, pid);
+      if (hrAct === null) {
+        logSh.getRange(4 + i, 16).setValue('');
+        logSh.getRange(4 + i, 17).setValue('VOID');
+        logSh.getRange(4 + i, 18).setValue('No batting HR line');
+        graded++;
+        continue;
+      }
+      const gh = mlbGradePitcherKRow_(line, side, hrAct);
+      logSh.getRange(4 + i, 14).setValue(gamePk);
+      logSh.getRange(4 + i, 15).setValue(pid);
+      logSh.getRange(4 + i, 16).setValue(hrAct);
+      logSh.getRange(4 + i, 17).setValue(gh.result);
+      logSh.getRange(4 + i, 18).setValue('statsapi HR · ' + gh.note);
       graded++;
       continue;
     }

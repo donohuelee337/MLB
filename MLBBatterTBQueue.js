@@ -12,6 +12,9 @@ const MLB_BATTER_TB_MARKET = 'batter_total_bases';
 const MLB_BATTER_HITS_QUEUE_TAB = '📋 Batter_Hits_Queue';
 const MLB_BATTER_HITS_MARKET = 'batter_hits';
 
+const MLB_BATTER_HR_QUEUE_TAB = '📋 Batter_HR_Queue';
+const MLB_BATTER_HR_MARKET = 'batter_home_runs';
+
 var __mlbHitGameLogSplitCache = {};
 var __mlbPlayerSearchIdCache = {};
 
@@ -118,6 +121,31 @@ function mlbHittingTbSummary_(playerId, season) {
   return {
     tbpgSzn: tbpgSzn,
     l7tb: l7n ? l7tb : '',
+    l7n: l7n || '',
+    games: n,
+    l7Avg: l7Avg,
+  };
+}
+
+function mlbHittingHrSummary_(playerId, season) {
+  const splits = mlbStatsApiGetHittingGameSplits_(playerId, season);
+  let totHr = 0;
+  const n = splits.length;
+  let l7hr = 0;
+  const l7n = Math.min(7, splits.length);
+  for (let i = 0; i < splits.length; i++) {
+    const st = splits[i].stat || {};
+    const hr = parseInt(st.homeRuns, 10) || 0;
+    totHr += hr;
+    if (i < 7) {
+      l7hr += hr;
+    }
+  }
+  const hrpgSzn = n > 0 ? Math.round((totHr / n) * 1000) / 1000 : '';
+  const l7Avg = l7n > 0 ? Math.round((l7hr / l7n) * 1000) / 1000 : '';
+  return {
+    hrpgSzn: hrpgSzn,
+    l7hr: l7n ? l7hr : '',
     l7n: l7n || '',
     games: n,
     l7Avg: l7Avg,
@@ -461,4 +489,158 @@ function refreshBatterHitsSlateQueue() {
   }
 
   ss.toast(out.length + ' batter hits rows', 'Batter Hits queue', 6);
+}
+
+function mlbCollectBatterHrOddsRows_(ss) {
+  const byKey = {};
+  const sh = ss.getSheetByName(MLB_ODDS_CONFIG.tabName);
+  if (!sh || sh.getLastRow() < 4) return byKey;
+  const last = sh.getLastRow();
+  const block = sh.getRange(4, 1, last, 6).getValues();
+  for (let i = 0; i < block.length; i++) {
+    const player = block[i][0];
+    const gameLabel = block[i][1];
+    const market = String(block[i][2] || '');
+    const side = String(block[i][3] || '');
+    const lineRaw = block[i][4];
+    const price = block[i][5];
+    if (market !== MLB_BATTER_HR_MARKET) continue;
+    const g = mlbNormalizeGameLabel_(gameLabel);
+    const p = mlbNormalizePersonName_(player);
+    if (!g || !p) continue;
+    const pt = parseFloat(lineRaw);
+    if (isNaN(pt)) continue;
+    const key = g + '||' + p;
+    if (!byKey[key]) {
+      byKey[key] = {
+        gameLabel: gameLabel,
+        displayName: String(player || '').trim(),
+        pointMap: {},
+      };
+    }
+    if (!byKey[key].pointMap[pt]) byKey[key].pointMap[pt] = {};
+    const sl = side.toLowerCase();
+    if (sl.indexOf('over') !== -1) byKey[key].pointMap[pt].Over = price;
+    if (sl.indexOf('under') !== -1) byKey[key].pointMap[pt].Under = price;
+  }
+  return byKey;
+}
+
+function refreshBatterHrSlateQueue() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const cfg = getConfig();
+  const season = mlbSlateSeasonYear_(cfg);
+  const gamePkMap = mlbBuildOddsGameNormToGamePk_(ss);
+  const inj = mlbLoadInjuryLookup_(ss);
+  const agg = mlbCollectBatterHrOddsRows_(ss);
+
+  const out = [];
+  const keys = Object.keys(agg);
+  keys.forEach(function (key) {
+    const entry = agg[key];
+    const gNorm = mlbNormalizeGameLabel_(entry.gameLabel);
+    let gamePk = mlbResolveGamePkFromFdGameLabel_(ss, entry.gameLabel, gamePkMap);
+    let matchup = '';
+    let hpUmp = '';
+    let note = '';
+    if (!gamePk) {
+      note = 'schedule_game_miss';
+    } else {
+      const meta = mlbScheduleMetaForGamePk_(ss, gamePk);
+      matchup = meta.matchup;
+      hpUmp = meta.hpUmp;
+    }
+
+    const pm = entry.pointMap;
+    const mainPt = mlbPickMainKPoint_(pm);
+    const px = mlbMainKPrices_(pm, mainPt);
+
+    let pidNum = mlbStatsApiResolvePlayerIdFromName_(entry.displayName);
+    if (isNaN(pidNum) || !pidNum) {
+      note = note ? note + '; id_miss' : 'id_miss';
+    }
+
+    let hrpgSzn = '';
+    let l7Avg = '';
+    let l7n = '';
+    if (!isNaN(pidNum) && pidNum) {
+      const hr = mlbHittingHrSummary_(pidNum, season);
+      hrpgSzn = hr.hrpgSzn;
+      l7n = hr.l7n;
+      l7Avg = hr.l7Avg;
+    }
+
+    const injSt = inj[mlbNormalizePersonName_(entry.displayName)] || '';
+
+    out.push([
+      gamePk || '',
+      matchup,
+      entry.displayName,
+      !isNaN(pidNum) && pidNum ? pidNum : '',
+      mainPt != null ? mainPt : '',
+      px.over,
+      px.under,
+      l7Avg,
+      l7n,
+      hrpgSzn,
+      note,
+      injSt,
+      hpUmp,
+      gNorm,
+    ]);
+  });
+
+  let sh = ss.getSheetByName(MLB_BATTER_HR_QUEUE_TAB);
+  if (sh) {
+    sh.clearContents();
+    sh.clearFormats();
+  } else {
+    sh = ss.insertSheet(MLB_BATTER_HR_QUEUE_TAB);
+  }
+  sh.setTabColor('#6a1b9a');
+  [72, 200, 150, 88, 56, 64, 64, 64, 44, 52, 220, 88, 140, 160].forEach(function (w, i) {
+    sh.setColumnWidth(i + 1, w);
+  });
+
+  sh.getRange(1, 1, 1, 14)
+    .merge()
+    .setValue(
+      '📋 Batter HR queue — FD batter_home_runs + hitting gameLog (L7 / season HR·game) · ' + season
+    )
+    .setFontWeight('bold')
+    .setBackground('#4a148c')
+    .setFontColor('#ffffff')
+    .setHorizontalAlignment('center');
+
+  const headers = [
+    'gamePk',
+    'matchup',
+    'batter',
+    'batter_id',
+    'fd_hr_line',
+    'fd_over',
+    'fd_under',
+    'L7_HR_avg',
+    'L7_games',
+    'HR_pg_szn',
+    'notes',
+    'injury_status',
+    'hp_umpire',
+    'odds_game_norm',
+  ];
+  sh.getRange(3, 1, 1, headers.length)
+    .setValues([headers])
+    .setFontWeight('bold')
+    .setBackground('#7b1fa2')
+    .setFontColor('#ffffff');
+  sh.setFrozenRows(3);
+
+  if (out.length) {
+    sh.getRange(4, 1, out.length, headers.length).setValues(out);
+    try {
+      ss.setNamedRange('MLB_BATTER_HR_QUEUE', sh.getRange(4, 1, out.length, headers.length));
+    } catch (e) {}
+  }
+
+  ss.toast(out.length + ' batter HR rows', 'Batter HR queue', 6);
 }

@@ -1,14 +1,29 @@
 // ============================================================
-// 🃏 MLB Bet Card — pitcher K + batter TB + batter hits (ranked by EV)
+// 🃏 MLB Bet Card — multi-market straights (AI-BOIZ / NBA rules)
 // ============================================================
-// Pulls 🎰 Pitcher_K_Card + 🎲 Batter_TB_Card + 🎯 Batter_Hits_Card;
-// merges, sorts by EV, caps per game + total plays.
+// Merges all model cards, sorts by EV, per-game + total caps.
+// Singles filter (NBA-style): main lines only in queue builders; optional
+// American band CARD_SINGLES_MIN_AMERICAN..MAX (default -150..+150).
 // ============================================================
 
 const MLB_BET_CARD_TAB = '🃏 MLB_Bet_Card';
-const MLB_BET_CARD_MAX_PLAYS = 30;
-/** Same spirit as AI-BOIZ: cap how many straights surface per game on the card. */
+const MLB_BET_CARD_MAX_PLAYS = 48;
 const MLB_BET_CARD_MAX_PER_GAME = 2;
+
+/** AI-BOIZ bet card spirit: straights American in [min, max] (e.g. -150 .. +150). */
+function mlbCardSinglesOddsBandOk_(american, cfg) {
+  const c = cfg || {};
+  const off = String(c['CARD_USE_NBA_ODDS_BAND'] != null ? c['CARD_USE_NBA_ODDS_BAND'] : 'true')
+    .trim()
+    .toLowerCase();
+  if (off === 'false' || off === '0' || off === 'no') return true;
+  const lo = parseFloat(String(c['CARD_SINGLES_MIN_AMERICAN'] != null ? c['CARD_SINGLES_MIN_AMERICAN'] : '-150'), 10);
+  const hi = parseFloat(String(c['CARD_SINGLES_MAX_AMERICAN'] != null ? c['CARD_SINGLES_MAX_AMERICAN'] : '150'), 10);
+  const o = parseFloat(String(american), 10);
+  if (isNaN(o)) return false;
+  if (o >= 0) return !isNaN(hi) && o <= hi;
+  return !isNaN(lo) && o >= lo;
+}
 
 function refreshMLBBetCard() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -18,22 +33,86 @@ function refreshMLBBetCard() {
   const slateDate = getSlateDateString_(cfg);
 
   const srcK = ss.getSheetByName(MLB_PITCHER_K_CARD_TAB);
+  const srcPo = ss.getSheetByName(MLB_PITCHER_OUTS_CARD_TAB);
+  const srcPbb = ss.getSheetByName(MLB_PITCHER_BB_CARD_TAB);
+  const srcPha = ss.getSheetByName(MLB_PITCHER_HA_CARD_TAB);
   const srcTb = ss.getSheetByName(MLB_BATTER_TB_CARD_TAB);
   const srcHits = ss.getSheetByName(MLB_BATTER_HITS_CARD_TAB);
+  const srcHr = ss.getSheetByName(MLB_BATTER_HR_CARD_TAB);
 
-  if (
-    (!srcK || srcK.getLastRow() < 4) &&
-    (!srcTb || srcTb.getLastRow() < 4) &&
-    (!srcHits || srcHits.getLastRow() < 4)
-  ) {
+  const anyCard =
+    (srcK && srcK.getLastRow() >= 4) ||
+    (srcPo && srcPo.getLastRow() >= 4) ||
+    (srcPbb && srcPbb.getLastRow() >= 4) ||
+    (srcPha && srcPha.getLastRow() >= 4) ||
+    (srcTb && srcTb.getLastRow() >= 4) ||
+    (srcHits && srcHits.getLastRow() >= 4) ||
+    (srcHr && srcHr.getLastRow() >= 4);
+
+  if (!anyCard) {
     safeAlert_(
       'MLB Bet Card',
-      'Run at least one model card first (🎰 Pitcher_K_Card / 🎲 Batter_TB_Card / 🎯 Batter_Hits_Card). Morning pipeline builds all.'
+      'Run the pipeline or individual model cards first (pitcher props + batter cards).'
     );
     return;
   }
 
   const plays = [];
+
+  function pushPitcherMirror_(r, marketLabel, pickMid, lambdaIx) {
+    const flags = String(r[16] || '');
+    const pid = r[17];
+    const hpUmp = String(r[18] || '').trim();
+    const throws = String(r[19] || '').trim();
+    if (flags.indexOf('injury') !== -1) return;
+    const bestSide = String(r[14] || '').trim();
+    if (bestSide !== 'Over' && bestSide !== 'Under') return;
+    const line = r[3];
+    if (line === '' || line == null) return;
+    const fdOver = r[4];
+    const fdUnder = r[5];
+    const american = bestSide === 'Over' ? fdOver : fdUnder;
+    if (american === '' || american == null || isNaN(parseFloat(String(american)))) return;
+    const pitcher = String(r[2] || '').trim();
+    if (!pitcher) return;
+    const evRaw = r[15];
+    const ev = parseFloat(String(evRaw));
+    if (isNaN(ev) || ev <= 0) return;
+    if (minEvFloor > 0 && ev < minEvFloor) return;
+    if (!mlbCardSinglesOddsBandOk_(american, cfg)) return;
+    const pWin = bestSide === 'Over' ? r[8] : r[9];
+    const hand =
+      throws.toUpperCase() === 'R' ? 'RHP' : throws.toUpperCase() === 'L' ? 'LHP' : throws ? throws : '';
+    const pickLabel =
+      pitcher +
+      (hand ? ' (' + hand + ')' : '') +
+      ' — ' +
+      pickMid +
+      ' ' +
+      bestSide +
+      ' ' +
+      String(line) +
+      (hpUmp ? ' · HP ' + hpUmp : '');
+    plays.push({
+      gamePk: r[0],
+      matchup: r[1],
+      pickLabel: pickLabel,
+      player: pitcher,
+      playerId: pid,
+      side: bestSide,
+      line: line,
+      american: american,
+      book: 'fanduel',
+      pWin: pWin,
+      ev: ev,
+      lambda: r[lambdaIx],
+      edge: r[7],
+      flags: flags,
+      market: marketLabel,
+      disclaimer:
+        'Poisson λ vs FD main line; ⚙️ MIN_EV_BET_CARD & CARD_USE_NBA_ODDS_BAND; not alt markets in builders.',
+    });
+  }
 
   if (srcK && srcK.getLastRow() >= 4) {
     const lastK = srcK.getLastRow();
@@ -44,29 +123,21 @@ function refreshMLBBetCard() {
       const hpUmp = String(r[20] || '').trim();
       const throws = String(r[21] || '').trim();
       if (flags.indexOf('injury') !== -1) return;
-
       const bestSide = String(r[16] || '').trim();
       if (bestSide !== 'Over' && bestSide !== 'Under') return;
-
       const line = r[4];
       if (line === '' || line == null) return;
-
       const fdOver = r[5];
       const fdUnder = r[6];
       const american = bestSide === 'Over' ? fdOver : fdUnder;
       if (american === '' || american == null || isNaN(parseFloat(String(american)))) return;
-
       const pitcher = String(r[3] || '').trim();
       if (!pitcher) return;
-
-      const evRaw = r[17];
-      const ev = parseFloat(String(evRaw));
+      const ev = parseFloat(String(r[17]));
       if (isNaN(ev) || ev <= 0) return;
       if (minEvFloor > 0 && ev < minEvFloor) return;
-
+      if (!mlbCardSinglesOddsBandOk_(american, cfg)) return;
       const pWin = bestSide === 'Over' ? r[10] : r[11];
-      const matchup = r[1];
-      const gamePk = r[0];
       const hand =
         throws.toUpperCase() === 'R' ? 'RHP' : throws.toUpperCase() === 'L' ? 'LHP' : throws ? throws : '';
       const pickLabel =
@@ -77,11 +148,9 @@ function refreshMLBBetCard() {
         ' ' +
         String(line) +
         (hpUmp ? ' · HP ' + hpUmp : '');
-
       plays.push({
-        kind: 'K',
-        gamePk: gamePk,
-        matchup: matchup,
+        gamePk: r[0],
+        matchup: r[1],
         pickLabel: pickLabel,
         player: pitcher,
         playerId: pitcherId,
@@ -90,129 +159,103 @@ function refreshMLBBetCard() {
         american: american,
         book: 'fanduel',
         pWin: pWin,
-        ev: isNaN(ev) ? '' : ev,
+        ev: ev,
         lambda: r[8],
         edge: r[9],
         flags: flags,
         market: 'Pitcher strikeouts',
-        disclaimer:
-          'Model: Poisson λ K/9×IP; EV vs list; MIN_EV from ⚙️; merged with 🎲 TB / 🎯 Hits when built.',
+        disclaimer: 'Poisson λ K/9×IP; ⚙️ MIN_EV & NBA-style odds band on card.',
       });
+    });
+  }
+
+  if (srcPo && srcPo.getLastRow() >= 4) {
+    const last = srcPo.getLastRow();
+    srcPo.getRange(4, 1, last, 21)
+      .getValues()
+      .forEach(function (r) {
+        pushPitcherMirror_(r, 'Pitcher outs', 'Outs', 6);
+      });
+  }
+  if (srcPbb && srcPbb.getLastRow() >= 4) {
+    const last = srcPbb.getLastRow();
+    srcPbb.getRange(4, 1, last, 21)
+      .getValues()
+      .forEach(function (r) {
+        pushPitcherMirror_(r, 'Pitcher walks', 'BB', 6);
+      });
+  }
+  if (srcPha && srcPha.getLastRow() >= 4) {
+    const last = srcPha.getLastRow();
+    srcPha.getRange(4, 1, last, 21)
+      .getValues()
+      .forEach(function (r) {
+        pushPitcherMirror_(r, 'Pitcher hits allowed', 'HA', 6);
+      });
+  }
+
+  function pushBatterMirror_(r, marketLabel, mid) {
+    const flags = String(r[16] || '');
+    const batterId = r[17];
+    const hpUmp = String(r[18] || '').trim();
+    if (flags.indexOf('injury') !== -1) return;
+    const bestSide = String(r[14] || '').trim();
+    if (bestSide !== 'Over' && bestSide !== 'Under') return;
+    const line = r[3];
+    if (line === '' || line == null) return;
+    const fdOver = r[4];
+    const fdUnder = r[5];
+    const american = bestSide === 'Over' ? fdOver : fdUnder;
+    if (american === '' || american == null || isNaN(parseFloat(String(american)))) return;
+    const batter = String(r[2] || '').trim();
+    if (!batter) return;
+    const ev = parseFloat(String(r[15]));
+    if (isNaN(ev) || ev <= 0) return;
+    if (minEvFloor > 0 && ev < minEvFloor) return;
+    if (!mlbCardSinglesOddsBandOk_(american, cfg)) return;
+    const pWin = bestSide === 'Over' ? r[8] : r[9];
+    const pickLabel =
+      batter + ' — ' + mid + ' ' + bestSide + ' ' + String(line) + (hpUmp ? ' · HP ' + hpUmp : '');
+    plays.push({
+      gamePk: r[0],
+      matchup: r[1],
+      pickLabel: pickLabel,
+      player: batter,
+      playerId: batterId,
+      side: bestSide,
+      line: line,
+      american: american,
+      book: 'fanduel',
+      pWin: pWin,
+      ev: ev,
+      lambda: r[6],
+      edge: r[7],
+      flags: flags,
+      market: marketLabel,
+      disclaimer: 'Batter Poisson λ; ⚙️ TB_BLEND & odds band.',
     });
   }
 
   if (srcTb && srcTb.getLastRow() >= 4) {
-    const lastT = srcTb.getLastRow();
-    const vals = srcTb.getRange(4, 1, lastT, 19).getValues();
-    vals.forEach(function (r) {
-      const flags = String(r[16] || '');
-      const batterId = r[17];
-      const hpUmp = String(r[18] || '').trim();
-      if (flags.indexOf('injury') !== -1) return;
-
-      const bestSide = String(r[14] || '').trim();
-      if (bestSide !== 'Over' && bestSide !== 'Under') return;
-
-      const line = r[3];
-      if (line === '' || line == null) return;
-
-      const fdOver = r[4];
-      const fdUnder = r[5];
-      const american = bestSide === 'Over' ? fdOver : fdUnder;
-      if (american === '' || american == null || isNaN(parseFloat(String(american)))) return;
-
-      const batter = String(r[2] || '').trim();
-      if (!batter) return;
-
-      const evRaw = r[15];
-      const ev = parseFloat(String(evRaw));
-      if (isNaN(ev) || ev <= 0) return;
-      if (minEvFloor > 0 && ev < minEvFloor) return;
-
-      const pWin = bestSide === 'Over' ? r[8] : r[9];
-      const matchup = r[1];
-      const gamePk = r[0];
-      const pickLabel =
-        batter + ' — TB ' + bestSide + ' ' + String(line) + (hpUmp ? ' · HP ' + hpUmp : '');
-
-      plays.push({
-        kind: 'TB',
-        gamePk: gamePk,
-        matchup: matchup,
-        pickLabel: pickLabel,
-        player: batter,
-        playerId: batterId,
-        side: bestSide,
-        line: line,
-        american: american,
-        book: 'fanduel',
-        pWin: pWin,
-        ev: isNaN(ev) ? '' : ev,
-        lambda: r[6],
-        edge: r[7],
-        flags: flags,
-        market: 'Batter total bases',
-        disclaimer:
-          'Model: Poisson λ TB/game blend × park; EV vs list; ⚙️ TB_BLEND_RECENT_WEIGHT · MIN_EV_BET_CARD.',
+    srcTb.getRange(4, 1, srcTb.getLastRow(), 19)
+      .getValues()
+      .forEach(function (r) {
+        pushBatterMirror_(r, 'Batter total bases', 'TB');
       });
-    });
   }
-
   if (srcHits && srcHits.getLastRow() >= 4) {
-    const lastH = srcHits.getLastRow();
-    const valsH = srcHits.getRange(4, 1, lastH, 19).getValues();
-    valsH.forEach(function (r) {
-      const flags = String(r[16] || '');
-      const batterId = r[17];
-      const hpUmp = String(r[18] || '').trim();
-      if (flags.indexOf('injury') !== -1) return;
-
-      const bestSide = String(r[14] || '').trim();
-      if (bestSide !== 'Over' && bestSide !== 'Under') return;
-
-      const line = r[3];
-      if (line === '' || line == null) return;
-
-      const fdOver = r[4];
-      const fdUnder = r[5];
-      const american = bestSide === 'Over' ? fdOver : fdUnder;
-      if (american === '' || american == null || isNaN(parseFloat(String(american)))) return;
-
-      const batter = String(r[2] || '').trim();
-      if (!batter) return;
-
-      const evRaw = r[15];
-      const ev = parseFloat(String(evRaw));
-      if (isNaN(ev) || ev <= 0) return;
-      if (minEvFloor > 0 && ev < minEvFloor) return;
-
-      const pWin = bestSide === 'Over' ? r[8] : r[9];
-      const matchup = r[1];
-      const gamePk = r[0];
-      const pickLabel =
-        batter + ' — H ' + bestSide + ' ' + String(line) + (hpUmp ? ' · HP ' + hpUmp : '');
-
-      plays.push({
-        kind: 'H',
-        gamePk: gamePk,
-        matchup: matchup,
-        pickLabel: pickLabel,
-        player: batter,
-        playerId: batterId,
-        side: bestSide,
-        line: line,
-        american: american,
-        book: 'fanduel',
-        pWin: pWin,
-        ev: isNaN(ev) ? '' : ev,
-        lambda: r[6],
-        edge: r[7],
-        flags: flags,
-        market: 'Batter hits',
-        disclaimer:
-          'Model: Poisson λ H/game blend × park (⚙️ TB_BLEND_RECENT_WEIGHT); EV vs list; MIN_EV_BET_CARD.',
+    srcHits.getRange(4, 1, srcHits.getLastRow(), 19)
+      .getValues()
+      .forEach(function (r) {
+        pushBatterMirror_(r, 'Batter hits', 'H');
       });
-    });
+  }
+  if (srcHr && srcHr.getLastRow() >= 4) {
+    srcHr.getRange(4, 1, srcHr.getLastRow(), 19)
+      .getValues()
+      .forEach(function (r) {
+        pushBatterMirror_(r, 'Batter home runs', 'HR');
+      });
   }
 
   plays.sort(function (a, b) {
@@ -259,20 +302,20 @@ function refreshMLBBetCard() {
   });
 
   if (rows.length === 0) {
-    const evHint =
-      minEvFloor > 0
-        ? 'EV≥' + minEvFloor + ' per $1 (⚙️ MIN_EV_BET_CARD), '
-        : 'positive EV, ';
+    const band =
+      String(cfg['CARD_USE_NBA_ODDS_BAND'] || 'true').toLowerCase() === 'false'
+        ? ''
+        : 'American in ⚙️ CARD_SINGLES_* band, ';
     rows.push([
       slateDate,
       '',
       '',
       '',
-      'No qualifying plays — build 🎰 Pitcher_K_Card / 🎲 Batter_TB_Card / 🎯 Batter_Hits_Card with ' +
-        evHint +
-        'both FD prices where needed, no injury flag (max ' +
+      'No qualifying plays — positive EV, ' +
+        band +
+        'MIN_EV optional, injury-clean, max ' +
         MLB_BET_CARD_MAX_PER_GAME +
-        ' plays per game).',
+        ' straights/game.',
       '',
       '',
       '',
@@ -298,21 +341,23 @@ function refreshMLBBetCard() {
   }
   sh.setTabColor('#00695c');
 
-  [88, 40, 72, 200, 280, 140, 140, 56, 56, 72, 72, 72, 56, 56, 56, 140, 72, 340].forEach(function (w, i) {
+  [88, 40, 72, 200, 280, 160, 56, 56, 72, 72, 72, 56, 56, 56, 140, 72, 340].forEach(function (w, i) {
     sh.setColumnWidth(i + 1, w);
   });
 
   sh.getRange(1, 1, 1, 18)
     .merge()
     .setValue(
-      '🃏 MLB BET CARD — FanDuel pitcher K + batter TB + batter H — ranked by EV ($1 risk). Injury-flagged omitted. Not betting advice.'
+      '🃏 MLB BET CARD — multi-market straights · EV rank · NBA-style odds band (⚙️) · max ' +
+        MLB_BET_CARD_MAX_PER_GAME +
+        '/game · not betting advice.'
     )
     .setFontWeight('bold')
     .setBackground('#004d40')
     .setFontColor('#ffffff')
     .setHorizontalAlignment('center')
     .setWrap(true);
-  sh.setRowHeight(1, 40);
+  sh.setRowHeight(1, 44);
 
   const headers = [
     'slate_date',
@@ -334,7 +379,7 @@ function refreshMLBBetCard() {
     'player_id',
     'disclaimer',
   ];
-  sh.getRange(3, 1, 1, headers.length)
+  sh.getRange(3, 1, 3, headers.length)
     .setValues([headers])
     .setFontWeight('bold')
     .setBackground('#00897b')

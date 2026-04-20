@@ -79,6 +79,13 @@ function buildConfigTab() {
     '0..1 blend of last-7 games TB/game vs season TB/game for 🎲 Batter_TB_Card λ (same spirit as K9_BLEND). Tune after slates.'
   );
   row_('MIN_EV_BET_CARD', '0', 'Min EV per $1 on 🃏 card; 0 = any positive EV (any edge). Optional floor: try ~0.02–0.05 vs 0 to drop thin lines; iterate after several slates using Pipeline_Log and 🃏 outcomes. If this key is missing, re-run menu "0. Build Config tab".');
+  row_(
+    'CARD_USE_NBA_ODDS_BAND',
+    'true',
+    'true | false — when true, 🃏 straights only keep American odds in CARD_SINGLES_MIN..MAX (NBA-style band, default ~−150..+150).'
+  );
+  row_('CARD_SINGLES_MIN_AMERICAN', '-150', 'With CARD_USE_NBA_ODDS_BAND: min American for favorites (e.g. −150 means exclude −160).');
+  row_('CARD_SINGLES_MAX_AMERICAN', '150', 'With CARD_USE_NBA_ODDS_BAND: max American for underdogs on the card.');
   row_('HP_UMP_LAMBDA_MULT', '1', 'Multiply 🎰 λ when hp_umpire listed (1=no change; try 1.02–1.05 cautiously)');
   row_('LHP_K_LAMBDA_MULT', '1', 'Extra λ mult when pitcher throws L (1=no change)');
   row_('RHP_K_LAMBDA_MULT', '1', 'Extra λ mult when pitcher throws R (1=no change)');
@@ -156,6 +163,11 @@ function validateMlbPipelineConfig_(cfg) {
   warnRange('HP_UMP_LAMBDA_MULT', c['HP_UMP_LAMBDA_MULT'], 0.85, 1.15);
   warnRange('LHP_K_LAMBDA_MULT', c['LHP_K_LAMBDA_MULT'], 0.92, 1.12);
   warnRange('RHP_K_LAMBDA_MULT', c['RHP_K_LAMBDA_MULT'], 0.92, 1.12);
+  const amin = parseFloat(String(c['CARD_SINGLES_MIN_AMERICAN'] != null ? c['CARD_SINGLES_MIN_AMERICAN'] : '').trim(), 10);
+  const amax = parseFloat(String(c['CARD_SINGLES_MAX_AMERICAN'] != null ? c['CARD_SINGLES_MAX_AMERICAN'] : '').trim(), 10);
+  if (!isNaN(amin) && !isNaN(amax) && amin > amax) {
+    addPipelineWarning_('⚙️ CARD_SINGLES_MIN_AMERICAN > CARD_SINGLES_MAX_AMERICAN (band inverted)');
+  }
 }
 
 function setConfigValue_(key, value) {

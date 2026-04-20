@@ -358,7 +358,7 @@ function refreshPitcherKBetCard() {
     'opp_k_pa',
     'opp_k_pa_vs',
   ];
-  sh.getRange(3, 1, 1, headers.length)
+  sh.getRange(3, 1, 3, headers.length)
     .setValues([headers])
     .setFontWeight('bold')
     .setBackground('#e53935')
