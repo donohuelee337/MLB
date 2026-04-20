@@ -67,6 +67,23 @@ function mlbPitcherKsFromBoxscore_(payload, pitcherId) {
   return null;
 }
 
+/** @returns {number|null} walks (BB) allowed in this game for MLB person id */
+function mlbPitcherWalksFromBoxscore_(payload, pitcherId) {
+  const teams = mlbBoxscoreTeams_(payload);
+  if (!teams) return null;
+  const pid = 'ID' + parseInt(pitcherId, 10);
+  const sides = ['away', 'home'];
+  for (let s = 0; s < sides.length; s++) {
+    const t = teams[sides[s]];
+    const pl = t && t.players && t.players[pid];
+    const pit = pl && pl.stats && pl.stats.pitching;
+    if (pit && pit.baseOnBalls != null && String(pit.inningsPitched || '').trim() !== '') {
+      return parseInt(pit.baseOnBalls, 10) || 0;
+    }
+  }
+  return null;
+}
+
 function mlbResolveGamePkFromSchedule_(slateYmd, matchupStr, playerName) {
   const payload = mlbFetchScheduleJsonForDate_(slateYmd);
   if (!payload) return null;
@@ -174,7 +191,9 @@ function gradeMLBPendingResults_() {
     if (!slateStr || slateStr >= today) {
       continue;
     }
-    if (market.indexOf('strikeout') === -1) continue;
+    const isK = market.indexOf('strikeout') !== -1;
+    const isBb = market.indexOf('walk') !== -1;
+    if (!isK && !isBb) continue;
     if (resCell && resCell !== 'PENDING') continue;
 
     let gamePk = parseInt(row[13], 10);
@@ -206,8 +225,10 @@ function gradeMLBPendingResults_() {
       continue;
     }
 
-    const kActual = mlbPitcherKsFromBoxscore_(box, pid);
-    if (kActual === null) {
+    const actualStat = isK
+      ? mlbPitcherKsFromBoxscore_(box, pid)
+      : mlbPitcherWalksFromBoxscore_(box, pid);
+    if (actualStat === null) {
       logSh.getRange(4 + i, 16).setValue('');
       logSh.getRange(4 + i, 17).setValue('VOID');
       logSh.getRange(4 + i, 18).setValue('No pitching line (DNP / bullpen-only?)');
@@ -215,10 +236,10 @@ function gradeMLBPendingResults_() {
       continue;
     }
 
-    const g = mlbGradePitcherKRow_(line, side, kActual);
+    const g = mlbGradePitcherKRow_(line, side, actualStat);
     logSh.getRange(4 + i, 14).setValue(gamePk);
     logSh.getRange(4 + i, 15).setValue(pid);
-    logSh.getRange(4 + i, 16).setValue(kActual);
+    logSh.getRange(4 + i, 16).setValue(actualStat);
     logSh.getRange(4 + i, 17).setValue(g.result);
     logSh.getRange(4 + i, 18).setValue('statsapi boxscore · ' + g.note);
     graded++;

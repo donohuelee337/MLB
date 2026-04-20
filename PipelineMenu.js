@@ -1,8 +1,8 @@
 // ============================================================
-// 🕐 MLB-BOIZ pipeline (MVP)
+// 🕐 MLB-BOIZ pipeline (MVP + pitcher walks)
 // ============================================================
 // Mirrors AI-BOIZ windows: morning = full refresh; midday = odds +
-// downstream without re-pulling injuries; final = full refresh + lock snapshot.
+// downstream without re-pulling injuries; final = full refresh + snapshot.
 // ============================================================
 
 function onOpen() {
@@ -20,10 +20,12 @@ function onOpen() {
     .addItem('🎯 Slate board only (join schedule + FD counts)', 'refreshMLBSlateBoard')
     .addItem('📒 Pitcher game logs only (statsapi, warms cache)', 'refreshMLBPitcherGameLogs')
     .addItem('📋 Pitcher K queue only (schedule + FD K + game logs)', 'refreshPitcherKSlateQueue')
+    .addItem('📋 Pitcher BB queue only (schedule + FD walks)', 'refreshPitcherWalkSlateQueue')
     .addItem('🎰 Pitcher K card only (Poisson + EV)', 'refreshPitcherKBetCard')
+    .addItem('🎰 Pitcher BB card only (Poisson + EV)', 'refreshPitcherWalkBetCard')
     .addItem('🃏 MLB Bet Card only (final plays)', 'refreshMLBBetCard')
     .addItem('📊 Grade pending MLB results (boxscore)', 'gradeMLBPendingResults_')
-    .addItem('📈 Backfill closing K (Results Log)', 'mlbBackfillClosingMenu_')
+    .addItem('📈 Backfill closing lines (Results Log)', 'mlbBackfillClosingMenu_')
     .addItem('📋 Open Pipeline Log', 'mlbActivatePipelineLog_')
     .addToUi();
 }
@@ -57,7 +59,7 @@ function mlbBackfillClosingMenu_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const n = mlbBackfillResultsLogClosingK_(ss);
   try {
-    ss.toast('Results log: updated ' + n + ' row(s) from FanDuel K tab', 'MLB-BOIZ', 7);
+    ss.toast('Results log: updated ' + n + ' row(s) from FanDuel tab', 'MLB-BOIZ', 7);
   } catch (e) {}
 }
 
@@ -108,6 +110,8 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   step('Slate board (join)', refreshMLBSlateBoard);
   step('Pitcher K queue', refreshPitcherKSlateQueue);
   step('Pitcher K card', refreshPitcherKBetCard);
+  step('Pitcher BB queue', refreshPitcherWalkSlateQueue);
+  step('Pitcher BB card', refreshPitcherWalkBetCard);
   step('MLB Bet Card', refreshMLBBetCard);
 
   const oCfg = outcomes[0] || { ok: true };
@@ -118,7 +122,9 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   const oSlate = outcomes[5] || { ok: true };
   const oPk = outcomes[6] || { ok: true };
   const oCard = outcomes[7] || { ok: true };
-  const oBet = outcomes[8] || { ok: true };
+  const oBbQ = outcomes[8] || { ok: true };
+  const oBbC = outcomes[9] || { ok: true };
+  const oBet = outcomes[10] || { ok: true };
 
   logStep_('Config', 1, oCfg.ok ? 1 : 0, oCfg.ok ? '' : oCfg.err || 'failed');
   logStep_(
@@ -164,6 +170,18 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
     oCard.ok ? '' : oCard.err || 'failed'
   );
   logStep_(
+    'Pitcher BB queue',
+    0,
+    oBbQ.ok ? mlbTabDataRowsBelowHeader3_(ss, MLB_PITCHER_BB_QUEUE_TAB) : 0,
+    oBbQ.ok ? '' : oBbQ.err || 'failed'
+  );
+  logStep_(
+    'Pitcher BB card',
+    0,
+    oBbC.ok ? mlbTabDataRowsBelowHeader3_(ss, MLB_PITCHER_BB_CARD_TAB) : 0,
+    oBbC.ok ? '' : oBbC.err || 'failed'
+  );
+  logStep_(
     'MLB Bet Card',
     0,
     oBet.ok ? mlbTabDataRowsBelowHeader3_(ss, MLB_BET_CARD_TAB) : 0,
@@ -184,7 +202,7 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
     try {
       mlbBackfillResultsLogClosingK_(ss);
     } catch (e) {
-      addPipelineWarning_('Closing K backfill: ' + (e.message || e));
+      addPipelineWarning_('Closing line backfill: ' + (e.message || e));
     }
   }
 

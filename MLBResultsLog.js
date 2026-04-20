@@ -25,7 +25,7 @@ const MLB_RESULTS_HEADERS = [
   'Play',
   'gamePk',
   'pitcher_id',
-  'actual_K',
+  'actual_stat',
   'result',
   'grade_notes',
   'close_line',
@@ -36,11 +36,17 @@ const MLB_RESULTS_HEADERS = [
   'open_odds',
 ];
 
-function mlbBetResultKey_(slate, gamePk, pitcherId, side, line) {
+function mlbBetResultKey_(slate, gamePk, pitcherId, side, line, market) {
+  const mkt = String(market || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '_')
+    .replace(/[^a-z0-9_]/g, '');
   return [
     String(slate || '').trim(),
     String(gamePk != null ? gamePk : '').trim(),
     String(pitcherId != null ? pitcherId : '').trim(),
+    mkt || 'unknown_market',
     String(side || '')
       .trim()
       .toLowerCase()
@@ -50,7 +56,7 @@ function mlbBetResultKey_(slate, gamePk, pitcherId, side, line) {
 }
 
 /** Sheet row index (1-based) or -1; prefers latest matching row. */
-function mlbFindResultsLogSheetRowForUpsert_(logSh, slateWant, betKey, gamePk, pitcherId, side, line) {
+function mlbFindResultsLogSheetRowForUpsert_(logSh, slateWant, betKey, gamePk, pitcherId, side, line, market) {
   const last = logSh.getLastRow();
   if (last < 4) return -1;
   const nc = Math.max(MLB_RESULTS_LOG_NCOL, logSh.getLastColumn());
@@ -62,6 +68,7 @@ function mlbFindResultsLogSheetRowForUpsert_(logSh, slateWant, betKey, gamePk, p
     .toLowerCase()
     .replace(/\s+/g, '');
   const lineS = String(line != null ? line : '').trim();
+  const wantM = String(market || '').trim().toLowerCase();
   for (let i = data.length - 1; i >= 0; i--) {
     if (String(data[i][1] || '').trim() !== slateWant) continue;
     const stored = String(data[i][21] || '').trim();
@@ -74,13 +81,15 @@ function mlbFindResultsLogSheetRowForUpsert_(logSh, slateWant, betKey, gamePk, p
       .trim()
       .toLowerCase()
       .replace(/\s+/g, '');
+    const rowM = String(data[i][5] || '').trim().toLowerCase();
     if (
       g === wantG &&
       !isNaN(g) &&
       p === wantP &&
       !isNaN(p) &&
       sd === sideN &&
-      String(data[i][6] != null ? data[i][6] : '').trim() === lineS
+      String(data[i][6] != null ? data[i][6] : '').trim() === lineS &&
+      (!wantM || rowM === wantM)
     ) {
       return 4 + i;
     }
@@ -112,7 +121,15 @@ function mlbClvNoteFromOpenClose_(openLine, openOdds, closeLine, closeOdds, side
  * @returns {{ line: *, american: * }|null}
  */
 function mlbLookupClosingPitcherK_(ss, gameStr, playerStr, betSide, gamePk) {
-  const oddsIdx = mlbBuildPitcherKOddsIndex_(ss);
+  return mlbLookupClosingPitcherProp_(ss, gameStr, playerStr, betSide, gamePk, 'pitcher_strikeouts');
+}
+
+function mlbLookupClosingPitcherWalks_(ss, gameStr, playerStr, betSide, gamePk) {
+  return mlbLookupClosingPitcherProp_(ss, gameStr, playerStr, betSide, gamePk, 'pitcher_walks');
+}
+
+function mlbLookupClosingPitcherProp_(ss, gameStr, playerStr, betSide, gamePk, marketKey) {
+  const oddsIdx = mlbBuildPitcherOddsIndexForMarket_(ss, marketKey);
   const pNorm = mlbNormalizePersonName_(playerStr);
   const labels = [];
   const a = String(gameStr || '').trim();
@@ -137,7 +154,7 @@ function mlbLookupClosingPitcherK_(ss, gameStr, playerStr, betSide, gamePk) {
 }
 
 /**
- * After FINAL odds refresh: fill close_line / close_odds / clv_note for this slate’s K rows.
+ * After FINAL odds refresh: fill close_line / close_odds / clv_note for this slate’s pitcher prop rows.
  * Overwrites prior close columns when re-run (latest tab = “close” proxy).
  */
 function mlbBackfillResultsLogClosingK_(ss) {
@@ -155,7 +172,6 @@ function mlbBackfillResultsLogClosingK_(ss) {
     const slateStr = String(row[1] || '').trim();
     if (slateStr !== slateWant) continue;
     const market = String(row[5] || '').toLowerCase();
-    if (market.indexOf('strikeout') === -1) continue;
     const player = String(row[3] || '').trim();
     const game = String(row[4] || '').trim();
     const side = String(row[7] || '').trim();
@@ -165,9 +181,20 @@ function mlbBackfillResultsLogClosingK_(ss) {
     if (!player) continue;
     if (!String(game || '').trim() && !parseInt(gamePkLog, 10)) continue;
 
-    const cl = mlbLookupClosingPitcherK_(ss, game, player, side, gamePkLog);
+    let cl = null;
+    let missNote = 'no FD match at close';
+    if (market.indexOf('strikeout') !== -1) {
+      cl = mlbLookupClosingPitcherK_(ss, game, player, side, gamePkLog);
+      missNote = 'no FD K match at close';
+    } else if (market.indexOf('walk') !== -1) {
+      cl = mlbLookupClosingPitcherWalks_(ss, game, player, side, gamePkLog);
+      missNote = 'no FD BB match at close';
+    } else {
+      continue;
+    }
+
     if (!cl) {
-      logSh.getRange(4 + i, 19, 1, 3).setValues([['', '', 'no FD K match at close']]);
+      logSh.getRange(4 + i, 19, 1, 3).setValues([['', '', missNote]]);
       continue;
     }
     const note = mlbClvNoteFromOpenClose_(openLine, openOdds, cl.line, cl.american, side);
@@ -243,8 +270,18 @@ function snapshotMLBBetCardToLog(windowTag) {
     const slate = row[0] || slateFallback;
     const line = row[8];
     const odds = row[9];
-    const betKey = mlbBetResultKey_(slate, row[2], row[16], row[7], line);
-    const hitRow = mlbFindResultsLogSheetRowForUpsert_(logSh, slate, betKey, row[2], row[16], row[7], line);
+    const market = String(row[6] || '').trim();
+    const betKey = mlbBetResultKey_(slate, row[2], row[16], row[7], line, market);
+    const hitRow = mlbFindResultsLogSheetRowForUpsert_(
+      logSh,
+      slate,
+      betKey,
+      row[2],
+      row[16],
+      row[7],
+      line,
+      market
+    );
 
     if (hitRow > 0) {
       const nc = Math.max(MLB_RESULTS_LOG_NCOL, logSh.getLastColumn());

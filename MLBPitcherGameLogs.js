@@ -148,6 +148,13 @@ function refreshMLBPitcherGameLogs() {
 
   let sh = ss.getSheetByName(MLB_PITCHER_GAME_LOGS_TAB);
   if (sh) {
+    const cr = Math.max(sh.getLastRow(), 3);
+    const cc = Math.max(sh.getLastColumn(), 13);
+    try {
+      sh.getRange(1, 1, cr, cc).breakApart();
+    } catch (e) {
+      Logger.log('refreshMLBPitcherGameLogs breakApart: ' + e.message);
+    }
     sh.clearContents();
     sh.clearFormats();
   } else {
@@ -177,12 +184,12 @@ function refreshMLBPitcherGameLogs() {
     .setBackground('#1b5e20')
     .setFontColor('#ffffff');
   sh.getRange(3, 1, 1, headers.length).setValues([headers]).setFontWeight('bold').setBackground('#2e7d32').setFontColor('#ffffff');
-  sh.setFrozenRows(3);
   if (out.length) {
     sh.getRange(4, 1, out.length, headers.length).setValues(out);
     try {
       ss.setNamedRange('MLB_PITCHER_GAME_LOGS', sh.getRange(4, 1, out.length, headers.length));
     } catch (e) {}
   }
+  sh.setFrozenRows(3);
   ss.toast(out.length + ' log rows · ' + Object.keys(seenPid).length + ' pitchers', 'Pitcher game logs', 6);
 }

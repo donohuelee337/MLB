@@ -1,28 +1,24 @@
 // ============================================================
-// 🃏 MLB Bet Card — actionable plays (from Pitcher K card)
+// 🃏 MLB Bet Card — pitcher K + pitcher walks (ranked by EV)
 // ============================================================
-// Pulls ranked pitcher-K props: FanDuel line, chosen side, price, naive EV.
-// Drops rows flagged injury (Out/Doubtful path in queue → card flags).
-// Cap: MLB_BET_CARD_MAX_PLAYS. Extend later with more markets via source col.
+// AI-BOIZ spirit: one actionable card; injury-flagged plays omitted.
+// Sources: 🎰 Pitcher_K_Card, 🎰 Pitcher_BB_Card.
 // ============================================================
 
 const MLB_BET_CARD_TAB = '🃏 MLB_Bet_Card';
-const MLB_BET_CARD_MAX_PLAYS = 24;
-/** Same spirit as AI-BOIZ: cap how many straights surface per game on the card. */
+const MLB_BET_CARD_MAX_PLAYS = 30;
+/** Same spirit as AI-BOIZ: cap straights per game across all markets on this card. */
 const MLB_BET_CARD_MAX_PER_GAME = 2;
 
-function refreshMLBBetCard() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const cfg = getConfig();
-  const minEvCfg = parseFloat(String(cfg['MIN_EV_BET_CARD'] != null ? cfg['MIN_EV_BET_CARD'] : '0').trim(), 10);
-  const minEvFloor = !isNaN(minEvCfg) && minEvCfg > 0 ? minEvCfg : 0;
-  const slateDate = getSlateDateString_(cfg);
-  const src = ss.getSheetByName(MLB_PITCHER_K_CARD_TAB);
-  if (!src || src.getLastRow() < 4) {
-    safeAlert_('MLB Bet Card', 'Run Pitcher K card first (Morning includes it).');
-    return;
-  }
-
+/**
+ * @param {string} srcTab MLB_PITCHER_K_CARD_TAB | MLB_PITCHER_BB_CARD_TAB
+ * @param {string} marketLabel e.g. Pitcher strikeouts
+ * @param {string} statVerb short label in pick text (K | BB)
+ * @param {string} disclaimer row note
+ */
+function mlbCollectPlaysFromPitcherOddsCard_(ss, cfg, srcTab, marketLabel, statVerb, disclaimer, minEvFloor) {
+  const src = ss.getSheetByName(srcTab);
+  if (!src || src.getLastRow() < 4) return [];
   const last = src.getLastRow();
   const vals = src.getRange(4, 1, last, 22).getValues();
   const plays = [];
@@ -61,7 +57,9 @@ function refreshMLBBetCard() {
     const pickLabel =
       pitcher +
       (hand ? ' (' + hand + ')' : '') +
-      ' — K ' +
+      ' — ' +
+      statVerb +
+      ' ' +
       bestSide +
       ' ' +
       String(line) +
@@ -82,8 +80,51 @@ function refreshMLBBetCard() {
       lambda: r[8],
       edge: r[9],
       flags: flags,
+      market: marketLabel,
+      disclaimer: disclaimer,
     });
   });
+
+  return plays;
+}
+
+function refreshMLBBetCard() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const cfg = getConfig();
+  const minEvCfg = parseFloat(String(cfg['MIN_EV_BET_CARD'] != null ? cfg['MIN_EV_BET_CARD'] : '0').trim(), 10);
+  const minEvFloor = !isNaN(minEvCfg) && minEvCfg > 0 ? minEvCfg : 0;
+  const slateDate = getSlateDateString_(cfg);
+
+  const kTab = ss.getSheetByName(MLB_PITCHER_K_CARD_TAB);
+  const bbTab = ss.getSheetByName(MLB_PITCHER_BB_CARD_TAB);
+  if ((!kTab || kTab.getLastRow() < 4) && (!bbTab || bbTab.getLastRow() < 4)) {
+    safeAlert_('MLB Bet Card', 'Run Pitcher K card and/or Pitcher BB card first (Morning includes both).');
+    return;
+  }
+
+  let plays = [];
+  plays = plays.concat(
+    mlbCollectPlaysFromPitcherOddsCard_(
+      ss,
+      cfg,
+      MLB_PITCHER_K_CARD_TAB,
+      'Pitcher strikeouts',
+      'K',
+      'Model: Poisson on λ=blended K/9×proj_IP×park×L/R×optional HP; not devigged.',
+      minEvFloor
+    )
+  );
+  plays = plays.concat(
+    mlbCollectPlaysFromPitcherOddsCard_(
+      ss,
+      cfg,
+      MLB_PITCHER_BB_CARD_TAB,
+      'Pitcher walks',
+      'BB',
+      'Model: Poisson on λ=blended BB9×proj_IP×optional L/R; no park v1; not devigged.',
+      minEvFloor
+    )
+  );
 
   plays.sort(function (a, b) {
     const be = parseFloat(String(b.ev));
@@ -112,7 +153,7 @@ function refreshMLBBetCard() {
       p.matchup,
       p.pickLabel,
       p.pitcher,
-      'Pitcher strikeouts',
+      p.market,
       p.side,
       p.line,
       p.american,
@@ -123,7 +164,7 @@ function refreshMLBBetCard() {
       p.edge,
       p.flags,
       p.pitcherId != null && p.pitcherId !== '' ? p.pitcherId : '',
-      'Model: Poisson on λ=blended K/9×proj_IP; EV vs list; MIN_EV_BET_CARD from ⚙️ Config; not devigged.',
+      p.disclaimer,
     ];
   });
 
@@ -137,7 +178,7 @@ function refreshMLBBetCard() {
       '',
       '',
       '',
-      'No qualifying plays — need 🎰 Pitcher_K_Card with ' +
+      'No qualifying plays — need 🎰 K and/or BB cards with ' +
         evHint +
         'both FD prices, no injury flag (max ' +
         MLB_BET_CARD_MAX_PER_GAME +
@@ -160,6 +201,13 @@ function refreshMLBBetCard() {
 
   let sh = ss.getSheetByName(MLB_BET_CARD_TAB);
   if (sh) {
+    const cr = Math.max(sh.getLastRow(), 3);
+    const cc = Math.max(sh.getLastColumn(), 18);
+    try {
+      sh.getRange(1, 1, cr, cc).breakApart();
+    } catch (e) {
+      Logger.log('refreshMLBBetCard breakApart: ' + e.message);
+    }
     sh.clearContents();
     sh.clearFormats();
   } else {
@@ -174,7 +222,7 @@ function refreshMLBBetCard() {
   sh.getRange(1, 1, 1, 18)
     .merge()
     .setValue(
-      '🃏 MLB BET CARD — FanDuel pitcher K — ranked by EV ($1 risk). Injury-flagged plays omitted. Not betting advice.'
+      '🃏 MLB BET CARD — FanDuel pitcher K + walks — ranked by EV ($1 risk). Injury-flagged omitted. Not betting advice.'
     )
     .setFontWeight('bold')
     .setBackground('#004d40')
@@ -197,7 +245,7 @@ function refreshMLBBetCard() {
     'book',
     'model_prob',
     'ev_per_$1',
-    'lambda_K',
+    'lambda',
     'edge_vs_line',
     'flags',
     'pitcher_id',
@@ -208,7 +256,6 @@ function refreshMLBBetCard() {
     .setFontWeight('bold')
     .setBackground('#00897b')
     .setFontColor('#ffffff');
-  sh.setFrozenRows(3);
 
   sh.getRange(4, 1, rows.length, headers.length).setValues(rows);
   if (rows.length > 0 && rows[0][4] && String(rows[0][4]).indexOf('No qualifying') === -1) {
@@ -216,6 +263,7 @@ function refreshMLBBetCard() {
       ss.setNamedRange('MLB_BET_CARD', sh.getRange(4, 1, rows.length, headers.length));
     } catch (e) {}
   }
+  sh.setFrozenRows(3);
 
-  ss.toast(rows.length + ' bet rows · ' + slateDate, 'MLB Bet Card', 6);
+  ss.toast(rows.length + ' bet rows · K+BB · ' + slateDate, 'MLB Bet Card', 6);
 }

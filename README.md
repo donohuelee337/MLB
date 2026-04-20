@@ -13,10 +13,12 @@ Google Apps Script + Google Sheets pipeline in the **AI-BOIZ** spirit: slate-fir
 5. **✅ FanDuel_MLB_Odds** — The Odds API `baseball_mlb` + FanDuel.
 6. **🎯 MLB_Slate_Board** — per-game FD line counts joined to schedule (flexible game keys).
 7. **📋 Pitcher_K_Queue** — schedule × FD K (`pitcher_strikeouts`) + L3 / season K9 + **throws** (R/L) + HP umpire.
-8. **🎰 Pitcher_K_Card** — Poisson + naive EV from queue.
-9. **🃏 MLB_Bet_Card** — ranked plays from the K card (EV floor optional).
-10. **📋 MLB_Results_Log** + **📊** grading — upsert by **`bet_key`** (open_line / open_odds frozen on first sight); each window updates **close_** from card; **🔒 Final** + **📈 Backfill** refresh close from ✅ FD tab.
-11. **⚾ Pipeline_Log** — funnel, warnings, near-misses, game coverage after **Morning / Midday / Final**.
+8. **📋 Pitcher_BB_Queue** — same join for **`pitcher_walks`** + L3 / season BB9.
+9. **🎰 Pitcher_K_Card** — Poisson + naive EV from K queue.
+10. **🎰 Pitcher_BB_Card** — Poisson + naive EV for walks (no park λ v1).
+11. **🃏 MLB_Bet_Card** — ranked **K + walks** (EV floor optional).
+12. **📋 MLB_Results_Log** + **📊** grading — upsert by **`bet_key`** (includes market); boxscore K or **BB**; **🔒 Final** + **📈 Backfill** close from ✅ FD tab.
+13. **⚾ Pipeline_Log** — funnel, warnings, near-misses, game coverage after **Morning / Midday / Final**.
 
 **Menus:** **🌅 Morning**, **🌤 Midday**, **🔒 Final**, **📆 Set SLATE_DATE to tomorrow (NY) + Morning**, per-stage “only” items, **📋 Open Pipeline Log**.
 

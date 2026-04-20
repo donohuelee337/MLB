@@ -286,10 +286,10 @@ function mlbActivatePipelineLog_() {
   else ss.toast('Run the morning pipeline once to create ' + MLB_PIPELINE_LOG_TAB, 'MLB-BOIZ', 5);
 }
 
-/** After 🎰 Pitcher_K_Card is built: injury scratches that still had +EV on a side. */
-function mlbAppendPitcherKNearMisses_(ss) {
+/** After 🎰 pitcher cards: injury scratches that still had +EV on a side. */
+function mlbAppendPitcherNearMissesFromCard_(ss, tabName, marketKey) {
   if (!pipelineLog_) return;
-  const sh = ss.getSheetByName(MLB_PITCHER_K_CARD_TAB);
+  const sh = ss.getSheetByName(tabName);
   if (!sh || sh.getLastRow() < 4) return;
   const vals = sh.getRange(4, 1, sh.getLastRow(), 22).getValues();
   vals.forEach(function (r) {
@@ -311,9 +311,14 @@ function mlbAppendPitcherKNearMisses_(ss) {
       bestSide = 'Under';
     }
     if (score > 0) {
-      logNearMiss_(pitcher, matchup, 'pitcher_strikeouts', bestSide, score, flags, 'Injury — model still liked a side');
+      logNearMiss_(pitcher, matchup, marketKey, bestSide, score, flags, 'Injury — model still liked a side');
     }
   });
+}
+
+function mlbAppendPitcherKNearMisses_(ss) {
+  mlbAppendPitcherNearMissesFromCard_(ss, MLB_PITCHER_K_CARD_TAB, 'pitcher_strikeouts');
+  mlbAppendPitcherNearMissesFromCard_(ss, MLB_PITCHER_BB_CARD_TAB, 'pitcher_walks');
 }
 
 /** After 🃏 MLB_Bet_Card: fill GAME COVERAGE cardPicks counts (AI-BOIZ-style funnel). */

@@ -103,13 +103,15 @@ function mlbParseInningsString_(s) {
 
 /**
  * @returns {Object} keyed by norm(game)||norm(player) → { pt: { Over, Under } }
+ * @param {string} marketFilter e.g. pitcher_strikeouts | pitcher_walks
  */
-function mlbBuildPitcherKOddsIndex_(ss) {
+function mlbBuildPitcherOddsIndexForMarket_(ss, marketFilter) {
   const byPitcherGame = {};
   const sh = ss.getSheetByName(MLB_ODDS_CONFIG.tabName);
   if (!sh || sh.getLastRow() < 4) return byPitcherGame;
   const last = sh.getLastRow();
   const block = sh.getRange(4, 1, last, 6).getValues();
+  const want = String(marketFilter || '').trim();
   for (let i = 0; i < block.length; i++) {
     const player = block[i][0];
     const gameLabel = block[i][1];
@@ -117,7 +119,7 @@ function mlbBuildPitcherKOddsIndex_(ss) {
     const side = String(block[i][3] || '');
     const lineRaw = block[i][4];
     const price = block[i][5];
-    if (market !== 'pitcher_strikeouts') continue;
+    if (market !== want) continue;
     const g = mlbNormalizeGameLabel_(gameLabel);
     const p = mlbNormalizePersonName_(player);
     if (!g || !p) continue;
@@ -131,6 +133,10 @@ function mlbBuildPitcherKOddsIndex_(ss) {
     if (sl.indexOf('under') !== -1) byPitcherGame[key][pt].Under = price;
   }
   return byPitcherGame;
+}
+
+function mlbBuildPitcherKOddsIndex_(ss) {
+  return mlbBuildPitcherOddsIndexForMarket_(ss, 'pitcher_strikeouts');
 }
 
 function mlbPickMainKPoint_(pointMap) {
@@ -203,6 +209,41 @@ function mlbPitchingLogSummary_(playerId, season) {
   } catch (e) {
     Logger.log('mlbPitchingLogSummary_: ' + e.message);
     return { l3k: '', l3ip: '', k9: '', games: 0 };
+  }
+}
+
+/** L3 walks + season BB/9 from pitching gameLog (mirrors K summary). */
+function mlbPitchingWalkSummary_(playerId, season) {
+  const id = parseInt(playerId, 10);
+  if (!id) return { l3bb: '', l3ip: '', bb9: '', games: 0 };
+  const splits = mlbStatsApiGetPitchingGameSplits_(playerId, season);
+  let totBb = 0;
+  let totIp = 0;
+  let l3bb = 0;
+  let l3ip = 0;
+  const nL = Math.min(3, splits.length);
+  try {
+    for (let i = 0; i < splits.length; i++) {
+      const st = splits[i].stat || {};
+      const bb = parseInt(st.baseOnBalls, 10) || 0;
+      const ip = mlbParseInningsString_(st.inningsPitched);
+      totBb += bb;
+      totIp += ip;
+      if (i < nL) {
+        l3bb += bb;
+        l3ip += ip;
+      }
+    }
+    const bb9 = totIp > 0 ? Math.round((totBb / totIp) * 900) / 100 : '';
+    return {
+      l3bb: nL ? l3bb : '',
+      l3ip: nL ? Math.round(l3ip * 100) / 100 : '',
+      bb9: bb9,
+      games: splits.length,
+    };
+  } catch (e) {
+    Logger.log('mlbPitchingWalkSummary_: ' + e.message);
+    return { l3bb: '', l3ip: '', bb9: '', games: 0 };
   }
 }
 
@@ -341,6 +382,13 @@ function refreshPitcherKSlateQueue() {
 
   let sh = ss.getSheetByName(MLB_PITCHER_K_QUEUE_TAB);
   if (sh) {
+    const cr = Math.max(sh.getLastRow(), 3);
+    const cc = Math.max(sh.getLastColumn(), 15);
+    try {
+      sh.getRange(1, 1, cr, cc).breakApart();
+    } catch (e) {
+      Logger.log('refreshPitcherKSlateQueue breakApart: ' + e.message);
+    }
     sh.clearContents();
     sh.clearFormats();
   } else {
@@ -381,7 +429,6 @@ function refreshPitcherKSlateQueue() {
     .setFontWeight('bold')
     .setBackground('#7b1fa2')
     .setFontColor('#ffffff');
-  sh.setFrozenRows(3);
 
   if (out.length) {
     sh.getRange(4, 1, out.length, headers.length).setValues(out);
@@ -389,6 +436,7 @@ function refreshPitcherKSlateQueue() {
       ss.setNamedRange('MLB_PITCHER_K_QUEUE', sh.getRange(4, 1, out.length, headers.length));
     } catch (e) {}
   }
+  sh.setFrozenRows(3);
 
   ss.toast(out.length + ' starter rows', 'Pitcher K queue', 6);
 }

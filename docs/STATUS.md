@@ -14,8 +14,10 @@
 | Slate / line density | `MLBSlateBoard.js` → **`🎯 MLB_Slate_Board`** (join uses flexible game keys vs FD labels) |
 | Schedule ↔ FD join | `MLBMatchKeys.js` — normalized labels + abbr→Odds team names for fewer `fd_k_miss` rows |
 | Pitcher K slate | `MLBPitcherKQueue.js` → **`📋 Pitcher_K_Queue`** (+ **`throws`** R/L from statsapi `/people/{id}`) |
+| Pitcher walks slate | `MLBPitcherWalkQueue.js` → **`📋 Pitcher_BB_Queue`** (`pitcher_walks` main line) |
 | Poisson + EV (K) | `MLBPitcherKBetCard.js` → **`🎰 Pitcher_K_Card`** (blended K/9 via **`K9_BLEND_L7_WEIGHT`**) |
-| Bet card | `MLBBetCard.js` → **`🃏 MLB_Bet_Card`** (optional **`MIN_EV_BET_CARD`** floor) |
+| Poisson + EV (BB) | `MLBPitcherWalkBetCard.js` → **`🎰 Pitcher_BB_Card`** (blended BB9; **`BB9_BLEND_L3_WEIGHT`** optional) |
+| Bet card | `MLBBetCard.js` → **`🃏 MLB_Bet_Card`** — **K + walks**, ranked EV (optional **`MIN_EV_BET_CARD`** floor) |
 | Results log + grading | `MLBResultsLog.js` / **`📋 MLB_Results_Log`**; `MLBResultsGrader.js` — menu grader; runs at start of each ball window |
 | CLV proxy (close line) | **`close_line` / `close_odds` / `clv_note`** — `mlbBackfillResultsLogClosingK_` on **FINAL** (after odds) + menu **📈 Backfill closing K** (join tries log **Game** then schedule **`gamePk`** matchup) |
 | Umpire → λ (optional) | **`⚙️ HP_UMP_LAMBDA_MULT`** — scales 🎰 λ when **`hp_umpire`** present (default **1** = off) |
@@ -39,10 +41,12 @@
 8. Slate board (join)
 9. Pitcher K queue
 10. Pitcher K card
-11. MLB Bet Card
-12. `mlbAppendPitcherKNearMisses_` → `snapshotMLBBetCardToLog` (if bet card OK) → **`mlbBackfillResultsLogClosingK_` when `FINAL` + odds OK** → `mlbAppendBetCardPipelineCoverage_` → step warnings → `writePipelineLogTab_` → toast; activates **`🃏 MLB_Bet_Card`**
+11. Pitcher BB queue
+12. Pitcher BB card
+13. MLB Bet Card
+14. `mlbAppendPitcherKNearMisses_` (K + BB injury near-misses) → `snapshotMLBBetCardToLog` (if bet card OK) → **`mlbBackfillResultsLogClosingK_` when `FINAL` + odds OK** → `mlbAppendBetCardPipelineCoverage_` → step warnings → `writePipelineLogTab_` → toast; activates **`🃏 MLB_Bet_Card`**
 
-One-off menu items mirror those stages (e.g. **`📒 Pitcher game logs only`**, **`🎰 Pitcher K card only (Poisson + EV)`**, **`📋 Open Pipeline Log`**).
+One-off menu items mirror those stages (e.g. **`📋 Pitcher BB queue only`**, **`🎰 Pitcher BB card only`**, **`📋 Open Pipeline Log`**).
 
 ## Not built yet (still fair gaps vs NBA / spec)
 
