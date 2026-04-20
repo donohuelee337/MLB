@@ -118,11 +118,6 @@ function fetchMLBScheduleForSlate() {
     });
   });
 
-  let sh = ss.getSheetByName(MLB_SCHEDULE_TAB);
-  if (!sh) sh = ss.insertSheet(MLB_SCHEDULE_TAB);
-  sh.clearContents();
-  sh.clearFormats();
-  sh.setTabColor('#37474f');
   const headers = [
     'gamePk',
     'date',
@@ -140,14 +135,30 @@ function fetchMLBScheduleForSlate() {
     'homePlateUmpire',
     'homePlateUmpireId',
   ];
+
+  let sh = ss.getSheetByName(MLB_SCHEDULE_TAB);
+  if (!sh) sh = ss.insertSheet(MLB_SCHEDULE_TAB);
+  // clearContents/clearFormats do NOT remove merges; a stale multi-row merge on the
+  // title/header block makes setValues([headers]) see a 3-row range vs 1 data row.
+  const clearRows = Math.max(sh.getLastRow(), 3);
+  const clearCols = Math.max(sh.getLastColumn(), headers.length);
+  try {
+    sh.getRange(1, 1, clearRows, clearCols).breakApart();
+  } catch (e) {
+    Logger.log('fetchMLBScheduleForSlate breakApart: ' + e.message);
+  }
+  sh.clearContents();
+  sh.clearFormats();
+  sh.setTabColor('#37474f');
+
   sh.getRange(1, 1, 1, headers.length).merge().setValue('📅 MLB schedule — ' + dateStr).setFontWeight('bold');
   sh.getRange(3, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
-  sh.setFrozenRows(3);
   if (rows.length) {
     sh.getRange(4, 1, rows.length, headers.length).setValues(rows);
     try {
       ss.setNamedRange('MLB_SCHEDULE', sh.getRange(4, 1, rows.length, headers.length));
     } catch (e) {}
   }
+  sh.setFrozenRows(3);
   ss.toast(rows.length + ' games loaded', 'MLB Schedule', 5);
 }

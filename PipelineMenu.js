@@ -16,6 +16,7 @@ function onOpen() {
     .addItem('🔒 Final — Full refresh + snapshot', 'runFinalWindowMLB')
     .addSeparator()
     .addItem('🚑 MLB injuries only', 'fetchMLBInjuryReport')
+    .addItem('📅 MLB schedule only (statsapi)', 'fetchMLBScheduleForSlate')
     .addItem('🎯 Slate board only (join schedule + FD counts)', 'refreshMLBSlateBoard')
     .addItem('📒 Pitcher game logs only (statsapi, warms cache)', 'refreshMLBPitcherGameLogs')
     .addItem('📋 Pitcher K queue only (schedule + FD K + game logs)', 'refreshPitcherKSlateQueue')
