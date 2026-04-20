@@ -20,6 +20,10 @@ function onOpen() {
     .addItem('📒 Pitcher game logs only (statsapi, warms cache)', 'refreshMLBPitcherGameLogs')
     .addItem('📋 Pitcher K queue only (schedule + FD K + game logs)', 'refreshPitcherKSlateQueue')
     .addItem('🎰 Pitcher K card only (Poisson + EV)', 'refreshPitcherKBetCard')
+    .addItem('📋 Batter TB queue only (FD TB + hitting logs)', 'refreshBatterTbSlateQueue')
+    .addItem('🎲 Batter TB card only (Poisson + EV)', 'refreshBatterTbBetCard')
+    .addItem('📋 Batter Hits queue only (FD hits + hitting logs)', 'refreshBatterHitsSlateQueue')
+    .addItem('🎯 Batter Hits card only (Poisson + EV)', 'refreshBatterHitsBetCard')
     .addItem('🃏 MLB Bet Card only (final plays)', 'refreshMLBBetCard')
     .addItem('📊 Grade pending MLB results (boxscore)', 'gradeMLBPendingResults_')
     .addItem('📈 Backfill closing K (Results Log)', 'mlbBackfillClosingMenu_')
@@ -77,6 +81,8 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   mlbResetPitchHandCache_();
   mlbResetTeamHittingSeasonCache_();
   mlbResetSavantAbsCache_();
+  mlbResetBatterTbCaches_();
+  let savantTeamCount = -1;
   const outcomes = [];
 
   function step(name, fn) {
@@ -94,6 +100,7 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   step('Config', function () {
     try {
       buildConfigTab();
+      validateMlbPipelineConfig_(getConfig());
     } catch (e) {}
   });
 
@@ -107,11 +114,15 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   step('Pitcher game logs (statsapi)', refreshMLBPitcherGameLogs);
   step('FanDuel MLB odds', fetchMLBFanDuelOdds);
   step('Savant ingest (optional)', function () {
-    mlbSavantAbsIngestBestEffort_();
+    savantTeamCount = mlbSavantAbsIngestBestEffort_();
   });
   step('Slate board (join)', refreshMLBSlateBoard);
   step('Pitcher K queue', refreshPitcherKSlateQueue);
   step('Pitcher K card', refreshPitcherKBetCard);
+  step('Batter TB queue', refreshBatterTbSlateQueue);
+  step('Batter TB card', refreshBatterTbBetCard);
+  step('Batter Hits queue', refreshBatterHitsSlateQueue);
+  step('Batter Hits card', refreshBatterHitsBetCard);
   step('MLB Bet Card', refreshMLBBetCard);
 
   const oCfg = outcomes[0] || { ok: true };
@@ -123,7 +134,11 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   const oSlate = outcomes[6] || { ok: true };
   const oPk = outcomes[7] || { ok: true };
   const oCard = outcomes[8] || { ok: true };
-  const oBet = outcomes[9] || { ok: true };
+  const oTbQ = outcomes[9] || { ok: true };
+  const oTbCard = outcomes[10] || { ok: true };
+  const oHitsQ = outcomes[11] || { ok: true };
+  const oHitsCard = outcomes[12] || { ok: true };
+  const oBet = outcomes[13] || { ok: true };
 
   logStep_('Config', 1, oCfg.ok ? 1 : 0, oCfg.ok ? '' : oCfg.err || 'failed');
   logStep_(
@@ -152,9 +167,15 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   );
   logStep_(
     'Savant ingest (optional)',
-    1,
-    oSavant.ok ? 1 : 0,
-    oSavant.ok ? '' : oSavant.err || 'failed'
+    savantTeamCount >= 0 ? 1 : 0,
+    savantTeamCount > 0 ? savantTeamCount : oSavant.ok ? 0 : 0,
+    !oSavant.ok
+      ? oSavant.err || 'failed'
+      : savantTeamCount < 0
+        ? 'skipped (disabled)'
+        : savantTeamCount > 0
+          ? 'teams=' + savantTeamCount
+          : 'no rows parsed — see warnings'
   );
   logStep_(
     'Slate board',
@@ -173,6 +194,30 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
     0,
     oCard.ok ? mlbTabDataRowsBelowHeader3_(ss, MLB_PITCHER_K_CARD_TAB) : 0,
     oCard.ok ? '' : oCard.err || 'failed'
+  );
+  logStep_(
+    'Batter TB queue',
+    0,
+    oTbQ.ok ? mlbTabDataRowsBelowHeader3_(ss, MLB_BATTER_TB_QUEUE_TAB) : 0,
+    oTbQ.ok ? '' : oTbQ.err || 'failed'
+  );
+  logStep_(
+    'Batter TB card',
+    0,
+    oTbCard.ok ? mlbTabDataRowsBelowHeader3_(ss, MLB_BATTER_TB_CARD_TAB) : 0,
+    oTbCard.ok ? '' : oTbCard.err || 'failed'
+  );
+  logStep_(
+    'Batter Hits queue',
+    0,
+    oHitsQ.ok ? mlbTabDataRowsBelowHeader3_(ss, MLB_BATTER_HITS_QUEUE_TAB) : 0,
+    oHitsQ.ok ? '' : oHitsQ.err || 'failed'
+  );
+  logStep_(
+    'Batter Hits card',
+    0,
+    oHitsCard.ok ? mlbTabDataRowsBelowHeader3_(ss, MLB_BATTER_HITS_CARD_TAB) : 0,
+    oHitsCard.ok ? '' : oHitsCard.err || 'failed'
   );
   logStep_(
     'MLB Bet Card',

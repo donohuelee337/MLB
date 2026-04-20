@@ -1,8 +1,8 @@
 // ============================================================
-// 📊 MLB Results Grader — statsapi boxscore (pitcher K)
+// 📊 MLB Results Grader — statsapi boxscore (pitcher K + batter TB)
 // ============================================================
 // Grades 📋 MLB_Results_Log rows for past slates where result is empty
-// or PENDING. Uses GET /game/{gamePk}/boxscore and pitching.strikeOuts.
+// or PENDING. Pitcher K: pitching.strikeOuts. Batter TB: batting.totalBases.
 // Run automatically at the start of each pipeline window (NBA-style),
 // or from the menu.
 // ============================================================
@@ -63,6 +63,38 @@ function mlbPitcherKsFromBoxscore_(payload, pitcherId) {
     if (pit && pit.strikeOuts != null && String(pit.inningsPitched || '').trim() !== '') {
       return parseInt(pit.strikeOuts, 10) || 0;
     }
+  }
+  return null;
+}
+
+/** @returns {number|null} total bases from boxscore batting line */
+function mlbBatterTbFromBoxscore_(payload, batterId) {
+  const teams = mlbBoxscoreTeams_(payload);
+  if (!teams) return null;
+  const pid = 'ID' + parseInt(batterId, 10);
+  const sides = ['away', 'home'];
+  for (let s = 0; s < sides.length; s++) {
+    const t = teams[sides[s]];
+    const pl = t && t.players && t.players[pid];
+    const bat = pl && pl.stats && pl.stats.batting;
+    if (!bat) continue;
+    if (bat.totalBases != null) return parseInt(bat.totalBases, 10) || 0;
+  }
+  return null;
+}
+
+/** @returns {number|null} hits from boxscore batting line */
+function mlbBatterHitsFromBoxscore_(payload, batterId) {
+  const teams = mlbBoxscoreTeams_(payload);
+  if (!teams) return null;
+  const pid = 'ID' + parseInt(batterId, 10);
+  const sides = ['away', 'home'];
+  for (let s = 0; s < sides.length; s++) {
+    const t = teams[sides[s]];
+    const pl = t && t.players && t.players[pid];
+    const bat = pl && pl.stats && pl.stats.batting;
+    if (!bat) continue;
+    if (bat.hits != null) return parseInt(bat.hits, 10) || 0;
   }
   return null;
 }
@@ -174,7 +206,6 @@ function gradeMLBPendingResults_() {
     if (!slateStr || slateStr >= today) {
       continue;
     }
-    if (market.indexOf('strikeout') === -1) continue;
     if (resCell && resCell !== 'PENDING') continue;
 
     let gamePk = parseInt(row[13], 10);
@@ -187,11 +218,24 @@ function gradeMLBPendingResults_() {
     if ((!gamePk || isNaN(gamePk)) && slateStr && matchup) {
       gamePk = mlbResolveGamePkFromSchedule_(slateStr, matchup, player);
     }
-    if ((!pid || isNaN(pid)) && slateStr && matchup && player) {
-      pid = mlbResolvePitcherIdFromSchedule_(slateStr, matchup, player);
+
+    const isK = market.indexOf('strikeout') !== -1;
+    const isTb = market.indexOf('total base') !== -1;
+    const isHits = market.indexOf('batter hits') !== -1;
+    if (!isK && !isTb && !isHits) continue;
+
+    if (isK) {
+      if ((!pid || isNaN(pid)) && slateStr && matchup && player) {
+        pid = mlbResolvePitcherIdFromSchedule_(slateStr, matchup, player);
+      }
+    } else if (isTb || isHits) {
+      if ((!pid || isNaN(pid)) && player) {
+        pid = mlbStatsApiResolvePlayerIdFromName_(player);
+      }
     }
+
     if (!gamePk || isNaN(gamePk) || !pid || isNaN(pid)) {
-      logSh.getRange(4 + i, 18).setValue('Missing gamePk or pitcher_id — re-run snapshot after refresh');
+      logSh.getRange(4 + i, 18).setValue('Missing gamePk or player_id — re-run snapshot / check name→id');
       continue;
     }
 
@@ -206,21 +250,61 @@ function gradeMLBPendingResults_() {
       continue;
     }
 
-    const kActual = mlbPitcherKsFromBoxscore_(box, pid);
-    if (kActual === null) {
-      logSh.getRange(4 + i, 16).setValue('');
-      logSh.getRange(4 + i, 17).setValue('VOID');
-      logSh.getRange(4 + i, 18).setValue('No pitching line (DNP / bullpen-only?)');
+    if (isK) {
+      const kActual = mlbPitcherKsFromBoxscore_(box, pid);
+      if (kActual === null) {
+        logSh.getRange(4 + i, 16).setValue('');
+        logSh.getRange(4 + i, 17).setValue('VOID');
+        logSh.getRange(4 + i, 18).setValue('No pitching line (DNP / bullpen-only?)');
+        graded++;
+        continue;
+      }
+
+      const g = mlbGradePitcherKRow_(line, side, kActual);
+      logSh.getRange(4 + i, 14).setValue(gamePk);
+      logSh.getRange(4 + i, 15).setValue(pid);
+      logSh.getRange(4 + i, 16).setValue(kActual);
+      logSh.getRange(4 + i, 17).setValue(g.result);
+      logSh.getRange(4 + i, 18).setValue('statsapi boxscore · ' + g.note);
       graded++;
       continue;
     }
 
-    const g = mlbGradePitcherKRow_(line, side, kActual);
+    if (isTb) {
+      const tbActual = mlbBatterTbFromBoxscore_(box, pid);
+      if (tbActual === null) {
+        logSh.getRange(4 + i, 16).setValue('');
+        logSh.getRange(4 + i, 17).setValue('VOID');
+        logSh.getRange(4 + i, 18).setValue('No batting line (DNP?)');
+        graded++;
+        continue;
+      }
+
+      const gt = mlbGradePitcherKRow_(line, side, tbActual);
+      logSh.getRange(4 + i, 14).setValue(gamePk);
+      logSh.getRange(4 + i, 15).setValue(pid);
+      logSh.getRange(4 + i, 16).setValue(tbActual);
+      logSh.getRange(4 + i, 17).setValue(gt.result);
+      logSh.getRange(4 + i, 18).setValue('statsapi boxscore TB · ' + gt.note);
+      graded++;
+      continue;
+    }
+
+    const hActual = mlbBatterHitsFromBoxscore_(box, pid);
+    if (hActual === null) {
+      logSh.getRange(4 + i, 16).setValue('');
+      logSh.getRange(4 + i, 17).setValue('VOID');
+      logSh.getRange(4 + i, 18).setValue('No batting line (DNP?)');
+      graded++;
+      continue;
+    }
+
+    const gh = mlbGradePitcherKRow_(line, side, hActual);
     logSh.getRange(4 + i, 14).setValue(gamePk);
     logSh.getRange(4 + i, 15).setValue(pid);
-    logSh.getRange(4 + i, 16).setValue(kActual);
-    logSh.getRange(4 + i, 17).setValue(g.result);
-    logSh.getRange(4 + i, 18).setValue('statsapi boxscore · ' + g.note);
+    logSh.getRange(4 + i, 16).setValue(hActual);
+    logSh.getRange(4 + i, 17).setValue(gh.result);
+    logSh.getRange(4 + i, 18).setValue('statsapi boxscore H · ' + gh.note);
     graded++;
   }
 

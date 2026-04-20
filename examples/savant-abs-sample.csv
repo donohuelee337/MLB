@@ -1,0 +1,5 @@
+# Sample ABS / Savant-style team multiplier CSV for SAVANT_ABS_CSV_URL
+team_id,abs_k_mult
+121,1.02
+117,0.99
+144,1.01

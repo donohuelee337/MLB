@@ -105,32 +105,7 @@ function mlbParseInningsString_(s) {
  * @returns {Object} keyed by norm(game)||norm(player) → { pt: { Over, Under } }
  */
 function mlbBuildPitcherKOddsIndex_(ss) {
-  const byPitcherGame = {};
-  const sh = ss.getSheetByName(MLB_ODDS_CONFIG.tabName);
-  if (!sh || sh.getLastRow() < 4) return byPitcherGame;
-  const last = sh.getLastRow();
-  const block = sh.getRange(4, 1, last, 6).getValues();
-  for (let i = 0; i < block.length; i++) {
-    const player = block[i][0];
-    const gameLabel = block[i][1];
-    const market = String(block[i][2] || '');
-    const side = String(block[i][3] || '');
-    const lineRaw = block[i][4];
-    const price = block[i][5];
-    if (market !== 'pitcher_strikeouts') continue;
-    const g = mlbNormalizeGameLabel_(gameLabel);
-    const p = mlbNormalizePersonName_(player);
-    if (!g || !p) continue;
-    const pt = parseFloat(lineRaw);
-    if (isNaN(pt)) continue;
-    const key = g + '||' + p;
-    if (!byPitcherGame[key]) byPitcherGame[key] = {};
-    if (!byPitcherGame[key][pt]) byPitcherGame[key][pt] = {};
-    const sl = side.toLowerCase();
-    if (sl.indexOf('over') !== -1) byPitcherGame[key][pt].Over = price;
-    if (sl.indexOf('under') !== -1) byPitcherGame[key][pt].Under = price;
-  }
-  return byPitcherGame;
+  return mlbBuildPersonPropOddsIndex_(ss, 'pitcher_strikeouts');
 }
 
 function mlbPickMainKPoint_(pointMap) {

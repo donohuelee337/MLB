@@ -5,7 +5,8 @@
 // and fills __mlbSavantAbsTeamMult (teamId → multiplier). K card uses
 // mlbGetAbsTeamLambdaMult_ before falling back to ⚙️ ABS_K_LAMBDA_MULT.
 //
-// CSV (simple comma-separated, no quoted commas in cells):
+// CSV: comma-separated; cells may be quoted (RFC 4180–style) so commas inside
+// a field are allowed. UTF-8 body expected (BOM stripped).
 //   team_id,abs_k_mult
 //   121,1.02
 // or
@@ -37,13 +38,50 @@ function mlbGetAbsTeamLambdaMult_(teamId) {
   return typeof v === 'number' && !isNaN(v) ? v : null;
 }
 
-function mlbCsvSplitSimple_(line) {
-  return String(line || '')
-    .replace(/^\uFEFF/, '')
-    .split(',')
-    .map(function (c) {
-      return String(c || '').trim();
-    });
+/**
+ * Split one CSV record; supports quoted fields and doubled-quote escapes.
+ * @param {string} line
+ * @returns {string[]}
+ */
+function mlbCsvSplitRow_(line) {
+  const s = String(line || '').replace(/^\uFEFF/, '');
+  const out = [];
+  let cur = '';
+  let i = 0;
+  let inQuotes = false;
+  while (i < s.length) {
+    const c = s.charAt(i);
+    if (inQuotes) {
+      if (c === '"') {
+        if (s.charAt(i + 1) === '"') {
+          cur += '"';
+          i += 2;
+          continue;
+        }
+        inQuotes = false;
+        i++;
+        continue;
+      }
+      cur += c;
+      i++;
+      continue;
+    }
+    if (c === '"') {
+      inQuotes = true;
+      i++;
+      continue;
+    }
+    if (c === ',') {
+      out.push(cur.trim());
+      cur = '';
+      i++;
+      continue;
+    }
+    cur += c;
+    i++;
+  }
+  out.push(cur.trim());
+  return out;
 }
 
 /**
@@ -75,7 +113,7 @@ function mlbParseSavantAbsCsv_(text) {
     return -1;
   }
 
-  const firstCells = mlbCsvSplitSimple_(lines[0]);
+  const firstCells = mlbCsvSplitRow_(lines[0]);
   const firstId = parseInt(firstCells[0], 10);
   const looksHeader = isNaN(firstId) || firstCells.length < 2;
 
@@ -110,7 +148,7 @@ function mlbParseSavantAbsCsv_(text) {
   let bad = 0;
 
   for (let r = dataStart; r < lines.length; r++) {
-    const cells = mlbCsvSplitSimple_(lines[r]);
+    const cells = mlbCsvSplitRow_(lines[r]);
     if (!cells.length || (cells.length === 1 && !cells[0])) {
       continue;
     }
@@ -152,25 +190,28 @@ function mlbParseSavantAbsCsv_(text) {
 /**
  * Optional fetch + parse of ABS team CSV. Requires pipelineLog_.
  */
+/**
+ * @returns {number} teams loaded into __mlbSavantAbsTeamMult; -1 = skipped (off / no pipelineLog)
+ */
 function mlbSavantAbsIngestBestEffort_() {
   if (!pipelineLog_) {
-    return;
+    return -1;
   }
   const cfg = getConfig() || {};
   const on = String(cfg['SAVANT_INGEST_ENABLED'] != null ? cfg['SAVANT_INGEST_ENABLED'] : '')
     .trim()
     .toLowerCase();
   if (on !== 'true' && on !== '1' && on !== 'yes') {
-    return;
+    return -1;
   }
   const url = String(cfg['SAVANT_ABS_CSV_URL'] != null ? cfg['SAVANT_ABS_CSV_URL'] : '').trim();
   if (!url) {
     addPipelineWarning_('Savant: SAVANT_INGEST_ENABLED is on but SAVANT_ABS_CSV_URL is empty.');
-    return;
+    return 0;
   }
   if (url.indexOf('http://') !== 0 && url.indexOf('https://') !== 0) {
     addPipelineWarning_('Savant: SAVANT_ABS_CSV_URL must start with http:// or https://');
-    return;
+    return 0;
   }
   try {
     const res = UrlFetchApp.fetch(url, {
@@ -180,22 +221,24 @@ function mlbSavantAbsIngestBestEffort_() {
     const code = res.getResponseCode();
     if (code !== 200) {
       addPipelineWarning_('Savant ABS CSV: HTTP ' + code + ' for URL');
-      return;
+      return 0;
     }
-    const text = res.getContentText() || '';
+    const text = res.getContentText('UTF-8') || '';
     if (text.length < 10) {
       addPipelineWarning_('Savant ABS CSV: body too short to be useful');
-      return;
+      return 0;
     }
     const parsed = mlbParseSavantAbsCsv_(text);
     if (parsed.count < 1) {
       addPipelineWarning_('Savant ABS CSV: parsed 0 teams (' + (parsed.warn || 'check columns') + ')');
-      return;
+      return 0;
     }
     if (parsed.warn) {
       addPipelineWarning_('Savant ABS CSV: loaded ' + parsed.count + ' teams — ' + parsed.warn);
     }
+    return parsed.count;
   } catch (e) {
     addPipelineWarning_('Savant ABS CSV fetch failed: ' + (e.message || e));
+    return 0;
   }
 }

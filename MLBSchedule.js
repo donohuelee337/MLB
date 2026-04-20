@@ -77,6 +77,28 @@ function mlbScheduleMatchupForGamePk_(ss, gamePk) {
   return '';
 }
 
+/** @returns {{ matchup: string, away: string, home: string, hpUmp: string }} */
+function mlbScheduleMetaForGamePk_(ss, gamePk) {
+  const g = parseInt(gamePk, 10);
+  const empty = { matchup: '', away: '', home: '', hpUmp: '' };
+  if (!g) return empty;
+  const sh = ss.getSheetByName(MLB_SCHEDULE_TAB);
+  if (!sh || sh.getLastRow() < 4) return empty;
+  const last = sh.getLastRow();
+  const block = sh.getRange(4, 1, last, 14).getValues();
+  for (let i = 0; i < block.length; i++) {
+    if (parseInt(block[i][0], 10) === g) {
+      return {
+        matchup: String(block[i][5] || '').trim(),
+        away: String(block[i][3] || '').trim(),
+        home: String(block[i][4] || '').trim(),
+        hpUmp: String(block[i][13] || '').trim(),
+      };
+    }
+  }
+  return empty;
+}
+
 function fetchMLBScheduleForSlate() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const cfg = getConfig();
