@@ -58,6 +58,7 @@ function fetchMLBFanDuelOdds() {
   const apiKey = getOddsApiKey_();
   if (!apiKey) return;
 
+  ensureMlbPipelineSlateDateAdvanced_(getConfig());
   const cfg = getConfig();
   const slateDate = getSlateDateString_(cfg);
   const eventIds = getMLEventIdsForDate_(apiKey, slateDate);

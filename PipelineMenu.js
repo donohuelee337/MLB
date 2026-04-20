@@ -81,6 +81,11 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   } catch (e) {
     Logger.log('gradeMLBPendingResults_: ' + e);
   }
+  try {
+    ensureMlbPipelineSlateDateAdvanced_(getConfig());
+  } catch (e) {
+    Logger.log('ensureMlbPipelineSlateDateAdvanced_: ' + e);
+  }
   mlbResetPitchGameLogFetchCache_();
   mlbResetPitchHandCache_();
   mlbResetTeamHittingSeasonCache_();

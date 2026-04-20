@@ -50,11 +50,10 @@ function buildConfigTab() {
       });
     }
   } catch (e) {}
-  const tz = Session.getScriptTimeZone();
   const defaultSlate =
     prevSlate && /^\d{4}-\d{2}-\d{2}$/.test(prevSlate)
       ? prevSlate
-      : Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+      : Utilities.formatDate(new Date(), 'America/New_York', 'yyyy-MM-dd');
 
   if (!sheet) sheet = ss.insertSheet(CONFIG_TAB_NAME);
   sheet.clearContents().clearFormats();
@@ -69,7 +68,12 @@ function buildConfigTab() {
     row++;
   }
   row_('RUN_WINDOW', 'MORNING', 'MORNING | MIDDAY | FINAL');
-  row_('SLATE_DATE', defaultSlate, 'yyyy-MM-dd in script TZ — use menu "tomorrow" or set manually');
+  row_('SLATE_DATE', defaultSlate, 'yyyy-MM-dd — slate for schedule + odds; auto can advance (see next row)');
+  row_(
+    'SLATE_AUTO_ADVANCE_WHEN_COMPLETE',
+    'true',
+    'true | false — when SLATE_DATE is today (America/New_York) and every MLB game that day is final/postponed/cancelled (or zero games), advance SLATE_DATE to tomorrow before fetch — prep next slate before midnight.'
+  );
   row_('ODDS_BOOK', 'fanduel', 'the-odds-api bookmaker key');
   row_('ODDS_REGION', 'us', 'regions param');
   row_('K9_BLEND_L7_WEIGHT', '0.35', '0..1 blend of L3 K/9 vs season K9 for 🎰 λ (needs L3_IP in queue). Practical scan ~0.2–0.5 around default 0.35; tune iteratively after several slates using Pipeline_Log and 🎰 bet card outcomes. If this key is missing, re-run menu "0. Build Config tab".');
@@ -139,10 +143,9 @@ function getOddsApiKey_() {
 }
 
 function getSlateDateString_(cfg) {
-  const tz = Session.getScriptTimeZone();
   const fromCfg = cfg && cfg['SLATE_DATE'] ? String(cfg['SLATE_DATE']).trim() : '';
   if (fromCfg && /^\d{4}-\d{2}-\d{2}$/.test(fromCfg)) return fromCfg;
-  return Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+  return Utilities.formatDate(new Date(), 'America/New_York', 'yyyy-MM-dd');
 }
 
 /** Soft validation for tuning keys — logs pipeline warnings only (does not block). */
