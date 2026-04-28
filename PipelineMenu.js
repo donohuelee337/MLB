@@ -30,7 +30,7 @@ function onOpen() {
     .addItem('📋 Batter HR queue / card', 'runBatterHrQueueAndCard_')
     .addItem('🃏 MLB Bet Card only (final plays)', 'refreshMLBBetCard')
     .addItem('📊 Grade pending MLB results (boxscore)', 'gradeMLBPendingResults_')
-    .addItem('📈 Backfill closing K (Results Log)', 'mlbBackfillClosingMenu_')
+    .addItem('📈 Backfill closing lines — all markets (Results Log)', 'mlbBackfillClosingMenu_')
     .addItem('📋 Open Pipeline Log', 'mlbActivatePipelineLog_')
     .addToUi();
 }
@@ -59,12 +59,12 @@ function runFinalWindowMLB() {
   runMLBBallWindow_('FINAL', false);
 }
 
-/** Menu: fill close_line / close_odds / clv_note from current ✅ tab for this slate’s log rows. */
+/** Menu: fill close_line / close_odds / clv_note for all 7 markets from current ✅ FD tab. */
 function mlbBackfillClosingMenu_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const n = mlbBackfillResultsLogClosingK_(ss);
   try {
-    ss.toast('Results log: updated ' + n + ' row(s) from FanDuel K tab', 'MLB-BOIZ', 7);
+    ss.toast(‘Results log: updated ‘ + n + ‘ row(s) across all markets’, ‘MLB-BOIZ’, 7);
   } catch (e) {}
 }
 

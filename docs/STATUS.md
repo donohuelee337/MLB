@@ -1,6 +1,6 @@
 # MLB-BOIZ — where we are (vs NBA AI-BOIZ)
 
-**Canonical repo:** `Documents\Cursor\mlb-boiz` — use this folder in Cursor and for `clasp push`.
+**Canonical repo:** `Documents\Cursor\MLB` — use this folder in Cursor and for `clasp push`.
 
 ## Done (MVP+, AI-BOIZ spirit)
 
@@ -12,19 +12,20 @@
 | Schedule / context | `MLBSchedule.js` → **`📅 MLB_Schedule`** (statsapi + probables + **home plate umpire** via `officials` hydrate) |
 | Pitcher game logs (Stats API) | `MLBPitcherGameLogs.js` → **`📒 Pitcher_Game_Logs`** (warms cache for queue) |
 | Slate / line density | `MLBSlateBoard.js` → **`🎯 MLB_Slate_Board`** (join uses flexible game keys vs FD labels) |
-| Schedule ↔ FD join | `MLBMatchKeys.js` — normalized labels + abbr→Odds team names + **`MLB_ABBR_ODDS_TEAM_ALTERNATES`** for label drift |
-| Pitcher K slate | `MLBPitcherKQueue.js` → **`📋 Pitcher_K_Queue`** (`throws`, **`opp_abbr`**, **`opp_k_pa`** season SO/PA, **`opp_k_pa_vs`** vs same-handed pitching via statsapi `/stats` aggregate) |
+| Schedule ↔ FD join | `MLBMatchKeys.js` — normalized labels + abbr→Odds team names + **`MLB_ABBR_ODDS_TEAM_ALTERNATES`**; `mlbBuildPersonPropOddsIndexMerged_` for alternate FD market fallback |
+| Pitcher K | `MLBPitcherKQueue.js` → **`📋 Pitcher_K_Queue`** (`throws`, `opp_abbr`, **`opp_k_pa`** season SO/PA, **`opp_k_pa_vs`** vs same-hand via statsapi); `MLBPitcherKBetCard.js` → **`🎰 Pitcher_K_Card`** (K9 blend, park, L/R, opp K%, **`ABS_K_LAMBDA_MULT`**, per-pitcher ABS from **`SAVANT_PITCHER_ABS_CSV_URL`**, HP ump) |
+| Pitcher outs / walks / HA | `MLBPitcherSecondaryMarkets.js` → **`🔩 Pitcher_Outs_Card`**, **`🪶 Pitcher_BB_Card`**, **`🧱 Pitcher_HA_Card`** — shared queue + card body; ABS shadow mult inverted into walks (1/mult) + HA (50%); alternate FD market fallback for walks + HA |
+| Batter TB / Hits / HR | `MLBBatterTBQueue.js` + `MLBBatterTBBetCard.js` → **`🎲 Batter_TB_Card`**, **`🎯 Batter_Hits_Card`**, **`💥 Batter_HR_Card`** — shared queue + card body; L7 + season blend per batter; park TB env |
 | Opponent K context | `MLBTeamHitting.js` — cached team hitting; `mlbTeamIdFromAbbr_` in `Config.js` |
-| Poisson + EV (K) | `MLBPitcherKBetCard.js` → **`🎰 Pitcher_K_Card`** (K9 blend, park, L/R, **opp K%** prefers vs-hand vs **`LEAGUE_HITTING_K_PA`** when **`OPP_K_RATE_LAMBDA_STRENGTH`** is non-zero, **`ABS_K_LAMBDA_MULT`**, HP ump) |
-| Bet card | `MLBBetCard.js` → **`🃏 MLB_Bet_Card`** (optional **`MIN_EV_BET_CARD`** floor) |
-| Results log + grading | `MLBResultsLog.js` / **`📋 MLB_Results_Log`**; `MLBResultsGrader.js` — menu grader; runs at start of each ball window |
-| CLV proxy (close line) | **`close_line` / `close_odds` / `clv_note`** (line move + **implied Δpp** vs open when odds parse) — `mlbBackfillResultsLogClosingK_` on **FINAL** + menu **📈 Backfill closing K** |
-| Umpire → λ (optional) | **`⚙️ HP_UMP_LAMBDA_MULT`** — scales 🎰 λ when **`hp_umpire`** present (default **1** = off) |
-| Pipeline observability | `MLBPipelineLog.js` → **`⚾ Pipeline_Log`** (funnel, warnings, near-miss append, bet-card game coverage) |
-| Savant / ABS CSV (optional) | `MLBSavantIngest.js` — fetch **`SAVANT_ABS_CSV_URL`** when enabled; parse **`team_id,abs_k_mult`** or **`abbr,factor`** into per-team map; 🎰 λ uses **`mlbGetAbsTeamLambdaMult_`** before **`ABS_K_LAMBDA_MULT`** fallback |
-| League priors (platoon) | **`LEAGUE_HITTING_K_PA`** + **`LEAGUE_HITTING_K_PA_VS_L`** / **`LEAGUE_HITTING_K_PA_VS_R`** for OPP_K ratio when **`opp_k_pa_vs`** is present |
+| Multi-market bet card | `MLBBetCard.js` → **`🃏 MLB_Bet_Card`** — merges all 7 model cards, NBA-style odds band (**`CARD_USE_NBA_ODDS_BAND`**, **`CARD_SINGLES_MIN/MAX_AMERICAN`**), **confidence tiers** (A+ ≥5% EV / A ≥3% / B ≥1% / C >0%), **Kelly sizing** (**`KELLY_BANKROLL`**, **`KELLY_FRACTION`**, **`KELLY_MAX_BET_PCT`**), forced BB slot, game-grouped layout, honorable mentions, debug reject tab (**`🧪 MLB_Bet_Card_Debug`**) |
+| Results log + grading | `MLBResultsLog.js` / **`📋 MLB_Results_Log`**; `MLBResultsGrader.js` — multi-market grader (K, outs, walks, HA, TB, hits, HR); runs at start of each ball window |
+| CLV proxy (all markets) | **`close_line` / `close_odds` / `clv_note`** — `mlbBackfillResultsLogClosingK_` now covers all 7 markets; FD index cached per market to avoid redundant fetches; runs on **FINAL** + menu **📈 Backfill closing K** |
+| Umpire → λ (optional) | **`⚙️ HP_UMP_LAMBDA_MULT`** — scales 🎰 λ when `hp_umpire` present (default **1** = off) |
+| Savant / ABS CSV (optional) | `MLBSavantIngest.js` — team CSV (**`SAVANT_ABS_CSV_URL`**, `team_id,abs_k_mult`) + pitcher CSV (**`SAVANT_PITCHER_ABS_CSV_URL`**, `pitcher_id,abs_k_mult`); 🎰 K uses per-pitcher → per-team → `ABS_K_LAMBDA_MULT` fallback; walks/HA use inverted per-pitcher mult |
+| League priors (platoon) | **`LEAGUE_HITTING_K_PA`** + **`LEAGUE_HITTING_K_PA_VS_L/R`** for OPP_K ratio when `opp_k_pa_vs` present |
+| Pipeline observability | `MLBPipelineLog.js` → **`⚾ Pipeline_Log`** — funnel, warnings, near-misses for all 7 markets (`mlbAppendAllMarketNearMisses_`), game coverage |
+| Auto slate-date advance | `ensureMlbPipelineSlateDateAdvanced_` — advances `SLATE_DATE` to tomorrow NY when all today's games are final before midnight |
 | Multi-window | **`🌅 Morning`**, **`🌤 Midday`** (skips injury HTTP), **`🔒 Final`** — `runMLBBallWindow_` in `PipelineMenu.js` |
-| Docs / clasp | `docs/*`, `.clasp.json` |
 
 ## Orchestrator (truth source)
 
@@ -33,34 +34,39 @@
 **`runMLBBallWindow_(windowTag, skipInjuriesFetch)`** — order of work:
 
 1. `gradeMLBPendingResults_` (best-effort)
-2. `mlbResetPitchGameLogFetchCache_` + `mlbResetPitchHandCache_` + **`mlbResetTeamHittingSeasonCache_`**
-3. Config (`buildConfigTab`)
-4. MLB injuries (ESPN) — **skipped when Midday**
+2. Reset caches: pitch game logs, pitch hand, team hitting, Savant ABS, batter TB
+3. Config (`buildConfigTab` + `validateMlbPipelineConfig_`)
+4. MLB injuries (ESPN) — skipped when Midday
 5. MLB schedule (statsapi)
 6. Pitcher game logs (statsapi)
 7. FanDuel MLB odds
-8. **Savant ingest (optional)** — URL probe / warnings only unless wired further
+8. Savant ingest (optional — team + pitcher ABS CSVs)
 9. Slate board (join)
-10. Pitcher K queue
-11. Pitcher K card
-12. MLB Bet Card
-13. `mlbAppendPitcherKNearMisses_` → `snapshotMLBBetCardToLog` (if bet card OK) → **`mlbBackfillResultsLogClosingK_` when `FINAL` + odds OK** → `mlbAppendBetCardPipelineCoverage_` → step warnings → `writePipelineLogTab_` → toast; activates **`🃏 MLB_Bet_Card`**
+10. Pitcher K queue → K card
+11. Pitcher Outs queue → Outs card
+12. Pitcher Walks queue → Walks card
+13. Pitcher HA queue → HA card
+14. Batter TB queue → TB card
+15. Batter Hits queue → Hits card
+16. Batter HR queue → HR card
+17. MLB Bet Card
+18. `mlbAppendAllMarketNearMisses_` → `snapshotMLBBetCardToLog` → **`mlbBackfillResultsLogClosingK_` (all 7 markets) when FINAL** → `mlbAppendBetCardPipelineCoverage_` → warnings → `writePipelineLogTab_` → toast; activates **`🃏 MLB_Bet_Card`**
 
-One-off menu items mirror those stages (e.g. **`📒 Pitcher game logs only`**, **`🎰 Pitcher K card only (Poisson + EV)`**, **`📋 Open Pipeline Log`**).
+One-off menu items available for every stage (e.g. **`📋 Pitcher Walks queue / card`**, **`📋 Batter TB queue only`**, **`🎯 Batter Hits card only`**, **`📋 Open Pipeline Log`**).
 
-## Not built yet (still fair gaps vs NBA / spec)
+## Not built yet (still fair gaps)
 
-- Broader **StatEngine** beyond pitcher-K Poisson; **v20-style sim** gates
-- Full multi-market breadth if you want NBA-style `Game_Logs` for every prop type
-- **Savant** umpire / catcher framing leaderboards (non-CSV) and richer ABS fields beyond a single **λ** multiplier column
+- Broader **StatEngine** beyond Poisson per-market; **sim-layer** gates
+- **Closing-line backfill for FINAL** only covers the K tab today — multi-market CLV is now in the backfill but depends on FD odds tab still being populated at close time
+- **Savant** umpire / catcher framing leaderboards (non-CSV) and richer ABS fields beyond a single λ multiplier
 - **CSV quality**: quoted commas / non-UTF8 encodings not handled in the simple parser
 
 ## Suggested next product steps
 
-1. Tune **`K9_BLEND_L7_WEIGHT`**, **`MIN_EV_BET_CARD`**, **`OPP_K_RATE_LAMBDA_STRENGTH`**, **`LEAGUE_HITTING_K_PA`** after several slates (re-run **0. Build Config tab** when keys are missing).
-2. Host a small **public CSV** (`team_id,abs_k_mult` or `abbr,factor`), set **`SAVANT_INGEST_ENABLED`** true + **`SAVANT_ABS_CSV_URL`**, then tune multipliers from **`Pipeline_Log`** + results.
-3. Pick one larger theme: **StatEngine/sim**, **non-K markets**, or **split league priors** for platoon λ.
+1. Tune **`K9_BLEND_L7_WEIGHT`**, **`MIN_EV_BET_CARD`**, **`OPP_K_RATE_LAMBDA_STRENGTH`**, **`KELLY_FRACTION`** after several slates — scan **`⚾ Pipeline_Log`** + **`📋 MLB_Results_Log`** CLV columns.
+2. Host small public CSVs (`team_id,abs_k_mult`, `pitcher_id,abs_k_mult`), set **`SAVANT_INGEST_ENABLED`** + **`SAVANT_ABS_CSV_URL`** / **`SAVANT_PITCHER_ABS_CSV_URL`**, then iterate multipliers from Pipeline_Log warnings.
+3. Next larger theme candidates: per-market EV floors + card caps config knobs (⚙️ MIN_EV_PITCHER_K / BET_CARD_MAX_PITCHER_K etc.), sim layer, or non-FD book support.
 
 ## Single repo (formerly two folders)
 
-The old **`mlb-pitcher-k`** folder was merged into **`mlb-boiz`** (2026-04-18). Use **one** Google Sheet + the `scriptId` in this repo’s `.clasp.json`. Pitcher-K **design spec:** `docs/2026-04-11-mlb-pitcher-k-pipeline-design.md`.
+The old **`mlb-pitcher-k`** folder was merged into **`mlb-boiz`** (2026-04-18). Use **one** Google Sheet + the `scriptId` in this repo's `.clasp.json`.
