@@ -291,7 +291,7 @@ function mlbAppendPitcherKNearMisses_(ss) {
   if (!pipelineLog_) return;
   const sh = ss.getSheetByName(MLB_PITCHER_K_CARD_TAB);
   if (!sh || sh.getLastRow() < 4) return;
-  const vals = sh.getRange(4, 1, sh.getLastRow(), 25).getValues();
+  const vals = sh.getRange(4, 1, sh.getLastRow(), MLB_PITCHER_K_CARD_COLS).getValues();
   vals.forEach(function (r) {
     const flags = String(r[18] || '');
     if (flags.indexOf('injury') === -1) return;
@@ -316,6 +316,50 @@ function mlbAppendPitcherKNearMisses_(ss) {
   });
 }
 
+/**
+ * Generic near-miss scanner for any model card tab.
+ * Reads `numCols` columns; column indices configurable via `cols` object.
+ * Logs injured rows that still have a positive-EV side.
+ */
+function mlbAppendCardNearMisses_(ss, tabName, marketKey, numCols, cols) {
+  if (!pipelineLog_) return;
+  const sh = ss.getSheetByName(tabName);
+  if (!sh || sh.getLastRow() < 4) return;
+  const vals = sh.getRange(4, 1, sh.getLastRow(), numCols).getValues();
+  vals.forEach(function (r) {
+    const flags = String(r[cols.flags] || '');
+    if (flags.indexOf('injury') === -1) return;
+    const player = String(r[cols.player] || '').trim();
+    const matchup = String(r[cols.matchup] || '').trim();
+    if (!player || !matchup) return;
+    const evO = parseFloat(String(r[cols.evOver]));
+    const evU = parseFloat(String(r[cols.evUnder]));
+    let bestSide = '';
+    let score = 0;
+    if (!isNaN(evO) && evO > score) { score = evO; bestSide = 'Over'; }
+    if (!isNaN(evU) && evU > score) { score = evU; bestSide = 'Under'; }
+    if (score > 0) {
+      logNearMiss_(player, matchup, marketKey, bestSide, score, flags, 'Injury — model still liked a side');
+    }
+  });
+}
+
+/** Column layout shared by all secondary pitcher card tabs (21 cols). */
+var MLB_SEC_CARD_NEAR_MISS_COLS = { player: 2, matchup: 1, evOver: 12, evUnder: 13, flags: 16 };
+
+/** Column layout shared by all batter prop card tabs (19 cols). */
+var MLB_BATTER_CARD_NEAR_MISS_COLS = { player: 2, matchup: 1, evOver: 12, evUnder: 13, flags: 16 };
+
+function mlbAppendAllMarketNearMisses_(ss) {
+  mlbAppendPitcherKNearMisses_(ss);
+  mlbAppendCardNearMisses_(ss, MLB_PITCHER_OUTS_CARD_TAB,  'pitcher_outs',         MLB_PITCHER_SEC_CARD_COLS,   MLB_SEC_CARD_NEAR_MISS_COLS);
+  mlbAppendCardNearMisses_(ss, MLB_PITCHER_BB_CARD_TAB,    'pitcher_walks',         MLB_PITCHER_SEC_CARD_COLS,   MLB_SEC_CARD_NEAR_MISS_COLS);
+  mlbAppendCardNearMisses_(ss, MLB_PITCHER_HA_CARD_TAB,    'pitcher_hits_allowed',  MLB_PITCHER_SEC_CARD_COLS,   MLB_SEC_CARD_NEAR_MISS_COLS);
+  mlbAppendCardNearMisses_(ss, MLB_BATTER_TB_CARD_TAB,     'batter_total_bases',    MLB_BATTER_PROP_CARD_COLS,   MLB_BATTER_CARD_NEAR_MISS_COLS);
+  mlbAppendCardNearMisses_(ss, MLB_BATTER_HITS_CARD_TAB,   'batter_hits',           MLB_BATTER_PROP_CARD_COLS,   MLB_BATTER_CARD_NEAR_MISS_COLS);
+  mlbAppendCardNearMisses_(ss, MLB_BATTER_HR_CARD_TAB,     'batter_home_runs',      MLB_BATTER_PROP_CARD_COLS,   MLB_BATTER_CARD_NEAR_MISS_COLS);
+}
+
 /** After 🃏 MLB_Bet_Card: fill GAME COVERAGE cardPicks counts (AI-BOIZ-style funnel). */
 function mlbAppendBetCardPipelineCoverage_(ss) {
   if (!pipelineLog_) return;
@@ -323,6 +367,9 @@ function mlbAppendBetCardPipelineCoverage_(ss) {
   if (!sh || sh.getLastRow() < 4) return;
   const data = sh.getRange(4, 1, sh.getLastRow(), 5).getValues();
   data.forEach(function (r) {
+    const rank = r[1];
+    // Skip game-header rows (rank empty, matchup in merged col 1) and honorable-mention rows (rank empty).
+    if (rank === '' || rank == null) return;
     const matchup = String(r[3] || '').trim();
     const play = String(r[4] || '');
     if (!matchup || play.indexOf('No qualifying') !== -1) return;

@@ -6,7 +6,8 @@
 // P(Over) / P(Under) vs half-integer FD line; naive EV from American odds.
 // ============================================================
 
-const MLB_PITCHER_K_CARD_TAB = '🎰 Pitcher_K_Card';
+const MLB_PITCHER_K_CARD_TAB  = '🎰 Pitcher_K_Card';
+const MLB_PITCHER_K_CARD_COLS = 25;
 
 function mlbPoissonCdf_(maxK, lambda) {
   if (maxK < 0) return 0;
@@ -39,6 +40,18 @@ function mlbAmericanImplied_(odds) {
   return Math.round((Math.abs(o) / (Math.abs(o) + 100)) * 1000) / 1000;
 }
 
+/** Returns {side, ev} for the better EV option; prefers Over on a tie. */
+function mlbPickBestSide_(evO, evU) {
+  if (evO !== '' && evU !== '') {
+    if (evO >= evU && evO > 0) return { side: 'Over', ev: evO };
+    if (evU > evO && evU > 0) return { side: 'Under', ev: evU };
+    return evO >= evU ? { side: 'Over', ev: evO } : { side: 'Under', ev: evU };
+  }
+  if (evO !== '') return { side: 'Over', ev: evO };
+  if (evU !== '') return { side: 'Under', ev: evU };
+  return { side: '', ev: '' };
+}
+
 /** Expected profit per $1 risked at this American price (decimal odds payout style). */
 function mlbEvPerDollarRisked_(p, american) {
   const o = parseFloat(american, 10);
@@ -47,6 +60,50 @@ function mlbEvPerDollarRisked_(p, american) {
   if (o > 0) winUnits = o / 100;
   else winUnits = 100 / Math.abs(o);
   return Math.round((p * winUnits - (1 - p)) * 1000) / 1000;
+}
+
+/**
+ * Confidence tier from EV per $1 risked.
+ * A+ = MAX edge (≥5%), A = SHARP (≥3%), B = CONTEXT (≥1%), C = LEAN (>0%).
+ */
+function mlbConfidenceTier_(ev) {
+  const e = parseFloat(ev);
+  if (isNaN(e) || e <= 0) return '';
+  if (e >= 0.05) return 'A+';
+  if (e >= 0.03) return 'A';
+  if (e >= 0.01) return 'B';
+  return 'C';
+}
+
+/**
+ * Full Kelly fraction: f* = p - (1-p)/b, where b = win units at the given American price.
+ * Returns 0 if Kelly is negative (no edge), '' on bad inputs.
+ */
+function mlbKellyFull_(pWin, american) {
+  const p = parseFloat(pWin);
+  const o = parseFloat(american);
+  if (isNaN(p) || p <= 0 || p >= 1 || isNaN(o)) return '';
+  const b = o >= 0 ? o / 100 : 100 / Math.abs(o);
+  const f = p - (1 - p) / b;
+  return f > 0 ? Math.round(f * 10000) / 10000 : 0;
+}
+
+/**
+ * Fractional Kelly dollar amount from config KELLY_BANKROLL / KELLY_FRACTION / KELLY_MAX_BET_PCT.
+ * Returns '' on bad inputs, 0 if no edge.
+ */
+function mlbKellyDollars_(pWin, american, cfg) {
+  const full = mlbKellyFull_(pWin, american);
+  if (full === '' || full <= 0) return full === '' ? '' : 0;
+  const c = cfg || {};
+  const bankroll = parseFloat(String(c['KELLY_BANKROLL'] != null ? c['KELLY_BANKROLL'] : '1000').trim());
+  const frac     = parseFloat(String(c['KELLY_FRACTION']    != null ? c['KELLY_FRACTION']    : '0.25').trim());
+  const capPct   = parseFloat(String(c['KELLY_MAX_BET_PCT'] != null ? c['KELLY_MAX_BET_PCT'] : '0.05').trim());
+  if (isNaN(bankroll) || bankroll <= 0) return '';
+  const fraction = !isNaN(frac) && frac > 0 ? Math.min(frac, 1) : 0.25;
+  const cap      = !isNaN(capPct) && capPct > 0 ? Math.min(capPct, 1) : 0.05;
+  const betPct   = Math.min(full * fraction, cap);
+  return Math.round(bankroll * betPct * 100) / 100;
 }
 
 function mlbProjIpFromQueueRow_(l3ipRaw) {
@@ -218,6 +275,22 @@ function refreshPitcherKBetCard() {
           }
         }
       }
+      // Per-pitcher ABS shadow mult: how dependent this pitcher is on borderline
+      // called strikes. CSV source: SAVANT_PITCHER_ABS_CSV_URL (pitcher_id, abs_k_mult).
+      // Falls back to ABS_PITCHER_K_LAMBDA_MULT config key (default 1 = neutral).
+      const pitcherAbsMult = mlbGetAbsPitcherLambdaMult_(pitcherId);
+      if (!isNaN(lamNum) && lamNum > 0 && pitcherAbsMult != null) {
+        const pm = Math.max(0.85, Math.min(1.08, pitcherAbsMult));
+        lamNum = Math.round(lamNum * pm * 100) / 100;
+      } else {
+        const absPRaw = parseFloat(
+          String(cfg['ABS_PITCHER_K_LAMBDA_MULT'] != null ? cfg['ABS_PITCHER_K_LAMBDA_MULT'] : '1').trim(), 10
+        );
+        if (!isNaN(lamNum) && lamNum > 0 && !isNaN(absPRaw) && absPRaw > 0) {
+          const apm = Math.max(0.90, Math.min(1.08, absPRaw));
+          if (Math.abs(apm - 1) > 1e-6) lamNum = Math.round(lamNum * apm * 100) / 100;
+        }
+      }
       const umpMultRaw = parseFloat(
         String(cfg['HP_UMP_LAMBDA_MULT'] != null ? cfg['HP_UMP_LAMBDA_MULT'] : '1').trim(),
         10
@@ -243,29 +316,9 @@ function refreshPitcherKBetCard() {
     const evO = pOver !== '' && fdOver !== '' ? mlbEvPerDollarRisked_(pOver, fdOver) : '';
     const evU = pUnder !== '' && fdUnder !== '' ? mlbEvPerDollarRisked_(pUnder, fdUnder) : '';
 
-    let bestSide = '';
-    let bestEv = '';
-    if (evO !== '' && evU !== '') {
-      if (evO >= evU && evO > 0) {
-        bestSide = 'Over';
-        bestEv = evO;
-      } else if (evU > evO && evU > 0) {
-        bestSide = 'Under';
-        bestEv = evU;
-      } else if (evO >= evU) {
-        bestSide = 'Over';
-        bestEv = evO;
-      } else {
-        bestSide = 'Under';
-        bestEv = evU;
-      }
-    } else if (evO !== '') {
-      bestSide = 'Over';
-      bestEv = evO;
-    } else if (evU !== '') {
-      bestSide = 'Under';
-      bestEv = evU;
-    }
+    const best = mlbPickBestSide_(evO, evU);
+    const bestSide = best.side;
+    const bestEv = best.ev;
 
     const flags = mlbFlagsCard_(inj, notes, hasModel);
 
@@ -358,7 +411,7 @@ function refreshPitcherKBetCard() {
     'opp_k_pa',
     'opp_k_pa_vs',
   ];
-  sh.getRange(3, 1, 3, headers.length)
+  sh.getRange(3, 1, 1, headers.length)
     .setValues([headers])
     .setFontWeight('bold')
     .setBackground('#e53935')

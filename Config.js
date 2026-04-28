@@ -80,7 +80,7 @@ function buildConfigTab() {
   row_(
     'TB_BLEND_RECENT_WEIGHT',
     '0.35',
-    '0..1 blend of last-7 games TB/game vs season TB/game for 🎲 Batter_TB_Card λ (same spirit as K9_BLEND). Tune after slates.'
+    '0..1 blend of L7 stat/game vs season stat/game for ALL batter prop cards (TB, Hits, HR). Same spirit as K9_BLEND. Tune after slates.'
   );
   row_('MIN_EV_BET_CARD', '0', 'Min EV per $1 on 🃏 card; 0 = any positive EV (any edge). Optional floor: try ~0.02–0.05 vs 0 to drop thin lines; iterate after several slates using Pipeline_Log and 🃏 outcomes. If this key is missing, re-run menu "0. Build Config tab".');
   row_(
@@ -90,6 +90,16 @@ function buildConfigTab() {
   );
   row_('CARD_SINGLES_MIN_AMERICAN', '-150', 'With CARD_USE_NBA_ODDS_BAND: min American for favorites (e.g. −150 means exclude −160).');
   row_('CARD_SINGLES_MAX_AMERICAN', '150', 'With CARD_USE_NBA_ODDS_BAND: max American for underdogs on the card.');
+  row_(
+    'MLB_FORCE_PITCHER_WALKS_BET_CARD',
+    'true',
+    'true | false — when true, 🃏 Pitcher walks skip NBA odds band + MIN_EV_BET_CARD (still need +EV from model), and may add a 3rd straight when 2 non-walk plays already fill the per-game cap.'
+  );
+  row_(
+    'MLB_FORCE_PITCHER_BB_BET_CARD',
+    'true',
+    'Legacy alias for MLB_FORCE_PITCHER_WALKS_BET_CARD. Keep in sync if you edit manually.'
+  );
   row_('HP_UMP_LAMBDA_MULT', '1', 'Multiply 🎰 λ when hp_umpire listed (1=no change; try 1.02–1.05 cautiously)');
   row_('LHP_K_LAMBDA_MULT', '1', 'Extra λ mult when pitcher throws L (1=no change)');
   row_('RHP_K_LAMBDA_MULT', '1', 'Extra λ mult when pitcher throws R (1=no change)');
@@ -105,13 +115,23 @@ function buildConfigTab() {
     'League SO/PA for hitters vs RHP (tune yearly). Used when opp_k_pa_vs is present and starter throws R; else falls back to LEAGUE_HITTING_K_PA.'
   );
   row_('OPP_K_RATE_LAMBDA_STRENGTH', '0', '0 = off. Try 0.15–0.35: scales 🎰 λ from opponent team season K% vs LEAGUE_HITTING_K_PA (whiff-heavier lineups → higher λ). Tune with Pipeline_Log.');
-  row_('ABS_K_LAMBDA_MULT', '1', 'reserved for future Savant/ABS team K environment; 1 = neutral until wired.');
-  row_('SAVANT_INGEST_ENABLED', 'false', 'true | false — when true, pipeline probes SAVANT_ABS_CSV_URL (best-effort; see MLBSavantIngest.js)');
+  row_('ABS_K_LAMBDA_MULT', '1', 'Per-team ABS opponent K environment fallback mult; 1 = neutral. Overridden per-team by SAVANT_ABS_CSV_URL when loaded.');
+  row_('ABS_PITCHER_K_LAMBDA_MULT', '1', 'Per-pitcher ABS shadow-zone fallback mult when SAVANT_PITCHER_ABS_CSV_URL not loaded; 1 = neutral. < 1 suppresses K λ for pitchers reliant on borderline calls.');
+  row_('BB9_BLEND_L7_WEIGHT', '0.35', '0..1 blend of L3 BB/9 vs season BB9 for 🪶 walks λ. 0 = season only; 1 = L3 only. Default 0.35 mirrors K9_BLEND_L7_WEIGHT — captures ABS-driven walk trend in recent starts.');
+  row_('SAVANT_INGEST_ENABLED', 'false', 'true | false — when true, pipeline probes SAVANT_ABS_CSV_URL and SAVANT_PITCHER_ABS_CSV_URL (best-effort; see MLBSavantIngest.js)');
   row_(
     'SAVANT_ABS_CSV_URL',
     '',
     'Public CSV: columns team_id + abs_k_mult (or abbr + factor). Example row: 121,1.02 — loads per-team λ mult when SAVANT_INGEST_ENABLED is true.'
   );
+  row_(
+    'SAVANT_PITCHER_ABS_CSV_URL',
+    '',
+    'CSV: columns pitcher_id + abs_k_mult. Per-pitcher shadow-zone K dependency mult (< 1 = loses Ks to ABS challenges). Loaded when SAVANT_INGEST_ENABLED is true.'
+  );
+  row_('KELLY_BANKROLL', '1000', 'Total bankroll in dollars used for Kelly sizing on 🃏 bet card. Set to your actual roll; Kelly $ scales proportionally.');
+  row_('KELLY_FRACTION', '0.25', 'Fractional Kelly multiplier (0..1). 0.25 = quarter-Kelly (recommended for props). Full Kelly (1.0) is theoretically optimal but high-variance.');
+  row_('KELLY_MAX_BET_PCT', '0.05', 'Hard cap: max bet as fraction of bankroll regardless of Kelly output (default 0.05 = 5%). Prevents runaway sizing on thin samples.');
   ss.getNamedRanges().forEach(function (nr) {
     if (nr.getName() === 'CONFIG') nr.remove();
   });

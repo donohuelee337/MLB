@@ -271,7 +271,7 @@ function fetchMLBScheduleForSlate() {
     'homePlateUmpireId',
   ];
   sh.getRange(1, 1, 1, headers.length).merge().setValue('📅 MLB schedule — ' + dateStr).setFontWeight('bold');
-  sh.getRange(3, 1, 3, headers.length).setValues([headers]).setFontWeight('bold');
+  sh.getRange(3, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
   sh.setFrozenRows(3);
   if (rows.length) {
     sh.getRange(4, 1, rows.length, headers.length).setValues(rows);

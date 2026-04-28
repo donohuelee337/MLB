@@ -17,8 +17,12 @@
 /** @type {Object<string, number>} MLB team id string → ABS λ multiplier */
 var __mlbSavantAbsTeamMult = {};
 
+/** @type {Object<string, number>} MLB pitcher id string → per-pitcher ABS shadow K mult */
+var __mlbSavantAbsPitcherMult = {};
+
 function mlbResetSavantAbsCache_() {
   __mlbSavantAbsTeamMult = {};
+  __mlbSavantAbsPitcherMult = {};
 }
 
 /**
@@ -239,6 +243,102 @@ function mlbSavantAbsIngestBestEffort_() {
     return parsed.count;
   } catch (e) {
     addPipelineWarning_('Savant ABS CSV fetch failed: ' + (e.message || e));
+    return 0;
+  }
+}
+
+// ── Per-pitcher ABS shadow multiplier ─────────────────────────────────────────
+// CSV format: pitcher_id,abs_k_mult  (e.g. 592789,0.93)
+// Represents how dependent a pitcher is on borderline/shadow-zone calls for Ks.
+// < 1 = high shadow dependency → loses Ks to ABS challenges (suppress K lambda).
+// Loaded when SAVANT_INGEST_ENABLED=true and SAVANT_PITCHER_ABS_CSV_URL is set.
+
+function mlbGetAbsPitcherLambdaMult_(pitcherId) {
+  const id = parseInt(pitcherId, 10);
+  if (!id) return null;
+  const k = String(id);
+  if (!Object.prototype.hasOwnProperty.call(__mlbSavantAbsPitcherMult, k)) return null;
+  const v = __mlbSavantAbsPitcherMult[k];
+  return typeof v === 'number' && !isNaN(v) ? v : null;
+}
+
+function mlbParseSavantAbsPitcherCsv_(text) {
+  const lines = String(text || '')
+    .split(/\r?\n/)
+    .map(function (l) { return String(l || '').trim(); })
+    .filter(function (l) { return l && l.indexOf('#') !== 0; });
+  if (!lines.length) return { count: 0, warn: 'no non-empty lines' };
+
+  const firstCells = mlbCsvSplitRow_(lines[0]);
+  const firstId = parseInt(firstCells[0], 10);
+  const looksHeader = isNaN(firstId) || firstCells.length < 2;
+
+  let iPid = 0;
+  let iMult = 1;
+  let dataStart = 0;
+
+  if (looksHeader) {
+    const headNorm = firstCells.map(function (h) {
+      return String(h || '').toLowerCase().replace(/\s+/g, '_');
+    });
+    iPid = -1;
+    iMult = -1;
+    for (let i = 0; i < headNorm.length; i++) {
+      if (['pitcher_id', 'player_id', 'mlbam_id', 'id'].indexOf(headNorm[i]) !== -1) iPid = i;
+      if (['abs_k_mult', 'abs_shadow_mult', 'factor', 'mult', 'k_mult'].indexOf(headNorm[i]) !== -1) iMult = i;
+    }
+    if (iPid < 0) return { count: 0, warn: 'header missing pitcher_id column' };
+    if (iMult < 0) return { count: 0, warn: 'header missing abs_k_mult column' };
+    dataStart = 1;
+  }
+
+  let count = 0;
+  let bad = 0;
+  for (let r = dataStart; r < lines.length; r++) {
+    const cells = mlbCsvSplitRow_(lines[r]);
+    if (!cells.length || (cells.length === 1 && !cells[0])) continue;
+    const pid = parseInt(cells[iPid] || '', 10);
+    const mult = parseFloat(cells[iMult] || '');
+    if (isNaN(pid) || pid <= 0 || isNaN(mult) || mult <= 0) { bad++; continue; }
+    __mlbSavantAbsPitcherMult[String(pid)] = mult;
+    count++;
+  }
+
+  return { count: count, warn: bad > 0 ? bad + ' row(s) skipped' : '' };
+}
+
+function mlbSavantAbsPitcherIngestBestEffort_() {
+  if (!pipelineLog_) return -1;
+  const cfg = getConfig() || {};
+  const on = String(cfg['SAVANT_INGEST_ENABLED'] != null ? cfg['SAVANT_INGEST_ENABLED'] : '').trim().toLowerCase();
+  if (on !== 'true' && on !== '1' && on !== 'yes') return -1;
+  const url = String(cfg['SAVANT_PITCHER_ABS_CSV_URL'] != null ? cfg['SAVANT_PITCHER_ABS_CSV_URL'] : '').trim();
+  if (!url) return -1;
+  if (url.indexOf('http://') !== 0 && url.indexOf('https://') !== 0) {
+    addPipelineWarning_('Savant pitcher ABS: SAVANT_PITCHER_ABS_CSV_URL must start with http:// or https://');
+    return 0;
+  }
+  try {
+    const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true, followRedirects: true });
+    const code = res.getResponseCode();
+    if (code !== 200) {
+      addPipelineWarning_('Savant pitcher ABS CSV: HTTP ' + code);
+      return 0;
+    }
+    const text = res.getContentText('UTF-8') || '';
+    if (text.length < 10) {
+      addPipelineWarning_('Savant pitcher ABS CSV: body too short');
+      return 0;
+    }
+    const parsed = mlbParseSavantAbsPitcherCsv_(text);
+    if (parsed.count < 1) {
+      addPipelineWarning_('Savant pitcher ABS CSV: parsed 0 pitchers (' + (parsed.warn || 'check columns') + ')');
+      return 0;
+    }
+    if (parsed.warn) addPipelineWarning_('Savant pitcher ABS CSV: loaded ' + parsed.count + ' pitchers — ' + parsed.warn);
+    return parsed.count;
+  } catch (e) {
+    addPipelineWarning_('Savant pitcher ABS CSV fetch failed: ' + (e.message || e));
     return 0;
   }
 }

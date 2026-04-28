@@ -7,11 +7,15 @@
 // ============================================================
 
 const MLB_PITCHER_OUTS_QUEUE_TAB = '📋 Pitcher_Outs_Queue';
-const MLB_PITCHER_OUTS_CARD_TAB = '🔩 Pitcher_Outs_Card';
-const MLB_PITCHER_BB_QUEUE_TAB = '📋 Pitcher_BB_Queue';
-const MLB_PITCHER_BB_CARD_TAB = '🪶 Pitcher_BB_Card';
-const MLB_PITCHER_HA_QUEUE_TAB = '📋 Pitcher_HA_Queue';
-const MLB_PITCHER_HA_CARD_TAB = '🧱 Pitcher_HA_Card';
+const MLB_PITCHER_OUTS_CARD_TAB  = '🔩 Pitcher_Outs_Card';
+const MLB_PITCHER_BB_QUEUE_TAB   = '📋 Pitcher_BB_Queue';
+const MLB_PITCHER_BB_CARD_TAB    = '🪶 Pitcher_BB_Card';
+const MLB_PITCHER_HA_QUEUE_TAB   = '📋 Pitcher_HA_Queue';
+const MLB_PITCHER_HA_CARD_TAB    = '🧱 Pitcher_HA_Card';
+
+/** Column counts — keep in sync with mlbPitcherSecondaryBetCardBody_ output and queue writers. */
+const MLB_PITCHER_SEC_QUEUE_COLS = 21;
+const MLB_PITCHER_SEC_CARD_COLS  = 21;
 
 /** Season BB/9 and H/9 from pitching gameLog splits. */
 function mlbPitchingBbHSeasonRates_(playerId, season) {
@@ -66,7 +70,12 @@ function mlbBuildPitcherSecondaryQueue_(ss, marketKey, fdMissToken) {
   });
   mlbPrefetchPitchHandsForIds_(Object.keys(pitcherIdsToPrefetch));
 
-  const oddsIdx = mlbBuildPersonPropOddsIndex_(ss, marketKey);
+  const oddsIdx =
+    marketKey === 'pitcher_walks'
+      ? mlbBuildPersonPropOddsIndexMerged_(ss, 'pitcher_walks', 'pitcher_walks_alternate')
+      : marketKey === 'pitcher_hits_allowed'
+        ? mlbBuildPersonPropOddsIndexMerged_(ss, 'pitcher_hits_allowed', 'pitcher_hits_allowed_alternate')
+        : mlbBuildPersonPropOddsIndex_(ss, marketKey);
   const inj = mlbLoadInjuryLookup_(ss);
   const out = [];
   const seenIds = {};
@@ -126,6 +135,7 @@ function mlbBuildPitcherSecondaryQueue_(ss, marketKey, fdMissToken) {
 
       let l3k = '';
       let l3ip = '';
+      let l3bb = '';
       let k9 = '';
       let bb9 = '';
       let h9 = '';
@@ -143,11 +153,13 @@ function mlbBuildPitcherSecondaryQueue_(ss, marketKey, fdMissToken) {
             k9: lg.k9,
             bb9: rh.bb9,
             h9: rh.h9,
+            l3bb: mlbPitchingL3Bb_(pidNum, season),
           };
         }
         const z = seenIds[pidNum];
         l3k = z.l3k;
         l3ip = z.l3ip;
+        l3bb = z.l3bb !== undefined ? z.l3bb : '';
         k9 = z.k9;
         bb9 = z.bb9;
         h9 = z.h9;
@@ -196,6 +208,7 @@ function mlbBuildPitcherSecondaryQueue_(ss, marketKey, fdMissToken) {
         oppAbbr,
         oppKpa,
         oppKpaVs,
+        l3bb,
       ]);
     });
   });
@@ -219,7 +232,7 @@ function mlbWritePitcherSecondaryQueueSheet_(ss, rows, season, tabName, title, h
     .setBackground('#37474f')
     .setFontColor('#ffffff')
     .setHorizontalAlignment('center');
-  sh.getRange(3, 1, 3, headers.length)
+  sh.getRange(3, 1, 1, headers.length)
     .setValues([headers])
     .setFontWeight('bold')
     .setBackground('#546e7a')
@@ -251,6 +264,7 @@ const MLB_PITCHER_SEC_QUEUE_HEADERS = [
   'opp_abbr',
   'opp_k_pa',
   'opp_k_pa_vs',
+  'L3_BB',
 ];
 
 function refreshPitcherOutsSlateQueue() {
@@ -273,9 +287,9 @@ function refreshPitcherOutsSlateQueue() {
 
 function refreshPitcherWalksSlateQueue() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const pack = mlbBuildPitcherSecondaryQueue_(ss, 'pitcher_walks', 'fd_bb_miss');
+  const pack = mlbBuildPitcherSecondaryQueue_(ss, 'pitcher_walks', 'fd_walks_miss');
   if (pack.err === 'no_schedule') {
-    safeAlert_('Pitcher BB queue', 'Run MLB schedule first.');
+    safeAlert_('Pitcher Walks queue', 'Run MLB schedule first.');
     return;
   }
   mlbWritePitcherSecondaryQueueSheet_(
@@ -286,7 +300,7 @@ function refreshPitcherWalksSlateQueue() {
     '📋 Pitcher walks queue — FD pitcher_walks',
     MLB_PITCHER_SEC_QUEUE_HEADERS
   );
-  ss.toast(pack.rows.length + ' rows', 'Pitcher BB queue', 5);
+  ss.toast(pack.rows.length + ' rows', 'Pitcher Walks queue', 5);
 }
 
 function refreshPitcherHitsAllowedSlateQueue() {
@@ -313,11 +327,46 @@ function mlbLambdaPitcherOuts_(l3ipRaw, cfg) {
   return Math.round(projIp * 3 * 100) / 100;
 }
 
-function mlbLambdaPitcherBb_(bb9raw, l3ipRaw, cfg) {
-  const projIp = mlbProjIpFromQueueRow_(l3ipRaw);
+/** Sum BBs from the last 3 logged starts. Returns number or '' if no splits. */
+function mlbPitchingL3Bb_(playerId, season) {
+  const splits = mlbStatsApiGetPitchingGameSplits_(playerId, season);
+  const n = Math.min(3, splits.length);
+  if (n === 0) return '';
+  let bb = 0;
+  for (let i = 0; i < n; i++) {
+    bb += parseInt((splits[i].stat || {}).baseOnBalls, 10) || 0;
+  }
+  return bb;
+}
+
+/**
+ * Blend season BB/9 with L3 BB/9 (same spirit as mlbEffectiveK9ForLambda_ for Ks).
+ * Config key BB9_BLEND_L7_WEIGHT (default 0.35): weight on the L3 figure.
+ */
+function mlbEffectiveBb9ForLambda_(bb9raw, l3bbRaw, l3ipRaw, cfg) {
   const bb9 = parseFloat(bb9raw, 10);
-  if (isNaN(bb9) || isNaN(projIp) || projIp <= 0) return NaN;
-  return Math.round(((bb9 / 9) * projIp) * 1000) / 1000;
+  const wRaw = cfg && cfg['BB9_BLEND_L7_WEIGHT'] != null
+    ? String(cfg['BB9_BLEND_L7_WEIGHT']).trim() : '0.35';
+  const w = parseFloat(wRaw, 10);
+  const wt = !isNaN(w) ? Math.max(0, Math.min(1, w)) : 0.35;
+  const lbb = parseFloat(l3bbRaw, 10);
+  const lip = parseFloat(l3ipRaw, 10);
+  if (!isNaN(lbb) && !isNaN(lip) && lip > 0.51) {
+    const bb9l = (lbb / lip) * 9;
+    if (!isNaN(bb9) && bb9 > 0) {
+      return Math.round(((1 - wt) * bb9 + wt * bb9l) * 100) / 100;
+    }
+    if (!isNaN(bb9l) && bb9l >= 0) return Math.round(bb9l * 100) / 100;
+  }
+  if (!isNaN(bb9) && bb9 > 0) return Math.round(bb9 * 100) / 100;
+  return NaN;
+}
+
+function mlbLambdaPitcherBb_(bb9raw, l3ipRaw, l3bbRaw, cfg) {
+  const projIp = mlbProjIpFromQueueRow_(l3ipRaw);
+  const bb9eff = mlbEffectiveBb9ForLambda_(bb9raw, l3bbRaw, l3ipRaw, cfg);
+  if (isNaN(bb9eff) || isNaN(projIp) || projIp <= 0) return NaN;
+  return Math.round(((bb9eff / 9) * projIp) * 1000) / 1000;
 }
 
 function mlbLambdaPitcherHa_(h9raw, l3ipRaw, cfg) {
@@ -336,7 +385,7 @@ function mlbPitcherSecondaryBetCardBody_(queueTab, lambdaFn, meta) {
     return;
   }
   const last = q.getLastRow();
-  const raw = q.getRange(4, 1, last, 21).getValues();
+  const raw = q.getRange(4, 1, last, MLB_PITCHER_SEC_QUEUE_COLS).getValues();
   const out = [];
 
   raw.forEach(function (r) {
@@ -359,9 +408,27 @@ function mlbPitcherSecondaryBetCardBody_(queueTab, lambdaFn, meta) {
 
     let lamNum = lambdaFn(l3ip, bb9, h9, cfg, r);
     const homeAbbr = mlbScheduleHomeAbbrForGamePk_(ss, gamePk);
-    const pk = mlbParkKLambdaMultForHomeAbbr_(homeAbbr);
+    const parkFn = meta.parkFactorFn || mlbParkKLambdaMultForHomeAbbr_;
+    const pk = parkFn(homeAbbr);
     if (!isNaN(lamNum) && lamNum >= 0) {
       lamNum = Math.round(lamNum * pk * 1000) / 1000;
+    }
+    // Per-pitcher ABS shadow mult — transform direction is market-dependent (see meta.absPitcherMultTransform).
+    // Walks/HA invert the K-shadow dependency: losing borderline Ks → more BBs / more balls in play.
+    if (meta.absPitcherMultTransform && !isNaN(lamNum) && lamNum > 0) {
+      const rawMult = mlbGetAbsPitcherLambdaMult_(pitcherId);
+      let apm;
+      if (rawMult != null) {
+        apm = meta.absPitcherMultTransform(rawMult);
+      } else {
+        const cfgRaw = parseFloat(
+          String(cfg['ABS_PITCHER_K_LAMBDA_MULT'] != null ? cfg['ABS_PITCHER_K_LAMBDA_MULT'] : '1').trim(), 10
+        );
+        if (!isNaN(cfgRaw) && cfgRaw > 0) apm = meta.absPitcherMultTransform(cfgRaw);
+      }
+      if (apm != null && !isNaN(apm) && Math.abs(apm - 1) > 1e-6) {
+        lamNum = Math.round(lamNum * apm * 1000) / 1000;
+      }
     }
 
     let lambdaDisp = '';
@@ -383,29 +450,9 @@ function mlbPitcherSecondaryBetCardBody_(queueTab, lambdaFn, meta) {
     const evO = pOver !== '' && fdOver !== '' ? mlbEvPerDollarRisked_(pOver, fdOver) : '';
     const evU = pUnder !== '' && fdUnder !== '' ? mlbEvPerDollarRisked_(pUnder, fdUnder) : '';
 
-    let bestSide = '';
-    let bestEv = '';
-    if (evO !== '' && evU !== '') {
-      if (evO >= evU && evO > 0) {
-        bestSide = 'Over';
-        bestEv = evO;
-      } else if (evU > evO && evU > 0) {
-        bestSide = 'Under';
-        bestEv = evU;
-      } else if (evO >= evU) {
-        bestSide = 'Over';
-        bestEv = evO;
-      } else {
-        bestSide = 'Under';
-        bestEv = evU;
-      }
-    } else if (evO !== '') {
-      bestSide = 'Over';
-      bestEv = evO;
-    } else if (evU !== '') {
-      bestSide = 'Under';
-      bestEv = evU;
-    }
+    const best = mlbPickBestSide_(evO, evU);
+    const bestSide = best.side;
+    const bestEv = best.ev;
 
     const flags = mlbPitcherSecondaryFlags_(inj, notes, hasModel);
 
@@ -483,7 +530,7 @@ function mlbPitcherSecondaryBetCardBody_(queueTab, lambdaFn, meta) {
     .setHorizontalAlignment('center')
     .setWrap(true);
   sh.setRowHeight(1, 34);
-  sh.getRange(3, 1, 3, headers.length)
+  sh.getRange(3, 1, 1, headers.length)
     .setValues([headers])
     .setFontWeight('bold')
     .setBackground(meta.headBg2 || '#607d8b')
@@ -508,22 +555,28 @@ function refreshPitcherOutsBetCard() {
     tabColor: '#455a64',
     headBg: '#37474f',
     headBg2: '#546e7a',
+    parkFactorFn: mlbParkKLambdaMultForHomeAbbr_,
   });
 }
 
 function refreshPitcherWalksBetCard() {
   mlbPitcherSecondaryBetCardBody_(MLB_PITCHER_BB_QUEUE_TAB, function (l3ip, bb9, h9, cfg, row) {
-    return mlbLambdaPitcherBb_(bb9, l3ip, cfg);
+    return mlbLambdaPitcherBb_(bb9, l3ip, row[20], cfg);
   }, {
-    alertTitle: 'Pitcher BB card',
-    alertDetail: 'Run Pitcher BB queue first.',
+    alertTitle: 'Pitcher Walks card',
+    alertDetail: 'Run Pitcher Walks queue first.',
     cardTab: MLB_PITCHER_BB_CARD_TAB,
-    cardTitle: '🪶 Pitcher walks card — λ = BB9×proj_IP/9 × park',
+    cardTitle: '🪶 Pitcher walks card — λ = BB9×proj_IP/9 (no park adj)',
     lambdaShort: 'BB',
-    toastLabel: 'Pitcher BB card',
+    toastLabel: 'Pitcher Walks card',
     tabColor: '#5d4037',
     headBg: '#4e342e',
     headBg2: '#6d4c41',
+    parkFactorFn: function () { return 1; },
+    // Shadow-dependent pitchers lose borderline Ks → more walks; invert the K-shadow mult.
+    absPitcherMultTransform: function (m) {
+      return Math.max(0.92, Math.min(1.12, 1 / Math.max(0.85, Math.min(1, m))));
+    },
   });
 }
 
@@ -534,11 +587,16 @@ function refreshPitcherHaBetCard() {
     alertTitle: 'Pitcher HA card',
     alertDetail: 'Run Pitcher HA queue first.',
     cardTab: MLB_PITCHER_HA_CARD_TAB,
-    cardTitle: '🧱 Pitcher hits allowed card — λ = H9×proj_IP/9 × park',
+    cardTitle: '🧱 Pitcher hits allowed card — λ = H9×proj_IP/9 × park (TB env)',
     lambdaShort: 'HA',
     toastLabel: 'Pitcher HA card',
     tabColor: '#263238',
     headBg: '#212121',
     headBg2: '#424242',
+    parkFactorFn: mlbParkTbLambdaMultForHomeAbbr_,
+    // Shadow-dependent pitchers lose Ks → more balls in play → mild HA increase; 50% of the K effect.
+    absPitcherMultTransform: function (m) {
+      return Math.max(0.96, Math.min(1.06, 1 + (1 - Math.max(0.85, Math.min(1, m))) * 0.5));
+    },
   });
 }

@@ -21,7 +21,7 @@ function onOpen() {
     .addItem('📋 Pitcher K queue only (schedule + FD K + game logs)', 'refreshPitcherKSlateQueue')
     .addItem('🎰 Pitcher K card only (Poisson + EV)', 'refreshPitcherKBetCard')
     .addItem('📋 Pitcher Outs queue / card', 'runPitcherOutsQueueAndCard_')
-    .addItem('📋 Pitcher BB queue / card', 'runPitcherBbQueueAndCard_')
+    .addItem('📋 Pitcher Walks queue / card', 'runPitcherBbQueueAndCard_')
     .addItem('📋 Pitcher HA queue / card', 'runPitcherHaQueueAndCard_')
     .addItem('📋 Batter TB queue only (FD TB + hitting logs)', 'refreshBatterTbSlateQueue')
     .addItem('🎲 Batter TB card only (Poisson + EV)', 'refreshBatterTbBetCard')
@@ -92,6 +92,7 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   mlbResetSavantAbsCache_();
   mlbResetBatterTbCaches_();
   let savantTeamCount = -1;
+  let savantPitcherCount = -1;
   const outcomes = [];
 
   function step(name, fn) {
@@ -124,14 +125,15 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   step('FanDuel MLB odds', fetchMLBFanDuelOdds);
   step('Savant ingest (optional)', function () {
     savantTeamCount = mlbSavantAbsIngestBestEffort_();
+    savantPitcherCount = mlbSavantAbsPitcherIngestBestEffort_();
   });
   step('Slate board (join)', refreshMLBSlateBoard);
   step('Pitcher K queue', refreshPitcherKSlateQueue);
   step('Pitcher K card', refreshPitcherKBetCard);
   step('Pitcher Outs queue', refreshPitcherOutsSlateQueue);
   step('Pitcher Outs card', refreshPitcherOutsBetCard);
-  step('Pitcher BB queue', refreshPitcherWalksSlateQueue);
-  step('Pitcher BB card', refreshPitcherWalksBetCard);
+  step('Pitcher Walks queue', refreshPitcherWalksSlateQueue);
+  step('Pitcher Walks card', refreshPitcherWalksBetCard);
   step('Pitcher HA queue', refreshPitcherHitsAllowedSlateQueue);
   step('Pitcher HA card', refreshPitcherHaBetCard);
   step('Batter TB queue', refreshBatterTbSlateQueue);
@@ -198,9 +200,8 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
       ? oSavant.err || 'failed'
       : savantTeamCount < 0
         ? 'skipped (disabled)'
-        : savantTeamCount > 0
-          ? 'teams=' + savantTeamCount
-          : 'no rows parsed — see warnings'
+        : (savantTeamCount > 0 ? 'teams=' + savantTeamCount : 'no team rows — see warnings') +
+          (savantPitcherCount > 0 ? ' · pitchers=' + savantPitcherCount : '')
   );
   logStep_(
     'Slate board',
@@ -233,13 +234,13 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
     oOutsC.ok ? '' : oOutsC.err || 'failed'
   );
   logStep_(
-    'Pitcher BB queue',
+    'Pitcher Walks queue',
     0,
     oBbQ.ok ? mlbTabDataRowsBelowHeader3_(ss, MLB_PITCHER_BB_QUEUE_TAB) : 0,
     oBbQ.ok ? '' : oBbQ.err || 'failed'
   );
   logStep_(
-    'Pitcher BB card',
+    'Pitcher Walks card',
     0,
     oBbC.ok ? mlbTabDataRowsBelowHeader3_(ss, MLB_PITCHER_BB_CARD_TAB) : 0,
     oBbC.ok ? '' : oBbC.err || 'failed'
@@ -299,7 +300,7 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
     oBet.ok ? '' : oBet.err || 'failed'
   );
 
-  mlbAppendPitcherKNearMisses_(ss);
+  mlbAppendAllMarketNearMisses_(ss);
 
   if (oBet.ok) {
     try {

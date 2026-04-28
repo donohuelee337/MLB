@@ -269,6 +269,9 @@ function snapshotMLBBetCardToLog(windowTag) {
     if (!playText || playText.indexOf('No qualifying') !== -1) return;
     const player = String(row[5] || '').trim();
     if (!player) return;
+    // Skip game-header rows (play col empty) and honorable-mention rows (rank col empty).
+    const rank = row[1];
+    if (rank === '' || rank == null) return;
 
     const slate = row[0] || slateFallback;
     const line = row[8];

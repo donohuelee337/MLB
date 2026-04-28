@@ -170,6 +170,31 @@ function mlbBuildPersonPropOddsIndex_(ss, marketKey) {
   return byGamePlayer;
 }
 
+/**
+ * Merge alternate lines (same game||player keys) when FanDuel posts only _alternate
+ * for a slate (common for walks / hits allowed).
+ * @param {string} altKey e.g. pitcher_walks_alternate — optional, pass '' to skip
+ */
+function mlbBuildPersonPropOddsIndexMerged_(ss, mainKey, altKey) {
+  const main = mlbBuildPersonPropOddsIndex_(ss, mainKey);
+  const ak = String(altKey || '').trim();
+  if (!ak) return main;
+  const alt = mlbBuildPersonPropOddsIndex_(ss, ak);
+  for (const k in alt) {
+    if (!Object.prototype.hasOwnProperty.call(alt, k)) continue;
+    if (!main[k]) main[k] = {};
+    for (const pt in alt[k]) {
+      if (!Object.prototype.hasOwnProperty.call(alt[k], pt)) continue;
+      if (!main[k][pt]) main[k][pt] = {};
+      const mo = main[k][pt];
+      const ao = alt[k][pt];
+      if (ao.Over != null && mo.Over == null) mo.Over = ao.Over;
+      if (ao.Under != null && mo.Under == null) mo.Under = ao.Under;
+    }
+  }
+  return main;
+}
+
 function mlbOddsPointMapForPerson_(oddsIdx, gameKeys, personNorm) {
   for (let i = 0; i < gameKeys.length; i++) {
     const k = gameKeys[i] + '||' + personNorm;
