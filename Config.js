@@ -40,10 +40,11 @@ function buildConfigTab() {
     }
   } catch (e) {}
   const tz = Session.getScriptTimeZone();
+  const today = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
   const defaultSlate =
-    prevSlate && /^\d{4}-\d{2}-\d{2}$/.test(prevSlate)
+    prevSlate && /^\d{4}-\d{2}-\d{2}$/.test(prevSlate) && prevSlate >= today
       ? prevSlate
-      : Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+      : today;
 
   if (!sheet) sheet = ss.insertSheet(CONFIG_TAB_NAME);
   sheet.clearContents().clearFormats();
