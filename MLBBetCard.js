@@ -33,6 +33,25 @@ function mlbGradePlay_(ev, american) {
   return 'C';
 }
 
+/**
+ * Fractional-Kelly stake in dollars at this American price for the model probability.
+ * f* = (p*b - q)/b where b = decimal-odds-minus-one. Returns 0 if EV <= 0.
+ */
+function mlbKellyStake_(p, american, bankroll, fraction) {
+  const pn = parseFloat(String(p));
+  const o  = parseFloat(String(american));
+  const bk = parseFloat(String(bankroll));
+  const fr = parseFloat(String(fraction));
+  if (isNaN(pn) || isNaN(o) || isNaN(bk) || bk <= 0) return '';
+  const frac = !isNaN(fr) && fr > 0 ? Math.min(1, fr) : 0.25;
+  const b = o > 0 ? o / 100 : 100 / Math.abs(o);
+  if (b <= 0) return '';
+  const q = 1 - pn;
+  const fStar = (pn * b - q) / b;
+  if (!isFinite(fStar) || fStar <= 0) return 0;
+  return Math.round(bk * frac * fStar);
+}
+
 /** gamePk → { iso, hhmm } map from the 📅 MLB_Schedule tab (gameDateRaw at col 3). */
 function mlbScheduleGameTimeIndex_(ss) {
   const idx = {};
@@ -112,9 +131,10 @@ function mlbCollectPlaysFromPitcherOddsCard_(ss, cfg, srcTab, marketLabel, statV
     if (minEvFloor > 0 && ev < minEvFloor) return;
     if (maxOddsCap != null && parseFloat(String(american)) > maxOddsCap) return;
 
-    const pWin = bestSide === 'Over' ? r[10] : r[11];
+    const pWin    = bestSide === 'Over' ? r[10] : r[11];
+    const implied = bestSide === 'Over' ? r[12] : r[13];
     const matchup = r[1];
-    const gamePk = r[0];
+    const gamePk  = r[0];
     const hand =
       throws.toUpperCase() === 'R' ? 'RHP' : throws.toUpperCase() === 'L' ? 'LHP' : throws ? throws : '';
     const pickLabel =
@@ -137,14 +157,13 @@ function mlbCollectPlaysFromPitcherOddsCard_(ss, cfg, srcTab, marketLabel, statV
       side: bestSide,
       line: line,
       american: american,
-      book: 'fanduel',
       pWin: pWin,
+      implied: implied,
       ev: isNaN(ev) ? '' : ev,
       lambda: r[8],
       edge: r[9],
       flags: flags,
       market: marketLabel,
-      disclaimer: disclaimer,
     });
   });
 
@@ -166,7 +185,11 @@ function refreshMLBBetCardMergeOnly_() {
   const minEvFloor = !isNaN(minEvCfg) && minEvCfg > 0 ? minEvCfg : 0;
   const maxOddsCfg = parseFloat(String(cfg['MAX_ODDS_BET_CARD'] != null ? cfg['MAX_ODDS_BET_CARD'] : '').trim());
   const maxOddsCap = !isNaN(maxOddsCfg) ? maxOddsCfg : null;
-  const slateDate = getSlateDateString_(cfg);
+  const bankrollCfg = parseFloat(String(cfg['BANKROLL'] != null ? cfg['BANKROLL'] : '1000').trim());
+  const bankroll    = !isNaN(bankrollCfg) && bankrollCfg > 0 ? bankrollCfg : 1000;
+  const kellyFracCfg = parseFloat(String(cfg['KELLY_FRACTION'] != null ? cfg['KELLY_FRACTION'] : '0.25').trim());
+  const kellyFrac    = !isNaN(kellyFracCfg) && kellyFracCfg > 0 ? Math.min(1, kellyFracCfg) : 0.25;
+  const slateDate    = getSlateDateString_(cfg);
 
   const kTab   = ss.getSheetByName(MLB_PITCHER_K_CARD_TAB);
   const hitTab = ss.getSheetByName(MLB_BATTER_HITS_CARD_TAB);
@@ -265,27 +288,28 @@ function refreshMLBBetCardMergeOnly_() {
   });
 
   const rows = selected.map(function (p, idx) {
+    const kelly = mlbKellyStake_(p.pWin, p.american, bankroll, kellyFrac);
     return [
-      slateDate,
-      idx + 1,
-      p.grade || '',
-      p.gamePk,
-      p.matchup,
-      p.pickLabel,
-      p.pitcher,
-      p.market,
-      p.side,
-      p.line,
-      p.american,
-      p.book,
-      p.pWin,
-      p.ev,
-      p.lambda,
-      p.edge,
-      p.flags,
-      p.pitcherId != null && p.pitcherId !== '' ? p.pitcherId : '',
-      p.disclaimer,
-      p.gameTimeHHmm || '',
+      slateDate,                                                              // 0  slate_date
+      idx + 1,                                                                // 1  rank
+      p.grade || '',                                                          // 2  grade
+      p.gamePk,                                                               // 3  gamePk
+      p.matchup,                                                              // 4  matchup
+      p.pickLabel,                                                            // 5  play
+      p.pitcher,                                                              // 6  player
+      p.market,                                                               // 7  market
+      p.side,                                                                 // 8  side
+      p.line,                                                                 // 9  line
+      p.american,                                                             // 10 american_odds
+      p.pWin,                                                                 // 11 model_prob
+      p.implied !== '' && p.implied != null ? p.implied : '',                 // 12 implied_prob
+      p.ev,                                                                   // 13 ev_per_$1
+      kelly,                                                                  // 14 kelly_$
+      p.lambda,                                                               // 15 lambda
+      p.edge,                                                                 // 16 edge_vs_line
+      p.flags,                                                                // 17 flags
+      p.pitcherId != null && p.pitcherId !== '' ? p.pitcherId : '',           // 18 pitcher_id
+      p.gameTimeHHmm || '',                                                   // 19 game_time
     ];
   });
 
@@ -319,13 +343,15 @@ function refreshMLBBetCardMergeOnly_() {
   }
   sh.setTabColor('#00695c');
 
-  [88, 40, 44, 72, 200, 280, 140, 130, 56, 56, 72, 72, 72, 56, 56, 56, 140, 72, 280, 72]
+  // Column widths (20 cols)
+  [80, 40, 48, 72, 180, 280, 140, 110, 50, 48, 64, 64, 64, 64, 64, 56, 56, 140, 72, 64]
     .forEach(function (w, i) { sh.setColumnWidth(i + 1, w); });
 
   sh.getRange(1, 1, 1, MLB_BET_CARD_NCOL)
     .merge()
     .setValue(
-      '🃏 MLB BET CARD — Pitcher K + Batter Hits — by game time, then EV. A+ plays bypass card caps. Not betting advice.'
+      '🃏 MLB BET CARD — Pitcher K + Batter Hits — by game time, then EV. A+ plays bypass caps. ' +
+      'kelly_$ = bankroll × KELLY_FRACTION × Kelly. Not betting advice.'
     )
     .setFontWeight('bold')
     .setBackground('#004d40')
@@ -345,15 +371,15 @@ function refreshMLBBetCardMergeOnly_() {
     'market',
     'side',
     'line',
-    'american_odds',
-    'book',
-    'model_prob',
-    'ev_per_$1',
+    'odds',
+    'model %',
+    'implied %',
+    'ev / $1',
+    'kelly $',
     'lambda',
     'edge_vs_line',
     'flags',
     'pitcher_id',
-    'disclaimer',
     'game_time',
   ];
   sh.getRange(3, 1, 1, headers.length)
@@ -363,17 +389,38 @@ function refreshMLBBetCardMergeOnly_() {
     .setFontColor('#ffffff');
 
   sh.getRange(4, 1, rows.length, headers.length).setValues(rows);
-  if (rows.length > 0 && rows[0][5] && String(rows[0][5]).indexOf('No qualifying') === -1) {
-    try {
-      ss.setNamedRange('MLB_BET_CARD', sh.getRange(4, 1, rows.length, headers.length));
-    } catch (e) {}
-  }
 
-  // Visually highlight A+ rows (col 3 = grade) so they jump out of the card.
-  if (rows.length > 0 && rows[0][5] && String(rows[0][5]).indexOf('No qualifying') === -1) {
+  const hasRealRows = rows.length > 0 && rows[0][5] && String(rows[0][5]).indexOf('No qualifying') === -1;
+  if (hasRealRows) {
+    try { ss.setNamedRange('MLB_BET_CARD', sh.getRange(4, 1, rows.length, headers.length)); } catch (e) {}
+
+    // Number formats: probabilities as %, EV with sign, Kelly $ as currency.
+    sh.getRange(4, 12, rows.length, 1).setNumberFormat('0.0%');   // model %
+    sh.getRange(4, 13, rows.length, 1).setNumberFormat('0.0%');   // implied %
+    sh.getRange(4, 14, rows.length, 1).setNumberFormat('+0.000;-0.000'); // ev/$1
+    sh.getRange(4, 15, rows.length, 1).setNumberFormat('$0');     // kelly $
+
+    // Grade cell color coding (col 3 = grade)
+    const gradeBg = { 'A+': '#66bb6a', 'A': '#a5d6a7', 'B+': '#fff59d', 'B': '#ffcc80', 'C': '#ef9a9a' };
     for (let i = 0; i < rows.length; i++) {
-      if (String(rows[i][2]) === 'A+') {
+      const g  = String(rows[i][2] || '');
+      const bg = gradeBg[g];
+      if (bg) sh.getRange(4 + i, 3).setBackground(bg).setFontWeight('bold').setHorizontalAlignment('center');
+      // A+ rows: highlight the entire row light green for at-a-glance scan
+      if (g === 'A+') {
         sh.getRange(4 + i, 1, 1, headers.length).setBackground('#e8f5e9').setFontWeight('bold');
+        sh.getRange(4 + i, 3).setBackground('#66bb6a'); // re-set grade cell darker after row paint
+      }
+    }
+
+    // Game dividers: thick bottom border on the last row of each game group
+    let prevPk = String(rows[0][3] || '');
+    for (let i = 1; i < rows.length; i++) {
+      const pk = String(rows[i][3] || '');
+      if (pk !== prevPk) {
+        sh.getRange(4 + i - 1, 1, 1, headers.length)
+          .setBorder(null, null, true, null, null, null, '#37474f', SpreadsheetApp.BorderStyle.SOLID_THICK);
+        prevPk = pk;
       }
     }
   }

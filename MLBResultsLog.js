@@ -251,8 +251,8 @@ function snapshotMLBBetCardToLog(windowTag) {
 
   const last  = bc.getLastRow();
   // Bet card layout (20 cols): 0 slate, 1 rank, 2 grade, 3 gamePk, 4 matchup, 5 play,
-  //  6 player, 7 market, 8 side, 9 line, 10 odds, 11 book, 12 pWin, 13 ev, 14 lambda,
-  // 15 edge, 16 flags, 17 pitcher_id, 18 disclaimer, 19 game_time.
+  //  6 player, 7 market, 8 side, 9 line, 10 odds, 11 model_prob, 12 implied_prob,
+  // 13 ev, 14 kelly_$, 15 lambda, 16 edge, 17 flags, 18 pitcher_id, 19 game_time.
   const block = bc.getRange(4, 1, last, MLB_BET_CARD_NCOL).getValues();
   const window   = windowTag || 'UNKNOWN';
   const now      = new Date();
@@ -297,9 +297,9 @@ function snapshotMLBBetCardToLog(windowTag) {
     const side     = String(row[8] || '').trim();
     const line     = row[9];
     const odds     = row[10];
-    const pWin     = row[12];
+    const pWin     = row[11];
     const ev       = row[13];
-    const playerId = row[17];
+    const playerId = row[18];
 
     const betKey = mlbBetResultKey_(slate, gamePk, playerId, side, line, market);
     const hitRow = mlbFindResultsLogSheetRowForUpsert_(
