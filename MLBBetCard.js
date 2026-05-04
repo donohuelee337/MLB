@@ -341,38 +341,42 @@ function refreshMLBBetCardMergeOnly_() {
   } else {
     sh = ss.insertSheet(MLB_BET_CARD_TAB);
   }
-  sh.setTabColor('#5d4037');
+  sh.setTabColor('#1a2332');
 
-  // ── Lineup-card aesthetic ────────────────────────────────────
-  // Parchment background, typewriter body, italic serif title, hairline rules.
-  const PARCHMENT     = '#fbf6e9';      // paper
-  const PARCHMENT_ALT = '#f3ead2';      // tinted row band
-  const INK           = '#2c1810';      // dark walnut
-  const RULE          = '#a89a85';      // warm gray
-  const HEADER_BG     = '#3e2723';      // ink-stained header
-  const HEADER_TEXT   = '#fbf6e9';
+  // ── Card-back aesthetic ──────────────────────────────────────
+  // Inspired by Topps stat-blocks + The Show overlays:
+  // ivory paper, navy ink, monospace for numbers, condensed serif for labels.
+  const PAPER       = '#faf7f0';      // very pale ivory (subtler than parchment)
+  const PAPER_ALT   = '#f4efe2';      // band stripe (still subtle)
+  const INK         = '#1a2332';      // dark navy
+  const INK_SOFT    = '#56627a';      // muted slate for de-emphasized cells
+  const RULE        = '#d4cdb8';      // light warm gray
+  const HEADER_BG   = '#1a2332';      // navy header
+  const HEADER_TEXT = '#faf7f0';
+  const BODY_FONT   = 'Source Sans Pro'; // body labels
+  const NUM_FONT    = 'Roboto Mono';      // tabular numbers (Topps stat block)
+  const TITLE_FONT  = 'Playfair Display'; // title only
 
   // Column widths (20 cols)
   [76, 36, 42, 64, 168, 280, 130, 96, 46, 44, 56, 60, 60, 64, 56, 50, 60, 130, 64, 56]
     .forEach(function (w, i) { sh.setColumnWidth(i + 1, w); });
 
-  // Title bar — italic serif, no bold, ink on parchment with thin underline.
+  // Title bar — small, restrained: serif italic on ivory with a thin navy rule.
   sh.getRange(1, 1, 1, MLB_BET_CARD_NCOL)
     .merge()
     .setValue(
-      'Lineup Card  ·  ' + slateDate + '  ·  Pitcher K  ·  Batter Hits  ·  ' +
-      'sorted by game time, EV within game.  A+ plays bypass caps.'
+      'MLB Card · ' + slateDate + ' · sorted by game time, EV within game · A+ plays bypass caps'
     )
-    .setFontFamily('Playfair Display')
-    .setFontSize(13)
+    .setFontFamily(TITLE_FONT)
+    .setFontSize(11)
     .setFontStyle('italic')
     .setFontWeight('normal')
-    .setBackground(PARCHMENT)
+    .setBackground(PAPER)
     .setFontColor(INK)
     .setHorizontalAlignment('center')
     .setVerticalAlignment('middle')
     .setWrap(true);
-  sh.setRowHeight(1, 32);
+  sh.setRowHeight(1, 26);
   sh.getRange(1, 1, 1, MLB_BET_CARD_NCOL)
     .setBorder(null, null, true, null, null, null, INK, SpreadsheetApp.BorderStyle.SOLID);
 
@@ -400,15 +404,14 @@ function refreshMLBBetCardMergeOnly_() {
   ];
   sh.getRange(3, 1, 1, headers.length)
     .setValues([headers])
-    .setFontFamily('Playfair Display')
-    .setFontSize(10)
-    .setFontStyle('italic')
+    .setFontFamily(BODY_FONT)
+    .setFontSize(9)
     .setFontWeight('normal')
     .setBackground(HEADER_BG)
     .setFontColor(HEADER_TEXT)
     .setHorizontalAlignment('center')
     .setVerticalAlignment('middle');
-  sh.setRowHeight(3, 24);
+  sh.setRowHeight(3, 22);
 
   sh.getRange(4, 1, rows.length, headers.length).setValues(rows);
 
@@ -416,18 +419,25 @@ function refreshMLBBetCardMergeOnly_() {
   if (hasRealRows) {
     try { ss.setNamedRange('MLB_BET_CARD', sh.getRange(4, 1, rows.length, headers.length)); } catch (e) {}
 
-    // Body styling: typewriter, ink color, parchment background, thin warm-gray rules.
+    // Body styling: clean sans body on ivory, light-gray hairline rules.
     const body = sh.getRange(4, 1, rows.length, headers.length);
-    body.setFontFamily('Special Elite')
+    body.setFontFamily(BODY_FONT)
         .setFontSize(10)
         .setFontWeight('normal')
         .setFontColor(INK)
-        .setBackground(PARCHMENT)
+        .setBackground(PAPER)
         .setVerticalAlignment('middle')
         .setBorder(true, true, true, true, true, true, RULE, SpreadsheetApp.BorderStyle.SOLID);
-    sh.setRowHeights(4, rows.length, 22);
+    sh.setRowHeights(4, rows.length, 21);
+
+    // Numeric columns get tabular monospace (Topps stat-block feel)
+    const numCols = [10, 11, 12, 13, 14, 15, 16, 17];  // line, odds, model%, book%, ev, kelly, proj, proj-line
+    numCols.forEach(function (c) {
+      sh.getRange(4, c, rows.length, 1).setFontFamily(NUM_FONT).setFontSize(9.5);
+    });
 
     // Number formats
+    sh.getRange(4, 10, rows.length, 1).setNumberFormat('0.0').setHorizontalAlignment('right');     // line
     sh.getRange(4, 11, rows.length, 1).setNumberFormat('+0;-0').setHorizontalAlignment('right');   // odds
     sh.getRange(4, 12, rows.length, 1).setNumberFormat('0.0%').setHorizontalAlignment('right');    // model %
     sh.getRange(4, 13, rows.length, 1).setNumberFormat('0.0%').setHorizontalAlignment('right');    // book %
@@ -436,25 +446,24 @@ function refreshMLBBetCardMergeOnly_() {
     sh.getRange(4, 16, rows.length, 1).setNumberFormat('0.00').setHorizontalAlignment('right');    // proj
     sh.getRange(4, 17, rows.length, 1).setNumberFormat('+0.00;-0.00').setHorizontalAlignment('right'); // proj − line
     sh.getRange(4,  9, rows.length, 1).setHorizontalAlignment('center'); // side
-    sh.getRange(4, 10, rows.length, 1).setNumberFormat('0.0').setHorizontalAlignment('center');    // line
 
-    // Subtle alternating row band for readability (every 2nd play within a game)
+    // Subtle alternating row band within each game group
     let bandToggle = false;
     let prevPkBand = String(rows[0][3] || '');
     for (let i = 0; i < rows.length; i++) {
       const pk = String(rows[i][3] || '');
       if (pk !== prevPkBand) { bandToggle = false; prevPkBand = pk; }
-      if (bandToggle) sh.getRange(4 + i, 1, 1, headers.length).setBackground(PARCHMENT_ALT);
+      if (bandToggle) sh.getRange(4 + i, 1, 1, headers.length).setBackground(PAPER_ALT);
       bandToggle = !bandToggle;
     }
 
-    // Grade cell — small muted color block, lowercase italic
+    // Grade cell — small muted block, condensed-feel sans
     const gradeBg = {
-      'A+': '#7cb342',  // mossy green (don't shout)
-      'A':  '#aed581',
-      'B+': '#fff176',
-      'B':  '#ffb74d',
-      'C':  '#e57373',
+      'A+': '#5d8a3a',  // muted forest (Topps card-back green)
+      'A':  '#9bb56b',
+      'B+': '#e6c955',
+      'B':  '#d99a4a',
+      'C':  '#c47670',
     };
     for (let i = 0; i < rows.length; i++) {
       const g  = String(rows[i][2] || '');
@@ -462,32 +471,32 @@ function refreshMLBBetCardMergeOnly_() {
       if (bg) {
         sh.getRange(4 + i, 3)
           .setBackground(bg)
-          .setFontFamily('Playfair Display')
-          .setFontStyle('italic')
-          .setFontWeight('normal')
+          .setFontFamily(BODY_FONT)
+          .setFontWeight('bold')
+          .setFontColor(g === 'A+' || g === 'C' ? PAPER : INK)
           .setHorizontalAlignment('center');
       }
     }
 
-    // Model % color cue — comfortably-above-coin-flip is dark green; coin-flip-zone is amber.
+    // Model % color cue — well-above-coin-flip green, coin-flip-zone amber
     for (let i = 0; i < rows.length; i++) {
       const mp = parseFloat(String(rows[i][11]));
       if (isNaN(mp)) continue;
       let color = INK;
-      if (mp >= 0.62)      color = '#33691e';  // strong (well above coin flip)
-      else if (mp >= 0.55) color = INK;        // workable
-      else                 color = '#bf6c00';  // amber — basically coin flip
+      if (mp >= 0.62)      color = '#2e6b1f';
+      else if (mp >= 0.55) color = INK;
+      else                 color = '#b56807';   // amber — basically coin flip
       sh.getRange(4 + i, 12).setFontColor(color);
     }
 
-    // EV: green for stronger edges
+    // EV color cue: green for strong, slate for marginal
     for (let i = 0; i < rows.length; i++) {
       const ev = parseFloat(String(rows[i][13]));
       if (isNaN(ev)) continue;
-      sh.getRange(4 + i, 14).setFontColor(ev >= 0.05 ? '#33691e' : ev >= 0.02 ? INK : '#6d4c41');
+      sh.getRange(4 + i, 14).setFontColor(ev >= 0.05 ? '#2e6b1f' : ev >= 0.02 ? INK : INK_SOFT);
     }
 
-    // Game dividers: hairline solid in walnut ink (replaces thick bar)
+    // Game dividers: hairline solid in navy ink (subtle, not a bar)
     let prevPk = String(rows[0][3] || '');
     for (let i = 1; i < rows.length; i++) {
       const pk = String(rows[i][3] || '');
@@ -498,12 +507,16 @@ function refreshMLBBetCardMergeOnly_() {
       }
     }
 
-    // De-emphasize technical columns (gamePk, player_id) so eye skips past them
-    sh.getRange(4, 4, rows.length, 1).setFontColor('#9e8e74'); // gamePk
-    sh.getRange(4, 19, rows.length, 1).setFontColor('#9e8e74'); // player_id
+    // De-emphasize technical columns
+    sh.getRange(4, 4, rows.length, 1).setFontColor(INK_SOFT).setFontFamily(NUM_FONT).setFontSize(9); // gamePk
+    sh.getRange(4, 19, rows.length, 1).setFontColor(INK_SOFT).setFontFamily(NUM_FONT).setFontSize(9); // player_id
 
-    // Time column: small caps feel
-    sh.getRange(4, 20, rows.length, 1).setFontFamily('Playfair Display').setFontStyle('italic').setHorizontalAlignment('right');
+    // Time column — small italic serif, right-aligned
+    sh.getRange(4, 20, rows.length, 1)
+      .setFontFamily(TITLE_FONT)
+      .setFontStyle('italic')
+      .setFontSize(10)
+      .setHorizontalAlignment('right');
   }
 
   sh.setFrozenRows(3);
