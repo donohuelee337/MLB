@@ -160,9 +160,9 @@ function mlbLookupClosingPitcherPropWithIdx_(ss, oddsIdx, gameStr, playerStr, be
 
 /**
  * After FINAL odds refresh: fill close_line / close_odds / clv_note for this
- * slate’s pitcher K and batter hits rows. Historically-logged walk rows are
+ * slate's pitcher K and batter hits rows. Historically-logged walk rows are
  * also handled for backward compatibility.
- * Overwrites prior close columns when re-run (latest tab = “close” proxy).
+ * Overwrites prior close columns when re-run (latest tab = "close" proxy).
  */
 function mlbBackfillResultsLogClosing_(ss) {
   const logSh = ss.getSheetByName(MLB_RESULTS_LOG_TAB);
@@ -176,36 +176,36 @@ function mlbBackfillResultsLogClosing_(ss) {
 
   for (let i = 0; i < data.length; i++) {
     const row      = data[i];
-    const slateStr = String(row[1] || ‘’).trim();
+    const slateStr = String(row[1] || '').trim();
     if (slateStr !== slateWant) continue;
-    const market    = String(row[5] || ‘’).toLowerCase();
-    const player    = String(row[3] || ‘’).trim();
-    const game      = String(row[4] || ‘’).trim();
-    const side      = String(row[7] || ‘’).trim();
-    const openLine  = row[22] !== ‘’ && row[22] != null ? row[22] : row[6];
-    const openOdds  = row[23] !== ‘’ && row[23] != null ? row[23] : row[8];
+    const market    = String(row[5] || '').toLowerCase();
+    const player    = String(row[3] || '').trim();
+    const game      = String(row[4] || '').trim();
+    const side      = String(row[7] || '').trim();
+    const openLine  = row[22] !== '' && row[22] != null ? row[22] : row[6];
+    const openOdds  = row[23] !== '' && row[23] != null ? row[23] : row[8];
     const gamePkLog = row[13];
     if (!player) continue;
-    if (!String(game || ‘’).trim() && !parseInt(gamePkLog, 10)) continue;
+    if (!String(game || '').trim() && !parseInt(gamePkLog, 10)) continue;
 
     let cl = null;
-    let missNote = ‘no FD match at close’;
-    if (market.indexOf(‘strikeout’) !== -1) {
+    let missNote = 'no FD match at close';
+    if (market.indexOf('strikeout') !== -1) {
       cl       = mlbLookupClosingPitcherK_(ss, game, player, side, gamePkLog);
-      missNote = ‘no FD K match at close’;
-    } else if (market.indexOf(‘batter hit’) !== -1) {
+      missNote = 'no FD K match at close';
+    } else if (market.indexOf('batter hit') !== -1) {
       cl       = mlbLookupClosingBatterHits_(ss, game, player, side, gamePkLog);
-      missNote = ‘no FD hits match at close’;
-    } else if (market.indexOf(‘walk’) !== -1) {
+      missNote = 'no FD hits match at close';
+    } else if (market.indexOf('walk') !== -1) {
       // Historical walk bets — keep for backward compat
       cl       = mlbLookupClosingPitcherWalks_(ss, game, player, side, gamePkLog);
-      missNote = ‘no FD BB match at close’;
+      missNote = 'no FD BB match at close';
     } else {
       continue;
     }
 
     if (!cl) {
-      logSh.getRange(4 + i, 19, 1, 3).setValues([[‘’, ‘’, missNote]]);
+      logSh.getRange(4 + i, 19, 1, 3).setValues([['', '', missNote]]);
       continue;
     }
     const note = mlbClvNoteFromOpenClose_(openLine, openOdds, cl.line, cl.american, side);
