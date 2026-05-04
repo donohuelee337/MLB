@@ -14,12 +14,11 @@
 | Slate / line density | `MLBSlateBoard.js` → **`🎯 MLB_Slate_Board`** (join uses flexible game keys vs FD labels) |
 | Schedule ↔ FD join | `MLBMatchKeys.js` — normalized labels + abbr→Odds team names for fewer `fd_k_miss` rows |
 | Pitcher K slate | `MLBPitcherKQueue.js` → **`📋 Pitcher_K_Queue`** (+ **`throws`** R/L from statsapi `/people/{id}`) |
-| Pitcher walks slate | `MLBPitcherWalkQueue.js` → **`📋 Pitcher_BB_Queue`** (`pitcher_walks` main line) |
 | Poisson + EV (K) | `MLBPitcherKBetCard.js` → **`🎰 Pitcher_K_Card`** (blended K/9 via **`K9_BLEND_L7_WEIGHT`**) |
-| Poisson + EV (BB) | `MLBPitcherWalkBetCard.js` → **`🎰 Pitcher_BB_Card`** (blended BB9; **`BB9_BLEND_L3_WEIGHT`** optional) |
-| Bet card | `MLBBetCard.js` → **`🃏 MLB_Bet_Card`** — **K + walks**, ranked EV (optional **`MIN_EV_BET_CARD`** floor) |
-| Results log + grading | `MLBResultsLog.js` / **`📋 MLB_Results_Log`**; `MLBResultsGrader.js` — menu grader; runs at start of each ball window |
-| CLV proxy (close line) | **`close_line` / `close_odds` / `clv_note`** — `mlbBackfillResultsLogClosingK_` on **FINAL** (after odds) + menu **📈 Backfill closing K** (join tries log **Game** then schedule **`gamePk`** matchup) |
+| Binomial + EV (Hits) | `MLBBatterHitsCard.js` → **`🎰 Batter_Hits_Card`** — P(≥k hits) on λ = season BA × est_AB; reads FD `batter_hits` + `batter_hits_alternate` |
+| Bet card | `MLBBetCard.js` → **`🃏 MLB_Bet_Card`** — **K + Batter Hits**, sorted by **game start time** then EV; **grade rubric** (A+/A/B+/B/C) with A+ bypass; **kelly $**, **model %**, **book %**, **proj**, **proj − line** columns; lineup-card aesthetic (ivory paper, navy ink, mono numbers) |
+| Results log + grading | `MLBResultsLog.js` / **`📋 MLB_Results_Log`**; `MLBResultsGrader.js` — menu grader; runs at start of each ball window; supports K + batter hits (historical walk rows still grade) |
+| CLV proxy (close line) | **`close_line` / `close_odds` / `clv_note`** — `mlbBackfillResultsLogClosing_` on **FINAL** (after odds) + menu **📈 Backfill closing lines** (handles K and batter hits; legacy walk rows for backward compat) |
 | Umpire → λ (optional) | **`⚙️ HP_UMP_LAMBDA_MULT`** — scales 🎰 λ when **`hp_umpire`** present (default **1** = off) |
 | Pipeline observability | `MLBPipelineLog.js` → **`⚾ Pipeline_Log`** (funnel, warnings, near-miss append, bet-card game coverage) |
 | Multi-window | **`🌅 Morning`**, **`🌤 Midday`** (skips injury HTTP), **`🔒 Final`** — `runMLBBallWindow_` in `PipelineMenu.js` |
@@ -31,7 +30,7 @@
 
 **`runMLBBallWindow_(windowTag, skipInjuriesFetch)`** — order of work:
 
-1. `gradeMLBPendingResults_` (best-effort)
+1. `gradeMLBPendingResults_` (best-effort; K + batter hits)
 2. `mlbResetPitchGameLogFetchCache_`
 3. Config (`buildConfigTab`)
 4. MLB injuries (ESPN) — **skipped when Midday**
@@ -41,12 +40,24 @@
 8. Slate board (join)
 9. Pitcher K queue
 10. Pitcher K card
-11. Pitcher BB queue
-12. Pitcher BB card
-13. MLB Bet Card
-14. `mlbAppendPitcherKNearMisses_` (K + BB injury near-misses) → `snapshotMLBBetCardToLog` (if bet card OK) → **`mlbBackfillResultsLogClosingK_` when `FINAL` + odds OK** → `mlbAppendBetCardPipelineCoverage_` → step warnings → `writePipelineLogTab_` → toast; activates **`🃏 MLB_Bet_Card`**
+11. Batter Hits card
+12. MLB Bet Card (merge K + Hits → grade → sort by game time)
+13. `mlbAppendPitcherKNearMisses_` → `snapshotMLBBetCardToLog` (if bet card OK; captures `grade` in Results Log) → **`mlbBackfillResultsLogClosing_` when `FINAL` + odds OK** → `mlbAppendBetCardPipelineCoverage_` → step warnings → `writePipelineLogTab_` → toast; activates **`🃏 MLB_Bet_Card`**
 
-One-off menu items mirror those stages (e.g. **`📋 Pitcher BB queue only`**, **`🎰 Pitcher BB card only`**, **`📋 Open Pipeline Log`**).
+One-off menu items mirror those stages (e.g. **`📋 Pitcher K queue only`**, **`🎰 Batter Hits card only`**, **`📋 Open Pipeline Log`**).
+
+## Bet card details
+
+- **Layout** (20 cols): `slate · # · grade · gamePk · matchup · play · player · market · side · line · odds · model % · book % · ev/$1 · kelly $ · proj · proj − line · flags · player_id · time`
+- **Grade rubric** (in `mlbGradePlay_`):
+  - **A+**: EV ≥ 0.05 AND odds ≤ +130 — bypasses 2/game and 30 total caps
+  - **A**: EV ≥ 0.04 AND odds ≤ +180
+  - **B+**: EV ≥ 0.025
+  - **B**: EV ≥ 0.015
+  - **C**: EV > 0
+- **Kelly $** = `BANKROLL × KELLY_FRACTION × max(0, (p·b − q)/b)` for model probability `p` at American odds (b = decimal odds − 1). Default quarter-Kelly on $1000.
+- **Sort**: game start time asc, EV desc within game (read from schedule `gameDateRaw`).
+- **Visual cues**: model % colored dark-green when ≥62% (well above coin flip), amber when <55% (coin-flip zone). Grade cells colored with muted Topps card-back palette. Game dividers via hairline navy underline.
 
 ## Not built yet (still fair gaps vs NBA / spec)
 
@@ -56,9 +67,10 @@ One-off menu items mirror those stages (e.g. **`📋 Pitcher BB queue only`**, *
 
 ## Suggested next product steps
 
-1. Tune **`K9_BLEND_L7_WEIGHT`** / **`MIN_EV_BET_CARD`** on **`⚙️ Config`** after a few slates (re-run **0. Build Config tab** if those keys are missing).
-2. Extend **`MLB_ABBR_ODDS_TEAM_ALTERNATES`** / Odds name map in `MLBMatchKeys.js` when a team rebrands or the Odds API changes strings.
-3. Pick one backlog theme: CLV, sim layer, or non-K markets.
+1. Tune **`K9_BLEND_L7_WEIGHT`** / **`MIN_EV_BET_CARD`** / **`MAX_ODDS_BET_CARD`** / **`EST_AB_PER_GAME`** / **`KELLY_FRACTION`** on **`⚙️ Config`** after a few slates (re-run **0. Build Config tab** if keys are missing).
+2. After enough graded slates, analyze WIN% by **`grade`** column (Results Log col Y). If A+ doesn't dominate, tighten the rubric in `mlbGradePlay_`.
+3. Extend **`MLB_ABBR_ODDS_TEAM_ALTERNATES`** / Odds name map in `MLBMatchKeys.js` when a team rebrands or the Odds API changes strings.
+4. Pick one backlog theme: CLV, sim layer, or non-K/Hits markets.
 
 ## Single repo (formerly two folders)
 
