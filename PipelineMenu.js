@@ -11,6 +11,7 @@ function onOpen() {
     .addItem('0. Build Config tab', 'buildConfigTab')
     .addSeparator()
     .addItem('🌅 Morning — Injuries + schedule + FanDuel odds', 'runMorningWindowMLB')
+    .addItem('📅 Set SLATE_DATE to today (NY) + Morning', 'runMorningForTodayNY_')
     .addItem('📆 Set SLATE_DATE to tomorrow (NY) + Morning', 'runMorningForTomorrowNY_')
     .addItem('🌤 Midday — Odds + slate + K pipeline (injuries unchanged)', 'runMiddayWindowMLB')
     .addItem('🔒 Final — Full refresh + snapshot', 'runFinalWindowMLB')
@@ -19,6 +20,7 @@ function onOpen() {
     .addItem('📅 MLB schedule only (statsapi)', 'fetchMLBScheduleForSlate')
     .addItem('🎯 Slate board only (join schedule + FD counts)', 'refreshMLBSlateBoard')
     .addItem('📒 Pitcher game logs only (statsapi, warms cache)', 'refreshMLBPitcherGameLogs')
+    .addItem('💣 Batter HR queue only (model P(HR≥1), no price needed)', 'refreshBatterHRQueue')
     .addItem('📋 Pitcher K queue only (schedule + FD K + game logs)', 'refreshPitcherKSlateQueue')
     .addItem('📋 Pitcher BB queue only (schedule + FD walks)', 'refreshPitcherWalkSlateQueue')
     .addItem('🎰 Pitcher K card only (Poisson + EV)', 'refreshPitcherKBetCard')
@@ -28,6 +30,16 @@ function onOpen() {
     .addItem('📈 Backfill closing lines (Results Log)', 'mlbBackfillClosingMenu_')
     .addItem('📋 Open Pipeline Log', 'mlbActivatePipelineLog_')
     .addToUi();
+}
+
+/**
+ * Sets Config SLATE_DATE to today in America/New_York, then runs morning.
+ */
+function runMorningForTodayNY_() {
+  const tz = 'America/New_York';
+  const ymd = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+  setConfigValue_('SLATE_DATE', ymd);
+  runMorningWindowMLB();
 }
 
 /**
