@@ -318,7 +318,6 @@ function mlbAppendPitcherNearMissesFromCard_(ss, tabName, marketKey) {
 
 function mlbAppendPitcherKNearMisses_(ss) {
   mlbAppendPitcherNearMissesFromCard_(ss, MLB_PITCHER_K_CARD_TAB, 'pitcher_strikeouts');
-  mlbAppendPitcherNearMissesFromCard_(ss, MLB_PITCHER_BB_CARD_TAB, 'pitcher_walks');
 }
 
 /** After 🃏 MLB_Bet_Card: fill GAME COVERAGE cardPicks counts (AI-BOIZ-style funnel). */
