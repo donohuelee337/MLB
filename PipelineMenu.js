@@ -21,6 +21,7 @@ function onOpen() {
     .addItem('🎯 Slate board only (join schedule + FD counts)', 'refreshMLBSlateBoard')
     .addItem('📒 Pitcher game logs only (statsapi, warms cache)', 'refreshMLBPitcherGameLogs')
     .addItem('💣 Batter HR queue only (model P(HR≥1), no price needed)', 'refreshBatterHRQueue')
+    .addItem('🧹 List Batter HR queue duplicate tabs', 'listBatterHRQueueDuplicates_')
     .addItem('📋 Pitcher K queue only (schedule + FD K + game logs)', 'refreshPitcherKSlateQueue')
     .addItem('🎰 Pitcher K card only (Poisson + EV)', 'refreshPitcherKBetCard')
     .addItem('🎰 Batter Hits card only (Binomial BA + EV)', 'refreshBatterHitsCard')

@@ -154,15 +154,27 @@ function refreshBatterHRQueue() {
   ss.toast('Fetching season hitting stats from Stats API…', 'Batter HR', 10);
   const allHitters = mlbFetchAllHitterSeasonStats_(season);
   if (!allHitters.length) {
-    safeAlert_('Batter HR queue', 'Could not fetch season hitting stats from Stats API.');
+    safeAlert_(
+      'Batter HR queue',
+      'Stats API returned 0 hitters for season ' + season + '. ' +
+      'If this is the very first day of the season, wait until after the first game ends. ' +
+      'Otherwise check Apps Script logs (View → Executions) for HTTP errors.'
+    );
     return;
   }
 
   // ── 3. Filter to today's slate & compute probability ────────
+  // Lower PA threshold dynamically for early-season slates (fewer ABs accumulated).
+  const slateMonth = parseInt(getSlateDateString_(cfg).split('-')[1], 10);
+  const minPa = slateMonth <= 4 ? 10 : (slateMonth === 5 ? 20 : MLB_BATTER_HR_MIN_PA);
   const rows = [];
+  let matchedTeam = 0;
+  let passedPa    = 0;
   allHitters.forEach(function (h) {
     if (!gamesByAbbr[h.teamAbbr]) return;          // not playing today
-    if (h.pa < MLB_BATTER_HR_MIN_PA) return;       // too small a sample
+    matchedTeam++;
+    if (h.pa < minPa) return;                       // too small a sample
+    passedPa++;
 
     const game = gamesByAbbr[h.teamAbbr];
     const parkMult = mlbParkHrLambdaMultForHomeAbbr_(game.homeAbbr);
@@ -259,7 +271,49 @@ function refreshBatterHRQueue() {
   }
 
   sh.setFrozenRows(3);
+
+  if (rows.length === 0) {
+    safeAlert_(
+      'Batter HR queue',
+      'Empty result. Diagnostic:\n' +
+      '  • Stats API returned ' + allHitters.length + ' hitters (season ' + season + ')\n' +
+      '  • ' + matchedTeam + ' play for one of the ' + slateTeams.length + ' team(s) on this slate\n' +
+      '  • ' + passedPa + ' have at least ' + minPa + ' PA\n' +
+      'If matchedTeam is 0, Stats API team abbreviations do not line up with the schedule (see schedule cols D/E). ' +
+      'If matchedTeam > 0 but passedPa is 0, lower the PA floor — set ⚙️ Config or wait a few games.'
+    );
+    return;
+  }
+
   ss.toast(rows.length + ' batters ranked · top P(HR≥1): ' +
     (rows[0] ? rows[0].name + ' ' + Math.round(rows[0].pHr * 1000) / 10 + '%' : '—'),
     'Batter HR queue', 8);
+}
+
+/**
+ * Menu helper: list every existing 📋 Batter_HR_Queue duplicate (the canonical
+ * tab is exactly the constant MLB_BATTER_HR_QUEUE_TAB; anything else with a
+ * similar name is an old/stale tab the user should remove manually).
+ */
+function listBatterHRQueueDuplicates_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const wanted = MLB_BATTER_HR_QUEUE_TAB;
+  const matches = [];
+  ss.getSheets().forEach(function (sh) {
+    const n = sh.getName();
+    if (n === wanted) return;
+    const lower = n.toLowerCase();
+    if (lower.indexOf('batter_hr') !== -1 || lower.indexOf('batter hr') !== -1 || lower.indexOf('hr_queue') !== -1) {
+      matches.push(n);
+    }
+  });
+  if (matches.length === 0) {
+    safeAlert_('HR Queue dupes', 'No duplicate tabs found. Canonical tab: ' + wanted);
+  } else {
+    safeAlert_(
+      'HR Queue dupes',
+      'Canonical tab: ' + wanted + '\n\nLikely duplicates (delete manually if stale):\n  • ' +
+      matches.join('\n  • ')
+    );
+  }
 }
