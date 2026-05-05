@@ -519,9 +519,186 @@ function refreshMLBBetCardMergeOnly_() {
       .setHorizontalAlignment('right');
   }
 
+  // Bet tracker section below the main card
+  const palette = {
+    paper: PAPER, paperAlt: PAPER_ALT, ink: INK, inkSoft: INK_SOFT,
+    rule: RULE, headerBg: HEADER_BG, headerText: HEADER_TEXT,
+    bodyFont: BODY_FONT, numFont: NUM_FONT, titleFont: TITLE_FONT,
+  };
+  const trackerStart = 4 + rows.length + 2;  // 2 spacer rows after main card
+  mlbAppendBetTrackerSection_(ss, sh, trackerStart, slateDate, palette);
+
   sh.setFrozenRows(3);
   sh.setHiddenGridlines(true);
 
   const aPlus = rows.filter(function (r) { return String(r[2]) === 'A+'; }).length;
   ss.toast(rows.length + ' bet rows · ' + aPlus + ' A+ · ' + slateDate, 'MLB Bet Card', 6);
+}
+
+/**
+ * Append a hit-rate-by-model-probability tracker below the main bet card.
+ * Reads 📋 MLB_Results_Log, groups graded rows by market × time window × bucket,
+ * and writes a small results panel using the same lineup-card palette.
+ */
+function mlbAppendBetTrackerSection_(ss, sh, startRow, slateDate, p) {
+  const log = ss.getSheetByName(MLB_RESULTS_LOG_TAB);
+  if (!log || log.getLastRow() < 4) return startRow;
+
+  const tz   = Session.getScriptTimeZone();
+  const data = log.getRange(4, 1, log.getLastRow(), MLB_RESULTS_LOG_NCOL).getValues();
+
+  // Build cutoff date strings (yyyy-MM-dd) — string compare works since format is ISO.
+  const slateD = new Date(slateDate + 'T12:00:00');
+  const ymd = function (offsetDays) {
+    return Utilities.formatDate(new Date(slateD.getTime() + offsetDays * 86400000), tz, 'yyyy-MM-dd');
+  };
+  const yest  = ymd(-1);
+  const cut7  = ymd(-7);
+  const cut30 = ymd(-30);
+
+  const markets = [
+    { key: 'K',  label: 'STRIKEOUTS',  test: function (m) { return m.indexOf('strikeout')   !== -1; } },
+    { key: 'H',  label: 'HITS',        test: function (m) { return m.indexOf('batter hit')  !== -1; } },
+    { key: 'TB', label: 'TOTAL BASES', test: function (m) { return m.indexOf('total base')  !== -1; } },
+  ];
+  const buckets = [
+    { lo: 0.50, hi: 0.60, label: '50–60%' },
+    { lo: 0.60, hi: 0.70, label: '60–70%' },
+    { lo: 0.70, hi: 0.80, label: '70–80%' },
+    { lo: 0.80, hi: 0.90, label: '80–90%' },
+    { lo: 0.90, hi: 1.001, label: '90–100%' },
+  ];
+  const windows = ['yesterday', 'last7', 'last30', 'lifetime'];
+
+  // stats[marketKey][window][bucketLabel] = { w, l, p }
+  const stats = {};
+  markets.forEach(function (m) {
+    stats[m.key] = {};
+    windows.forEach(function (w) {
+      stats[m.key][w] = {};
+      buckets.forEach(function (b) { stats[m.key][w][b.label] = { w: 0, l: 0, p: 0 }; });
+    });
+  });
+
+  // Aggregate
+  data.forEach(function (row) {
+    const slate = String(row[1] || '').trim();
+    if (!slate || slate >= slateDate) return;
+    const market = String(row[5] || '').toLowerCase();
+    const result = String(row[16] || '').trim().toUpperCase();
+    if (result !== 'WIN' && result !== 'LOSS' && result !== 'PUSH') return;
+    const mp = parseFloat(String(row[9]));
+    if (isNaN(mp) || mp < 0.5) return;
+
+    let mKey = null;
+    for (let i = 0; i < markets.length; i++) {
+      if (markets[i].test(market)) { mKey = markets[i].key; break; }
+    }
+    if (!mKey) return;
+
+    let bKey = null;
+    for (let i = 0; i < buckets.length; i++) {
+      if (mp >= buckets[i].lo && mp < buckets[i].hi) { bKey = buckets[i].label; break; }
+    }
+    if (!bKey) return;
+
+    function bump(w) {
+      const s = stats[mKey][w][bKey];
+      if      (result === 'WIN')  s.w++;
+      else if (result === 'LOSS') s.l++;
+      else                        s.p++;
+    }
+    if (slate === yest)   bump('yesterday');
+    if (slate >= cut7)    bump('last7');
+    if (slate >= cut30)   bump('last30');
+    bump('lifetime');
+  });
+
+  function fmtCell(s) {
+    const n = s.w + s.l;
+    if (n === 0) return '—';
+    return s.w + '-' + s.l + '  ' + Math.round((s.w / n) * 100) + '%';
+  }
+
+  let r = startRow;
+
+  // Title row — italic serif on paper, navy underline
+  sh.getRange(r, 1, 1, MLB_BET_CARD_NCOL)
+    .merge()
+    .setValue('Bet Tracker  ·  hit rate by model probability bucket  ·  graded slates only')
+    .setFontFamily(p.titleFont)
+    .setFontSize(11)
+    .setFontStyle('italic')
+    .setFontColor(p.ink)
+    .setBackground(p.paper)
+    .setHorizontalAlignment('center')
+    .setVerticalAlignment('middle')
+    .setBorder(true, null, true, null, null, null, p.ink, SpreadsheetApp.BorderStyle.SOLID);
+  sh.setRowHeight(r, 28);
+  r++;
+
+  // Window-header row (blank label cell + 4 window headers)
+  sh.getRange(r, 1, 1, MLB_BET_CARD_NCOL).setBackground(p.paper);
+  sh.getRange(r, 1, 1, 5)
+    .setValues([['', 'YESTERDAY', 'LAST 7', 'LAST 30', 'LIFETIME']])
+    .setFontFamily(p.bodyFont)
+    .setFontSize(9)
+    .setFontColor(p.ink)
+    .setBackground(p.paperAlt)
+    .setHorizontalAlignment('center');
+  sh.setColumnWidth(2, 96);
+  sh.setColumnWidth(3, 96);
+  sh.setColumnWidth(4, 96);
+  sh.setColumnWidth(5, 96);
+  r++;
+
+  markets.forEach(function (m) {
+    // Market subtitle row
+    sh.getRange(r, 1, 1, MLB_BET_CARD_NCOL).setBackground(p.paper);
+    sh.getRange(r, 1, 1, 5).merge()
+      .setValue(m.label + '  (' + m.key + ')')
+      .setFontFamily(p.titleFont)
+      .setFontSize(10)
+      .setFontStyle('italic')
+      .setFontColor(p.ink)
+      .setBackground(p.paper)
+      .setHorizontalAlignment('left')
+      .setBorder(null, null, true, null, null, null, p.rule, SpreadsheetApp.BorderStyle.SOLID);
+    sh.setRowHeight(r, 22);
+    r++;
+
+    // Bucket rows
+    buckets.forEach(function (b) {
+      const cells = [b.label];
+      windows.forEach(function (w) { cells.push(fmtCell(stats[m.key][w][b.label])); });
+      sh.getRange(r, 1, 1, MLB_BET_CARD_NCOL).setBackground(p.paper);
+      sh.getRange(r, 1, 1, 5)
+        .setValues([cells])
+        .setFontFamily(p.bodyFont)
+        .setFontSize(10)
+        .setFontColor(p.ink)
+        .setBackground(p.paper)
+        .setHorizontalAlignment('center')
+        .setVerticalAlignment('middle');
+      // Bucket label: light italic, left-aligned
+      sh.getRange(r, 1)
+        .setFontFamily(p.titleFont)
+        .setFontStyle('italic')
+        .setHorizontalAlignment('right')
+        .setFontColor(p.inkSoft);
+      // Stat cells: tabular monospace
+      sh.getRange(r, 2, 1, 4)
+        .setFontFamily(p.numFont)
+        .setFontSize(9.5);
+      sh.setRowHeight(r, 20);
+      r++;
+    });
+
+    // Spacer between markets
+    sh.getRange(r, 1, 1, MLB_BET_CARD_NCOL).setBackground(p.paper);
+    sh.setRowHeight(r, 8);
+    r++;
+  });
+
+  return r;
 }
