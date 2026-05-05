@@ -71,6 +71,32 @@ function mlbFetchAllHitterSeasonStats_(season) {
  * Build ranked HR probability queue for today's slate.
  * Writes to 📋 Batter_HR_Queue tab, sorted by P(HR≥1) desc.
  */
+/** Reverse map: full team name (lower-cased) → abbreviation. */
+function mlbBuildTeamNameToAbbrIndex_() {
+  const idx = {};
+  Object.keys(MLB_ABBR_TO_ODDS_TEAM_NAME).forEach(function (a) {
+    idx[String(MLB_ABBR_TO_ODDS_TEAM_NAME[a]).toLowerCase()] = a;
+  });
+  Object.keys(MLB_ABBR_ODDS_TEAM_ALTERNATES).forEach(function (a) {
+    (MLB_ABBR_ODDS_TEAM_ALTERNATES[a] || []).forEach(function (alt) {
+      idx[String(alt).toLowerCase()] = a;
+    });
+  });
+  return idx;
+}
+
+/** Fuzzy: full name first, then any key that contains the side string. */
+function mlbAbbrFromMatchupSide_(side, nameIdx) {
+  const s = String(side || '').trim().toLowerCase();
+  if (!s) return '';
+  if (nameIdx[s]) return nameIdx[s];
+  const keys = Object.keys(nameIdx);
+  for (let i = 0; i < keys.length; i++) {
+    if (keys[i].indexOf(s) !== -1 || s.indexOf(keys[i]) !== -1) return nameIdx[keys[i]];
+  }
+  return '';
+}
+
 function refreshBatterHRQueue() {
   const ss  = SpreadsheetApp.getActiveSpreadsheet();
   const cfg = getConfig();
@@ -82,24 +108,45 @@ function refreshBatterHRQueue() {
     safeAlert_('Batter HR queue', 'Run MLB schedule first (📅 MLB schedule only).');
     return;
   }
-  const schRows = sch.getRange(4, 1, sch.getLastRow(), 10).getValues();
+  const numDataRows = Math.max(0, sch.getLastRow() - 3);
+  const schRows = numDataRows > 0
+    ? sch.getRange(4, 1, numDataRows, 10).getValues()
+    : [];
 
-  // Collect { abbr → homeAbbr } — we need to know which team is HOME for park factor
-  // Row cols (0-based): [0]=gamePk [3]=awayAbbr [4]=homeAbbr [5]=matchup [8]=venue
-  const gamesByAbbr = {};   // abbr → { homeAbbr, matchup, venue }
+  // Collect { abbr → homeAbbr } — we need to know which team is HOME for park factor.
+  // Schedule row cols (0-based): [0]=gamePk [3]=awayAbbr [4]=homeAbbr [5]=matchup [8]=venue
+  // Some statsapi rows ship matchup populated but abbreviation empty (newly scheduled,
+  // postponed, etc.) — fall back to parsing the matchup string against our team-name map.
+  const nameIdx = mlbBuildTeamNameToAbbrIndex_();
+  const gamesByAbbr = {};
+  let parsedRows = 0;
+  let skippedRows = 0;
   schRows.forEach(function (r) {
-    const away = String(r[3] || '').trim().toUpperCase();
-    const home = String(r[4] || '').trim().toUpperCase();
+    let away   = String(r[3] || '').trim().toUpperCase();
+    let home   = String(r[4] || '').trim().toUpperCase();
     const matchup = String(r[5] || '').trim();
     const venue   = String(r[8] || '').trim();
-    if (!away || !home) return;
+
+    if ((!away || !home) && matchup.indexOf(' @ ') !== -1) {
+      const parts = matchup.split(' @ ');
+      if (!away && parts.length === 2) away = mlbAbbrFromMatchupSide_(parts[0], nameIdx);
+      if (!home && parts.length === 2) home = mlbAbbrFromMatchupSide_(parts[1], nameIdx);
+    }
+
+    if (!away || !home) { skippedRows++; return; }
     gamesByAbbr[away] = { homeAbbr: home, matchup: matchup, venue: venue };
     gamesByAbbr[home] = { homeAbbr: home, matchup: matchup, venue: venue };
+    parsedRows++;
   });
 
   const slateTeams = Object.keys(gamesByAbbr);
   if (!slateTeams.length) {
-    safeAlert_('Batter HR queue', 'No teams found in schedule tab.');
+    safeAlert_(
+      'Batter HR queue',
+      'No teams found in 📅 MLB_Schedule. Read ' + schRows.length + ' data row(s); ' +
+      'none had usable away/home (skipped ' + skippedRows + '). ' +
+      'Re-run 📅 MLB schedule only — if that returns 0 games, check ⚙️ SLATE_DATE.'
+    );
     return;
   }
 
