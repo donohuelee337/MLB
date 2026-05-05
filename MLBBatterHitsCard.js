@@ -59,10 +59,16 @@ function mlbFetchAllHitterBatStats_(season) {
       // Stats API returns avg as string ".285"; fallback to computed ratio
       const avgStr = String(st.avg || '');
       const ba = parseFloat(avgStr) || (ab > 0 ? h / ab : 0);
+      // Hitting splits often ship empty tm.abbreviation — fall back to id lookup.
+      let teamAbbr = String(tm.abbreviation || '').trim().toUpperCase();
+      const teamId = parseInt(tm.id, 10);
+      if (!teamAbbr && teamId && MLB_TEAM_ABBREV[teamId]) {
+        teamAbbr = MLB_TEAM_ABBREV[teamId];
+      }
       out[pl.id] = {
         playerId: pl.id,
         name:     pl.fullName || '',
-        teamAbbr: String(tm.abbreviation || '').trim().toUpperCase(),
+        teamAbbr: teamAbbr,
         teamId:   tm.id || '',
         ba:       ba,
         ab:       ab,

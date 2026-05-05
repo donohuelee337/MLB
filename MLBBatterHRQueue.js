@@ -48,10 +48,16 @@ function mlbFetchAllHitterSeasonStats_(season) {
       const hr  = parseInt(st.homeRuns, 10)         || 0;
       const g   = parseInt(st.gamesPlayed, 10)      || 0;
       if (!pl.id) return;
+      // Stats API hitting splits often ship empty tm.abbreviation; fall back to id lookup.
+      let teamAbbr = String(tm.abbreviation || '').trim().toUpperCase();
+      const teamId = parseInt(tm.id, 10);
+      if (!teamAbbr && teamId && MLB_TEAM_ABBREV[teamId]) {
+        teamAbbr = MLB_TEAM_ABBREV[teamId];
+      }
       out.push({
         playerId:  pl.id,
         name:      pl.fullName || '',
-        teamAbbr:  String(tm.abbreviation || '').trim().toUpperCase(),
+        teamAbbr:  teamAbbr,
         teamId:    tm.id || '',
         hr:        hr,
         pa:        pa,
