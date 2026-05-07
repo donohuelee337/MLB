@@ -148,10 +148,6 @@ function mlbBuildPitcherKOddsIndex_(ss) {
   return mlbBuildPitcherOddsIndexForMarkets_(ss, ['pitcher_strikeouts', 'pitcher_strikeouts_alternate']);
 }
 
-function mlbBuildPitcherWalkOddsIndex_(ss) {
-  return mlbBuildPitcherOddsIndexForMarkets_(ss, ['pitcher_walks', 'pitcher_walks_alternate']);
-}
-
 function mlbPickMainKPoint_(pointMap) {
   const pts = Object.keys(pointMap)
     .map(Number)
@@ -222,41 +218,6 @@ function mlbPitchingLogSummary_(playerId, season) {
   } catch (e) {
     Logger.log('mlbPitchingLogSummary_: ' + e.message);
     return { l3k: '', l3ip: '', k9: '', games: 0 };
-  }
-}
-
-/** L3 walks + season BB/9 from pitching gameLog (mirrors K summary). */
-function mlbPitchingWalkSummary_(playerId, season) {
-  const id = parseInt(playerId, 10);
-  if (!id) return { l3bb: '', l3ip: '', bb9: '', games: 0 };
-  const splits = mlbStatsApiGetPitchingGameSplits_(playerId, season);
-  let totBb = 0;
-  let totIp = 0;
-  let l3bb = 0;
-  let l3ip = 0;
-  const nL = Math.min(3, splits.length);
-  try {
-    for (let i = 0; i < splits.length; i++) {
-      const st = splits[i].stat || {};
-      const bb = parseInt(st.baseOnBalls, 10) || 0;
-      const ip = mlbParseInningsString_(st.inningsPitched);
-      totBb += bb;
-      totIp += ip;
-      if (i < nL) {
-        l3bb += bb;
-        l3ip += ip;
-      }
-    }
-    const bb9 = totIp > 0 ? Math.round((totBb / totIp) * 900) / 100 : '';
-    return {
-      l3bb: nL ? l3bb : '',
-      l3ip: nL ? Math.round(l3ip * 100) / 100 : '',
-      bb9: bb9,
-      games: splits.length,
-    };
-  } catch (e) {
-    Logger.log('mlbPitchingWalkSummary_: ' + e.message);
-    return { l3bb: '', l3ip: '', bb9: '', games: 0 };
   }
 }
 

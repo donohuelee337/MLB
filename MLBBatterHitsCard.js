@@ -56,9 +56,16 @@ function mlbFetchAllHitterBatStats_(season) {
       const h  = parseInt(st.hits, 10)   || 0;
       const pa = parseInt(st.plateAppearances, 10) || 0;
       const g  = parseInt(st.gamesPlayed, 10)      || 0;
-      // Stats API returns avg as string ".285"; fallback to computed ratio
+      const d  = parseInt(st.doubles, 10)  || 0;
+      const tr = parseInt(st.triples, 10)  || 0;
+      const hr = parseInt(st.homeRuns, 10) || 0;
+      // Stats API returns avg/slg as strings (".285", ".478"); fall back to computed ratio.
       const avgStr = String(st.avg || '');
+      const slgStr = String(st.slg || '');
       const ba = parseFloat(avgStr) || (ab > 0 ? h / ab : 0);
+      // TB = h + d + 2t + 3hr (each AB averaged across all hits incl. HR).
+      const tb = h + d + 2 * tr + 3 * hr;
+      const slg = parseFloat(slgStr) || (ab > 0 ? tb / ab : 0);
       // Hitting splits often ship empty tm.abbreviation — fall back to id lookup.
       let teamAbbr = String(tm.abbreviation || '').trim().toUpperCase();
       const teamId = parseInt(tm.id, 10);
@@ -71,8 +78,10 @@ function mlbFetchAllHitterBatStats_(season) {
         teamAbbr: teamAbbr,
         teamId:   tm.id || '',
         ba:       ba,
+        slg:      slg,
         ab:       ab,
         hits:     h,
+        tb:       tb,
         pa:       pa,
         games:    g,
       };

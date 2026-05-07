@@ -88,18 +88,26 @@ function mlbBatterHitsFromBoxscore_(payload, batterId) {
   return null;
 }
 
-/** @returns {number|null} walks (BB) allowed in this game for MLB person id */
-function mlbPitcherWalksFromBoxscore_(payload, pitcherId) {
+/** @returns {number|null} total bases for this batter in this game */
+function mlbBatterTotalBasesFromBoxscore_(payload, batterId) {
   const teams = mlbBoxscoreTeams_(payload);
   if (!teams) return null;
-  const pid = 'ID' + parseInt(pitcherId, 10);
+  const pid   = 'ID' + parseInt(batterId, 10);
   const sides = ['away', 'home'];
   for (let s = 0; s < sides.length; s++) {
-    const t = teams[sides[s]];
+    const t  = teams[sides[s]];
     const pl = t && t.players && t.players[pid];
-    const pit = pl && pl.stats && pl.stats.pitching;
-    if (pit && pit.baseOnBalls != null && String(pit.inningsPitched || '').trim() !== '') {
-      return parseInt(pit.baseOnBalls, 10) || 0;
+    const bat = pl && pl.stats && pl.stats.batting;
+    if (bat && bat.atBats != null) {
+      // Prefer direct totalBases when shipped; else derive from hit components.
+      if (bat.totalBases != null && bat.totalBases !== '') {
+        return parseInt(bat.totalBases, 10) || 0;
+      }
+      const h  = parseInt(bat.hits, 10)      || 0;
+      const d  = parseInt(bat.doubles, 10)   || 0;
+      const tr = parseInt(bat.triples, 10)   || 0;
+      const hr = parseInt(bat.homeRuns, 10)  || 0;
+      return h + d + 2 * tr + 3 * hr;
     }
   }
   return null;
@@ -212,10 +220,10 @@ function gradeMLBPendingResults_() {
     if (!slateStr || slateStr >= today) {
       continue;
     }
-    const isK   = market.indexOf('strikeout')  !== -1;
-    const isBb  = market.indexOf('walk')       !== -1;
-    const isHit = market.indexOf('batter hit') !== -1;
-    if (!isK && !isBb && !isHit) continue;
+    const isK   = market.indexOf('strikeout')   !== -1;
+    const isHit = market.indexOf('batter hit')  !== -1;
+    const isTb  = market.indexOf('total base')  !== -1;
+    if (!isK && !isHit && !isTb) continue;
     if (resCell && resCell !== 'PENDING') continue;
 
     let gamePk = parseInt(row[13], 10);
@@ -229,8 +237,9 @@ function gradeMLBPendingResults_() {
       gamePk = mlbResolveGamePkFromSchedule_(slateStr, matchup, player);
     }
     // For pitcher markets: resolve pitcher ID if missing
-    // For batter hits: batter_id is stored in col 15; skip pitcher lookup
-    if (!isHit && (!pid || isNaN(pid)) && slateStr && matchup && player) {
+    // For batter markets (hits, total bases): player_id is stored in col 15; skip pitcher lookup
+    const isBatter = isHit || isTb;
+    if (!isBatter && (!pid || isNaN(pid)) && slateStr && matchup && player) {
       pid = mlbResolvePitcherIdFromSchedule_(slateStr, matchup, player);
     }
     if (!gamePk || isNaN(gamePk)) {
@@ -255,14 +264,14 @@ function gradeMLBPendingResults_() {
 
     const actualStat = isHit
       ? mlbBatterHitsFromBoxscore_(box, pid)
-      : isK
-        ? mlbPitcherKsFromBoxscore_(box, pid)
-        : mlbPitcherWalksFromBoxscore_(box, pid);
+      : isTb
+        ? mlbBatterTotalBasesFromBoxscore_(box, pid)
+        : mlbPitcherKsFromBoxscore_(box, pid);
     if (actualStat === null) {
       logSh.getRange(4 + i, 16).setValue('');
       logSh.getRange(4 + i, 17).setValue('VOID');
       logSh.getRange(4 + i, 18).setValue(
-        isHit ? 'No batting line (DNP / inactive?)' : 'No pitching line (DNP / bullpen-only?)'
+        isBatter ? 'No batting line (DNP / inactive?)' : 'No pitching line (DNP / bullpen-only?)'
       );
       graded++;
       continue;

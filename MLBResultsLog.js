@@ -125,12 +125,12 @@ function mlbLookupClosingPitcherK_(ss, gameStr, playerStr, betSide, gamePk) {
   return mlbLookupClosingPitcherPropWithIdx_(ss, mlbBuildPitcherKOddsIndex_(ss), gameStr, playerStr, betSide, gamePk);
 }
 
-function mlbLookupClosingPitcherWalks_(ss, gameStr, playerStr, betSide, gamePk) {
-  return mlbLookupClosingPitcherPropWithIdx_(ss, mlbBuildPitcherWalkOddsIndex_(ss), gameStr, playerStr, betSide, gamePk);
-}
-
 function mlbLookupClosingBatterHits_(ss, gameStr, playerStr, betSide, gamePk) {
   return mlbLookupClosingPitcherPropWithIdx_(ss, mlbBuildBatterHitsOddsIndex_(ss), gameStr, playerStr, betSide, gamePk);
+}
+
+function mlbLookupClosingBatterTb_(ss, gameStr, playerStr, betSide, gamePk) {
+  return mlbLookupClosingPitcherPropWithIdx_(ss, mlbBuildBatterTbOddsIndex_(ss), gameStr, playerStr, betSide, gamePk);
 }
 
 /** Closing line from a pre-built odds index (main + alternate markets merged). */
@@ -160,8 +160,7 @@ function mlbLookupClosingPitcherPropWithIdx_(ss, oddsIdx, gameStr, playerStr, be
 
 /**
  * After FINAL odds refresh: fill close_line / close_odds / clv_note for this
- * slate's pitcher K and batter hits rows. Historically-logged walk rows are
- * also handled for backward compatibility.
+ * slate's pitcher K, batter hits, and batter total bases rows.
  * Overwrites prior close columns when re-run (latest tab = "close" proxy).
  */
 function mlbBackfillResultsLogClosing_(ss) {
@@ -196,10 +195,9 @@ function mlbBackfillResultsLogClosing_(ss) {
     } else if (market.indexOf('batter hit') !== -1) {
       cl       = mlbLookupClosingBatterHits_(ss, game, player, side, gamePkLog);
       missNote = 'no FD hits match at close';
-    } else if (market.indexOf('walk') !== -1) {
-      // Historical walk bets — keep for backward compat
-      cl       = mlbLookupClosingPitcherWalks_(ss, game, player, side, gamePkLog);
-      missNote = 'no FD BB match at close';
+    } else if (market.indexOf('total base') !== -1) {
+      cl       = mlbLookupClosingBatterTb_(ss, game, player, side, gamePkLog);
+      missNote = 'no FD TB match at close';
     } else {
       continue;
     }

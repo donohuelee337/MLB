@@ -71,7 +71,8 @@ function mlbScheduleGameTimeIndex_(ss) {
 }
 
 /**
- * Rebuild K queue + Poisson card + batter hits card when schedule + odds exist.
+ * Rebuild K queue + Poisson card + batter hits + batter TB cards when
+ * schedule + odds exist.
  * @returns {boolean} false if prerequisites missing
  */
 function mlbRebuildStagingForBetCard_(ss) {
@@ -88,6 +89,7 @@ function mlbRebuildStagingForBetCard_(ss) {
   refreshPitcherKSlateQueue();
   refreshPitcherKBetCard();
   refreshBatterHitsCard();
+  refreshBatterTBCard();
   return true;
 }
 
@@ -193,10 +195,15 @@ function refreshMLBBetCardMergeOnly_() {
 
   const kTab   = ss.getSheetByName(MLB_PITCHER_K_CARD_TAB);
   const hitTab = ss.getSheetByName(MLB_BATTER_HITS_CARD_TAB);
-  if ((!kTab || kTab.getLastRow() < 4) && (!hitTab || hitTab.getLastRow() < 4)) {
+  const tbTab  = ss.getSheetByName(MLB_BATTER_TB_CARD_TAB);
+  if (
+    (!kTab   || kTab.getLastRow()   < 4) &&
+    (!hitTab || hitTab.getLastRow() < 4) &&
+    (!tbTab  || tbTab.getLastRow()  < 4)
+  ) {
     safeAlert_(
       'MLB Bet Card',
-      'No 🎰 staging rows — run Morning (or Pitcher K queue + card + Batter Hits card) first.'
+      'No 🎰 staging rows — run Morning (or Pitcher K + Batter Hits + Batter TB cards) first.'
     );
     return;
   }
@@ -222,6 +229,18 @@ function refreshMLBBetCardMergeOnly_() {
       'Batter hits',
       'H',
       'Model: Binomial P(≥k hits) on λ=BA×est_AB; season BA from Stats API; not devigged.',
+      minEvFloor,
+      maxOddsCap
+    )
+  );
+  plays = plays.concat(
+    mlbCollectPlaysFromPitcherOddsCard_(
+      ss,
+      cfg,
+      MLB_BATTER_TB_CARD_TAB,
+      'Batter total bases',
+      'TB',
+      'Model: Poisson P(≥k TB) on λ=SLG×est_AB; season SLG from Stats API; not devigged.',
       minEvFloor,
       maxOddsCap
     )
@@ -557,9 +576,9 @@ function mlbAppendBetTrackerSection_(ss, sh, startRow, slateDate, p) {
   const cut30 = ymd(-30);
 
   const markets = [
-    { key: 'K',  label: 'STRIKEOUTS',  test: function (m) { return m.indexOf('strikeout')   !== -1; } },
-    { key: 'H',  label: 'HITS',        test: function (m) { return m.indexOf('batter hit')  !== -1; } },
-    { key: 'TB', label: 'TOTAL BASES', test: function (m) { return m.indexOf('total base')  !== -1; } },
+    { key: 'K',  label: 'STRIKEOUTS',  test: function (m) { return m.indexOf('strikeout')  !== -1; } },
+    { key: 'H',  label: 'HITS',        test: function (m) { return m.indexOf('batter hit') !== -1; } },
+    { key: 'TB', label: 'TOTAL BASES', test: function (m) { return m.indexOf('total base') !== -1; } },
   ];
   const buckets = [
     { lo: 0.50, hi: 0.60, label: '50–60%' },

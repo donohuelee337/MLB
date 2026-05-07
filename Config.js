@@ -72,8 +72,6 @@ function buildConfigTab() {
   row_('HP_UMP_LAMBDA_MULT', '1', 'Multiply 🎰 λ when hp_umpire listed (1=no change; try 1.02–1.05 cautiously)');
   row_('LHP_K_LAMBDA_MULT', '1', 'Extra λ mult when pitcher throws L (1=no change)');
   row_('RHP_K_LAMBDA_MULT', '1', 'Extra λ mult when pitcher throws R (1=no change)');
-  row_('LHP_BB_LAMBDA_MULT', '1', 'Pitcher walks 🎰: LHP λ mult (1=no change)');
-  row_('RHP_BB_LAMBDA_MULT', '1', 'Pitcher walks 🎰: RHP λ mult (1=no change)');
   ss.getNamedRanges().forEach(function (nr) {
     if (nr.getName() === 'CONFIG') nr.remove();
   });
