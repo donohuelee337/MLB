@@ -99,7 +99,7 @@ function mlbRebuildStagingForBetCard_(ss) {
  * @param {string} statVerb short label in pick text (K | BB)
  * @param {string} disclaimer row note
  */
-function mlbCollectPlaysFromPitcherOddsCard_(ss, cfg, srcTab, marketLabel, statVerb, disclaimer, minEvFloor, maxOddsCap) {
+function mlbCollectPlaysFromPitcherOddsCard_(ss, cfg, srcTab, marketLabel, statVerb, disclaimer, minEvFloor, maxOddsCap, minOddsFloor) {
   const src = ss.getSheetByName(srcTab);
   if (!src || src.getLastRow() < 4) return [];
   const last = src.getLastRow();
@@ -132,6 +132,7 @@ function mlbCollectPlaysFromPitcherOddsCard_(ss, cfg, srcTab, marketLabel, statV
     if (isNaN(ev) || ev <= 0) return;
     if (minEvFloor > 0 && ev < minEvFloor) return;
     if (maxOddsCap != null && parseFloat(String(american)) > maxOddsCap) return;
+    if (minOddsFloor != null && parseFloat(String(american)) < minOddsFloor) return;
 
     const pWin    = bestSide === 'Over' ? r[10] : r[11];
     const implied = bestSide === 'Over' ? r[12] : r[13];
@@ -187,6 +188,8 @@ function refreshMLBBetCardMergeOnly_() {
   const minEvFloor = !isNaN(minEvCfg) && minEvCfg > 0 ? minEvCfg : 0;
   const maxOddsCfg = parseFloat(String(cfg['MAX_ODDS_BET_CARD'] != null ? cfg['MAX_ODDS_BET_CARD'] : '').trim());
   const maxOddsCap = !isNaN(maxOddsCfg) ? maxOddsCfg : null;
+  const minOddsCfg = parseFloat(String(cfg['MIN_ODDS_BET_CARD'] != null ? cfg['MIN_ODDS_BET_CARD'] : '-250').trim());
+  const minOddsFloor = !isNaN(minOddsCfg) ? minOddsCfg : null;
   const bankrollCfg = parseFloat(String(cfg['BANKROLL'] != null ? cfg['BANKROLL'] : '1000').trim());
   const bankroll    = !isNaN(bankrollCfg) && bankrollCfg > 0 ? bankrollCfg : 1000;
   const kellyFracCfg = parseFloat(String(cfg['KELLY_FRACTION'] != null ? cfg['KELLY_FRACTION'] : '0.25').trim());
@@ -218,7 +221,8 @@ function refreshMLBBetCardMergeOnly_() {
       'K',
       'Model: Poisson on λ=blended K/9×proj_IP×park×L/R×optional HP; not devigged.',
       minEvFloor,
-      maxOddsCap
+      maxOddsCap,
+      minOddsFloor
     )
   );
   plays = plays.concat(
@@ -230,7 +234,8 @@ function refreshMLBBetCardMergeOnly_() {
       'H',
       'Model: Binomial P(≥k hits) on λ=BA×est_AB; season BA from Stats API; not devigged.',
       minEvFloor,
-      maxOddsCap
+      maxOddsCap,
+      minOddsFloor
     )
   );
   plays = plays.concat(
@@ -242,7 +247,8 @@ function refreshMLBBetCardMergeOnly_() {
       'TB',
       'Model: Poisson P(≥k TB) on λ=SLG×est_AB; season SLG from Stats API; not devigged.',
       minEvFloor,
-      maxOddsCap
+      maxOddsCap,
+      minOddsFloor
     )
   );
 
@@ -291,13 +297,19 @@ function refreshMLBBetCardMergeOnly_() {
     nonAPlus++;
   }
 
-  // Display order: game start time asc, then EV desc within game
+  // Display order: game start time asc → group by gamePk when times tie → EV desc within game
   selected.sort(function (a, b) {
+    // 1. Game start time ascending (empty/unknown times sink to bottom)
     const ta = a.gameTimeIso || '';
     const tb = b.gameTimeIso || '';
     if (ta && tb && ta !== tb) return ta < tb ? -1 : 1;
     if (ta && !tb) return -1;
     if (!ta && tb) return 1;
+    // 2. Same start time → keep games grouped (sort by gamePk so same game stays together)
+    const ga = String(a.gamePk != null ? a.gamePk : a.matchup || '');
+    const gb = String(b.gamePk != null ? b.gamePk : b.matchup || '');
+    if (ga !== gb) return ga < gb ? -1 : 1;
+    // 3. Within the same game: EV descending (best bet first)
     const be = parseFloat(String(b.ev));
     const ae = parseFloat(String(a.ev));
     if (isNaN(be) && isNaN(ae)) return 0;

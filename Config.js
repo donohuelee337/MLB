@@ -66,6 +66,7 @@ function buildConfigTab() {
   row_('BB9_BLEND_L3_WEIGHT', '', 'Optional; blank = use K9_BLEND for 🎰 Pitcher BB λ (L3 BB9 vs season)');
   row_('MIN_EV_BET_CARD', '0', 'Min EV per $1 on 🃏 card; 0 = any positive EV; e.g. 0.03 for 3¢ floor');
   row_('MAX_ODDS_BET_CARD', '', 'Max American odds on 🃏 card; blank = no cap; e.g. 130 to exclude bets over +130');
+  row_('MIN_ODDS_BET_CARD', '-250', 'Min American odds on 🃏 card (heavy-chalk floor); blank = no floor; e.g. -250 to exclude -260 and worse');
   row_('EST_AB_PER_GAME', '3.5', 'Estimated AB per game for 🎰 Batter Hits model (fallback when season AB/G unavailable)');
   row_('BANKROLL', '1000', 'Total bankroll in $ — used to size kelly_$ on the 🃏 card');
   row_('KELLY_FRACTION', '0.25', 'Fraction of full Kelly to wager (0.25 = quarter-Kelly; safer for sports)');
