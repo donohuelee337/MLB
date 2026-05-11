@@ -71,7 +71,7 @@ function mlbFindResultsLogSheetRowForUpsert_(logSh, slateWant, betKey, gamePk, p
   const lineS = String(line != null ? line : '').trim();
   const wantM = String(market || '').trim().toLowerCase();
   for (let i = data.length - 1; i >= 0; i--) {
-    if (String(data[i][1] || '').trim() !== slateWant) continue;
+    if (mlbReadSlateYmd_(data[i][1]) !== slateWant) continue;
     const stored = String(data[i][21] || '').trim();
     if (stored && stored === betKey) {
       return 4 + i;
@@ -175,7 +175,7 @@ function mlbBackfillResultsLogClosing_(ss) {
 
   for (let i = 0; i < data.length; i++) {
     const row      = data[i];
-    const slateStr = String(row[1] || '').trim();
+    const slateStr = mlbReadSlateYmd_(row[1]);
     if (slateStr !== slateWant) continue;
     const market    = String(row[5] || '').toLowerCase();
     const player    = String(row[3] || '').trim();

@@ -28,6 +28,8 @@ function onOpen() {
     .addItem('🎰 Batter TB card only (Poisson SLG + EV)', 'refreshBatterTBCard')
     .addItem('🃏 MLB Bet Card only (all picks — primary sheet)', 'refreshMLBBetCard')
     .addItem('📊 Grade pending MLB results (boxscore)', 'gradeMLBPendingResults_')
+    .addItem('🔬 Diagnose Results Log (counts only)', 'mlbDiagnoseResultsLog_')
+    .addItem('🧪 Test grade ONE row (verbose)', 'mlbTestGradeOneRow_')
     .addItem('📈 Backfill closing lines (Results Log)', 'mlbBackfillClosingMenu_')
     .addItem('📋 Open Pipeline Log', 'mlbActivatePipelineLog_')
     .addToUi();
