@@ -139,6 +139,9 @@ function mlbCollectPlaysFromPitcherOddsCard_(ss, cfg, srcTab, marketLabel, statV
       if (isNaN(pn) || pn < minProbFloor) return;
     }
     const implied = bestSide === 'Over' ? r[12] : r[13];
+    // Floor: never put a play on the bet card if model says < 50% to win.
+    const pWinNum = parseFloat(String(pWin));
+    if (isNaN(pWinNum) || pWinNum < 0.50) return;
     const matchup = r[1];
     const gamePk  = r[0];
     const hand =
@@ -363,19 +366,21 @@ function refreshMLBBetCardMergeOnly_() {
   }
   sh.setTabColor('#1a2332');
 
-  // ── Card-back aesthetic ──────────────────────────────────────
-  // Inspired by Topps stat-blocks + The Show overlays:
-  // ivory paper, navy ink, monospace for numbers, condensed serif for labels.
-  const PAPER       = '#faf7f0';      // very pale ivory (subtler than parchment)
-  const PAPER_ALT   = '#f4efe2';      // band stripe (still subtle)
+  // ── Aesthetic ────────────────────────────────────────────────
+  // White card with navy ink + monospace numbers; bet rows tinted by
+  // model-probability bucket so quality is identifiable at a glance.
+  const PAPER       = '#ffffff';      // plain white
   const INK         = '#1a2332';      // dark navy
   const INK_SOFT    = '#56627a';      // muted slate for de-emphasized cells
-  const RULE        = '#d4cdb8';      // light warm gray
+  const RULE        = '#e0e0e0';      // light gray hairline
   const HEADER_BG   = '#1a2332';      // navy header
-  const HEADER_TEXT = '#faf7f0';
+  const HEADER_TEXT = '#ffffff';
   const BODY_FONT   = 'Source Sans Pro'; // body labels
-  const NUM_FONT    = 'Roboto Mono';      // tabular numbers (Topps stat block)
+  const NUM_FONT    = 'Roboto Mono';      // tabular numbers
   const TITLE_FONT  = 'Playfair Display'; // title only
+
+  // Bucket colors live at module scope (mlbBucketColor_) so the tracker
+  // can shade its bucket rows with the same palette.
 
   // Column widths (20 cols)
   [76, 36, 42, 64, 168, 280, 130, 96, 46, 44, 56, 60, 60, 64, 56, 50, 60, 130, 64, 56]
@@ -467,14 +472,9 @@ function refreshMLBBetCardMergeOnly_() {
     sh.getRange(4, 17, rows.length, 1).setNumberFormat('+0.00;-0.00').setHorizontalAlignment('right'); // proj − line
     sh.getRange(4,  9, rows.length, 1).setHorizontalAlignment('center'); // side
 
-    // Subtle alternating row band within each game group
-    let bandToggle = false;
-    let prevPkBand = String(rows[0][3] || '');
+    // Tint each bet row by its model-probability bucket (50–60, 60–70, etc.).
     for (let i = 0; i < rows.length; i++) {
-      const pk = String(rows[i][3] || '');
-      if (pk !== prevPkBand) { bandToggle = false; prevPkBand = pk; }
-      if (bandToggle) sh.getRange(4 + i, 1, 1, headers.length).setBackground(PAPER_ALT);
-      bandToggle = !bandToggle;
+      sh.getRange(4 + i, 1, 1, headers.length).setBackground(mlbBucketColor_(rows[i][11]));
     }
 
     // Grade cell — small muted block, condensed-feel sans
@@ -539,9 +539,9 @@ function refreshMLBBetCardMergeOnly_() {
       .setHorizontalAlignment('right');
   }
 
-  // Bet tracker section below the main card
+  // Bet tracker section below the main card — also white background
   const palette = {
-    paper: PAPER, paperAlt: PAPER_ALT, ink: INK, inkSoft: INK_SOFT,
+    paper: PAPER, paperAlt: '#f5f5f5', ink: INK, inkSoft: INK_SOFT,
     rule: RULE, headerBg: HEADER_BG, headerText: HEADER_TEXT,
     bodyFont: BODY_FONT, numFont: NUM_FONT, titleFont: TITLE_FONT,
   };
@@ -553,6 +553,22 @@ function refreshMLBBetCardMergeOnly_() {
 
   const aPlus = rows.filter(function (r) { return String(r[2]) === 'A+'; }).length;
   ss.toast(rows.length + ' bet rows · ' + aPlus + ' A+ · ' + slateDate, 'MLB Bet Card', 6);
+}
+
+/**
+ * Bucket color for a model-probability value (0-1 decimal). Used for both
+ * bet-row shading on the main card and bucket-row shading on the tracker
+ * so the two stay visually linked: a 70-80% bet on the card matches the
+ * 70-80% bucket row below.
+ */
+function mlbBucketColor_(modelProb) {
+  const v = parseFloat(String(modelProb));
+  if (isNaN(v) || v < 0.50) return '#ffffff';
+  if (v < 0.60) return '#FFF9C4'; // 50–60%
+  if (v < 0.70) return '#FFECB3'; // 60–70%
+  if (v < 0.80) return '#DCEDC8'; // 70–80%
+  if (v < 0.90) return '#C8E6C9'; // 80–90%
+  return '#A5D6A7';                // 90–100%
 }
 
 /**
@@ -590,25 +606,40 @@ function mlbAppendBetTrackerSection_(ss, sh, startRow, slateDate, p) {
   ];
   const windows = ['yesterday', 'last7', 'last30', 'lifetime'];
 
-  // stats[marketKey][window][bucketLabel] = { w, l, p }
+  // American odds → decimal-1 (i.e., profit per $1 risked on win).
+  function americanToProfit_(american) {
+    const o = parseFloat(String(american));
+    if (isNaN(o) || o === 0) return null;
+    return o > 0 ? o / 100 : 100 / Math.abs(o);
+  }
+
+  // stats[marketKey][window][bucketLabel] = { w, l, p, ret, mid }
+  // ret = sum of per-$1 net returns (+profit on win, -1 on loss, 0 on push)
+  // mid = bucket midpoint for calibration delta (e.g. 50–60% → 0.55)
   const stats = {};
   markets.forEach(function (m) {
     stats[m.key] = {};
     windows.forEach(function (w) {
       stats[m.key][w] = {};
-      buckets.forEach(function (b) { stats[m.key][w][b.label] = { w: 0, l: 0, p: 0 }; });
+      buckets.forEach(function (b) {
+        stats[m.key][w][b.label] = {
+          w: 0, l: 0, p: 0, ret: 0,
+          mid: (b.lo + Math.min(b.hi, 1.0)) / 2,
+        };
+      });
     });
   });
 
   // Aggregate
   data.forEach(function (row) {
-    const slate = String(row[1] || '').trim();
+    const slate = mlbReadSlateYmd_(row[1]);
     if (!slate || slate >= slateDate) return;
     const market = String(row[5] || '').toLowerCase();
     const result = String(row[16] || '').trim().toUpperCase();
     if (result !== 'WIN' && result !== 'LOSS' && result !== 'PUSH') return;
     const mp = parseFloat(String(row[9]));
     if (isNaN(mp) || mp < 0.5) return;
+    const profit = americanToProfit_(row[8]);
 
     let mKey = null;
     for (let i = 0; i < markets.length; i++) {
@@ -624,9 +655,15 @@ function mlbAppendBetTrackerSection_(ss, sh, startRow, slateDate, p) {
 
     function bump(w) {
       const s = stats[mKey][w][bKey];
-      if      (result === 'WIN')  s.w++;
-      else if (result === 'LOSS') s.l++;
-      else                        s.p++;
+      if (result === 'WIN') {
+        s.w++;
+        if (profit != null) s.ret += profit;
+      } else if (result === 'LOSS') {
+        s.l++;
+        s.ret -= 1;
+      } else {
+        s.p++; // push: stake refunded, net 0
+      }
     }
     if (slate === yest)   bump('yesterday');
     if (slate >= cut7)    bump('last7');
@@ -634,10 +671,24 @@ function mlbAppendBetTrackerSection_(ss, sh, startRow, slateDate, p) {
     bump('lifetime');
   });
 
+  // Multi-line cell:
+  //   line 1: W-L[-P] · hit%
+  //   line 2: EV/$1 · Δ vs bucket midpoint (percentage points)
   function fmtCell(s) {
-    const n = s.w + s.l;
-    if (n === 0) return '—';
-    return s.w + '-' + s.l + '  ' + Math.round((s.w / n) * 100) + '%';
+    const decided = s.w + s.l;
+    const total = decided + s.p;
+    if (total === 0) return '—';
+    const hitPct = decided > 0 ? (s.w / decided) : null;
+    const ev = total > 0 ? (s.ret / total) : 0;
+    const evStr = (ev >= 0 ? '+' : '') + ev.toFixed(2);
+    const wlpStr = s.w + '-' + s.l + (s.p > 0 ? '-' + s.p : '');
+    const hitStr = hitPct == null ? '—' : Math.round(hitPct * 100) + '%';
+    let deltaStr = '';
+    if (hitPct != null) {
+      const dpts = Math.round((hitPct - s.mid) * 100);
+      deltaStr = ' · Δ' + (dpts >= 0 ? '+' : '') + dpts;
+    }
+    return wlpStr + ' · ' + hitStr + '\n' + evStr + deltaStr;
   }
 
   let r = startRow;
@@ -645,7 +696,7 @@ function mlbAppendBetTrackerSection_(ss, sh, startRow, slateDate, p) {
   // Title row — italic serif on paper, navy underline
   sh.getRange(r, 1, 1, MLB_BET_CARD_NCOL)
     .merge()
-    .setValue('Bet Tracker  ·  hit rate by model probability bucket  ·  graded slates only')
+    .setValue('Bet Tracker  ·  W-L · hit%  /  EV per $1 · Δ vs bucket midpoint (pts)  ·  graded slates only')
     .setFontFamily(p.titleFont)
     .setFontSize(11)
     .setFontStyle('italic')
@@ -666,10 +717,10 @@ function mlbAppendBetTrackerSection_(ss, sh, startRow, slateDate, p) {
     .setFontColor(p.ink)
     .setBackground(p.paperAlt)
     .setHorizontalAlignment('center');
-  sh.setColumnWidth(2, 96);
-  sh.setColumnWidth(3, 96);
-  sh.setColumnWidth(4, 96);
-  sh.setColumnWidth(5, 96);
+  sh.setColumnWidth(2, 116);
+  sh.setColumnWidth(3, 116);
+  sh.setColumnWidth(4, 116);
+  sh.setColumnWidth(5, 116);
   r++;
 
   markets.forEach(function (m) {
@@ -687,30 +738,59 @@ function mlbAppendBetTrackerSection_(ss, sh, startRow, slateDate, p) {
     sh.setRowHeight(r, 22);
     r++;
 
-    // Bucket rows
+    // EV/$1 thresholds for cell font color (mirrors bet card's signal cues).
+    // Neutral (small sample or near-zero EV) stays INK.
+    const GREEN = '#2e6b1f';
+    const AMBER = '#b56807';
+    function evFontColor_(s) {
+      const total = s.w + s.l + s.p;
+      if (total < 3) return p.ink;       // small sample — don't signal
+      const ev = s.ret / total;
+      if (ev >=  0.02) return GREEN;
+      if (ev <= -0.02) return AMBER;
+      return p.ink;
+    }
+
+    // Bucket rows — shade with the same color the bet card uses for plays
+    // in this bucket; add small white right borders between cells for a
+    // visible gap so the windows don't blur into each other.
     buckets.forEach(function (b) {
       const cells = [b.label];
-      windows.forEach(function (w) { cells.push(fmtCell(stats[m.key][w][b.label])); });
+      const cellColors = [p.inkSoft]; // label stays muted
+      windows.forEach(function (w) {
+        const s = stats[m.key][w][b.label];
+        cells.push(fmtCell(s));
+        cellColors.push(evFontColor_(s));
+      });
+      const tint = mlbBucketColor_((b.lo + Math.min(b.hi, 1.0)) / 2);
       sh.getRange(r, 1, 1, MLB_BET_CARD_NCOL).setBackground(p.paper);
       sh.getRange(r, 1, 1, 5)
         .setValues([cells])
         .setFontFamily(p.bodyFont)
         .setFontSize(10)
-        .setFontColor(p.ink)
-        .setBackground(p.paper)
+        .setBackground(tint)
         .setHorizontalAlignment('center')
         .setVerticalAlignment('middle');
-      // Bucket label: light italic, left-aligned
+      // Bucket label: light italic, right-aligned
       sh.getRange(r, 1)
         .setFontFamily(p.titleFont)
         .setFontStyle('italic')
         .setHorizontalAlignment('right')
         .setFontColor(p.inkSoft);
-      // Stat cells: tabular monospace
+      // Stat cells: tabular monospace, wrap so the two lines render
       sh.getRange(r, 2, 1, 4)
         .setFontFamily(p.numFont)
-        .setFontSize(9.5);
-      sh.setRowHeight(r, 20);
+        .setFontSize(9.5)
+        .setWrap(true);
+      // Per-window font color (green/amber by EV signal, INK neutral)
+      for (let ci = 1; ci < 5; ci++) {
+        sh.getRange(r, ci + 1).setFontColor(cellColors[ci]);
+      }
+      // White right border on cols 1–4 creates a small visual gap
+      // between windows without disturbing the grid.
+      sh.getRange(r, 1, 1, 4)
+        .setBorder(null, null, null, true, null, null, p.paper, SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
+      sh.setRowHeight(r, 34);
       r++;
     });
 
