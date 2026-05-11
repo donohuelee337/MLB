@@ -1,12 +1,14 @@
 // ============================================================
 // 🃏 MLB Bet Card — single ranked sheet (NBA-style product)
 // ============================================================
-// Staging tabs 🎰 Pitcher_K_Card / 🎰 Batter_Hits_Card are rebuilt
+// Staging: 🎰 Pitcher_K_Card → ⚡ Sim_Pitcher_K; 🎰 Batter_Hits_Card / 🎰 Batter_TB_Card
 // automatically when you run this from the menu. Pipeline calls
 // merge-only to avoid double work.
 // ============================================================
 
 const MLB_BET_CARD_TAB = '🃏 MLB_Bet_Card';
+/** K plays on 🃏 are sourced from ⚡ Sim_Pitcher_K — keep in sync with MLBSimPitcherK.js */
+const MLB_PITCHER_K_SIM_TAB = '⚡ Sim_Pitcher_K';
 const MLB_BET_CARD_MAX_PLAYS = 30;
 /** Same spirit as AI-BOIZ: cap straights per game across all markets on this card. */
 const MLB_BET_CARD_MAX_PER_GAME = 2;
@@ -88,13 +90,14 @@ function mlbRebuildStagingForBetCard_(ss) {
   }
   refreshPitcherKSlateQueue();
   refreshPitcherKBetCard();
+  refreshPitcherKSimEngine_();
   refreshBatterHitsCard();
   refreshBatterTBCard();
   return true;
 }
 
 /**
- * @param {string} srcTab MLB_PITCHER_K_CARD_TAB | MLB_BATTER_HITS_CARD_TAB
+ * @param {string} srcTab MLB_PITCHER_K_SIM_TAB | MLB_BATTER_HITS_CARD_TAB | MLB_BATTER_TB_CARD_TAB
  * @param {string} marketLabel e.g. Pitcher strikeouts
  * @param {string} statVerb short label in pick text (K | BB)
  * @param {string} disclaimer row note
@@ -199,17 +202,17 @@ function refreshMLBBetCardMergeOnly_() {
   const kellyFrac    = !isNaN(kellyFracCfg) && kellyFracCfg > 0 ? Math.min(1, kellyFracCfg) : 0.25;
   const slateDate    = getSlateDateString_(cfg);
 
-  const kTab   = ss.getSheetByName(MLB_PITCHER_K_CARD_TAB);
+  const simTab = ss.getSheetByName(MLB_PITCHER_K_SIM_TAB);
   const hitTab = ss.getSheetByName(MLB_BATTER_HITS_CARD_TAB);
   const tbTab  = ss.getSheetByName(MLB_BATTER_TB_CARD_TAB);
   if (
-    (!kTab   || kTab.getLastRow()   < 4) &&
+    (!simTab || simTab.getLastRow() < 4) &&
     (!hitTab || hitTab.getLastRow() < 4) &&
     (!tbTab  || tbTab.getLastRow()  < 4)
   ) {
     safeAlert_(
       'MLB Bet Card',
-      'No 🎰 staging rows — run Morning (or Pitcher K + Batter Hits + Batter TB cards) first.'
+      'No staging rows — run Morning (or ⚡ Sim + Hits + TB), or 🃏 MLB Bet Card only after K pipeline.'
     );
     return;
   }
@@ -219,10 +222,10 @@ function refreshMLBBetCardMergeOnly_() {
     mlbCollectPlaysFromPitcherOddsCard_(
       ss,
       cfg,
-      MLB_PITCHER_K_CARD_TAB,
+      MLB_PITCHER_K_SIM_TAB,
       'Pitcher strikeouts',
       'K',
-      'Model: Poisson on λ=blended K/9×proj_IP×park×L/R×optional HP; not devigged.',
+      'Model: Anchored Poisson on λ (ANCHOR_WEIGHT_K) after 🎰 card; EV from ⚡ Sim. Not devigged.',
       minEvFloor,
       maxOddsCap,
       minOddsFloor

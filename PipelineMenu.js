@@ -24,6 +24,7 @@ function onOpen() {
     .addItem('🧹 List Batter HR queue duplicate tabs', 'listBatterHRQueueDuplicates_')
     .addItem('📋 Pitcher K queue only (schedule + FD K + game logs)', 'refreshPitcherKSlateQueue')
     .addItem('🎰 Pitcher K card only (Poisson + EV)', 'refreshPitcherKBetCard')
+    .addItem('⚡ Pitcher K Sim only (anchored → ⚡ tab)', 'refreshPitcherKSimEngine_')
     .addItem('🎰 Batter Hits card only (Binomial BA + EV)', 'refreshBatterHitsCard')
     .addItem('🎰 Batter TB card only (Poisson SLG + EV)', 'refreshBatterTBCard')
     .addItem('🃏 MLB Bet Card only (all picks — primary sheet)', 'refreshMLBBetCard')
@@ -107,6 +108,7 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   step('Slate board (join)',        refreshMLBSlateBoard);
   step('Pitcher K queue',          refreshPitcherKSlateQueue);
   step('Pitcher K card',           refreshPitcherKBetCard);
+  step('Sim Engine (Pitcher K)',   refreshPitcherKSimEngine_);
   step('Batter Hits card',         refreshBatterHitsCard);
   step('Batter TB card',           refreshBatterTBCard);
   step('MLB Bet Card',             refreshMLBBetCardMergeOnly_);
@@ -120,9 +122,10 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   const oSlate    = outcomes[5]  || { ok: true };
   const oPkQ      = outcomes[6]  || { ok: true };
   const oPkC      = outcomes[7]  || { ok: true };
-  const oHits     = outcomes[8]  || { ok: true };
-  const oTb       = outcomes[9]  || { ok: true };
-  const oBet      = outcomes[10] || { ok: true };
+  const oSim      = outcomes[8]  || { ok: true };
+  const oHits     = outcomes[9]  || { ok: true };
+  const oTb       = outcomes[10] || { ok: true };
+  const oBet      = outcomes[11] || { ok: true };
 
   logStep_('Config',           1, oCfg.ok      ? 1 : 0,  oCfg.ok      ? '' : oCfg.err      || 'failed');
   logStep_('MLB injuries',     0, oInj.ok      ? mlbTabDataRowsBelowHeader3_(ss, MLB_INJURY_CONFIG.tabName)  : 0, oInj.ok      ? '' : oInj.err      || 'failed');
@@ -132,6 +135,7 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   logStep_('Slate board',      0, oSlate.ok    ? mlbTabDataRowsBelowHeader3_(ss, MLB_SLATE_BOARD_TAB)        : 0, oSlate.ok    ? '' : oSlate.err    || 'failed');
   logStep_('Pitcher K queue',  0, oPkQ.ok      ? mlbTabDataRowsBelowHeader3_(ss, MLB_PITCHER_K_QUEUE_TAB)   : 0, oPkQ.ok      ? '' : oPkQ.err      || 'failed');
   logStep_('Pitcher K card',   0, oPkC.ok      ? mlbTabDataRowsBelowHeader3_(ss, MLB_PITCHER_K_CARD_TAB)    : 0, oPkC.ok      ? '' : oPkC.err      || 'failed');
+  logStep_('Sim Engine (Pitcher K)', 0, oSim.ok ? mlbTabDataRowsBelowHeader3_(ss, '⚡ Sim_Pitcher_K') : 0, oSim.ok ? '' : oSim.err || 'failed');
   logStep_('Batter Hits card', 0, oHits.ok     ? mlbTabDataRowsBelowHeader3_(ss, MLB_BATTER_HITS_CARD_TAB)  : 0, oHits.ok     ? '' : oHits.err     || 'failed');
   logStep_('Batter TB card',   0, oTb.ok       ? mlbTabDataRowsBelowHeader3_(ss, MLB_BATTER_TB_CARD_TAB)    : 0, oTb.ok       ? '' : oTb.err       || 'failed');
   logStep_('MLB Bet Card',     0, oBet.ok      ? mlbTabDataRowsBelowHeader3_(ss, MLB_BET_CARD_TAB)          : 0, oBet.ok      ? '' : oBet.err      || 'failed');
