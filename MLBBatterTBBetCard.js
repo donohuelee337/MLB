@@ -10,11 +10,6 @@
 // Card output: MLB_BATTER_PROP_CARD_COLS cols (see constant below).
 // ============================================================
 
-const MLB_BATTER_TB_CARD_TAB   = '🎲 Batter_TB_Card';
-const MLB_BATTER_HITS_CARD_TAB = '🎯 Batter_Hits_Card';
-const MLB_BATTER_HR_CARD_TAB   = '💥 Batter_HR_Card';
-
-/** Column count for every batter prop card output tab. */
 const MLB_BATTER_PROP_CARD_COLS = 19;
 
 /**

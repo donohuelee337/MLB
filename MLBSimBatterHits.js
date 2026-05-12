@@ -15,7 +15,7 @@ function refreshBatterHitsSimEngine_() {
   if (isNaN(w)) w = 0.35;
   w = Math.max(0, Math.min(1, w));
 
-  const src = ss.getSheetByName(MLB_BATTER_HITS_CARD_TAB);
+  const src = ss.getSheetByName(MLB_BATTER_HITS_BINOMIAL_TAB);
   if (!src || src.getLastRow() < 4) {
     mlbClearBatterHitsSimSheet_(ss);
     return;

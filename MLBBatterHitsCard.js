@@ -16,7 +16,7 @@
 //  7  est_AB        15 ev_under_$1
 // ============================================================
 
-const MLB_BATTER_HITS_CARD_TAB = '🎰 Batter_Hits_Card';
+const MLB_BATTER_HITS_BINOMIAL_TAB = '🎰 Batter_Hits_Card';
 
 var __mlbHitterBatStatsCache = {};
 
@@ -284,7 +284,7 @@ function refreshBatterHitsCard() {
   });
 
   // ── 6. Write tab ──────────────────────────────────────────────
-  let sh = ss.getSheetByName(MLB_BATTER_HITS_CARD_TAB);
+  let sh = ss.getSheetByName(MLB_BATTER_HITS_BINOMIAL_TAB);
   if (sh) {
     const cr = Math.max(sh.getLastRow(), 3);
     const cc = Math.max(sh.getLastColumn(), 22);
@@ -292,7 +292,7 @@ function refreshBatterHitsCard() {
     sh.clearContents();
     sh.clearFormats();
   } else {
-    sh = ss.insertSheet(MLB_BATTER_HITS_CARD_TAB);
+    sh = ss.insertSheet(MLB_BATTER_HITS_BINOMIAL_TAB);
   }
   sh.setTabColor('#1565c0');
 

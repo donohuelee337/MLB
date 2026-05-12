@@ -19,7 +19,7 @@
 //  7  est_AB        15 ev_under_$1
 // ============================================================
 
-const MLB_BATTER_TB_CARD_TAB = '🎰 Batter_TB_Card';
+const MLB_BATTER_TB_SLG_LEGACY_TAB = '🎰 Batter_TB_Card';
 
 /** Odds index for batter_total_bases + batter_total_bases_alternate from the FD tab. */
 function mlbBuildBatterTbOddsIndex_(ss) {
@@ -184,7 +184,7 @@ function refreshBatterTBCard() {
   });
 
   // ── 6. Write tab ──────────────────────────────────────────────
-  let sh = ss.getSheetByName(MLB_BATTER_TB_CARD_TAB);
+  let sh = ss.getSheetByName(MLB_BATTER_TB_SLG_LEGACY_TAB);
   if (sh) {
     const cr = Math.max(sh.getLastRow(), 3);
     const cc = Math.max(sh.getLastColumn(), 22);
@@ -192,7 +192,7 @@ function refreshBatterTBCard() {
     sh.clearContents();
     sh.clearFormats();
   } else {
-    sh = ss.insertSheet(MLB_BATTER_TB_CARD_TAB);
+    sh = ss.insertSheet(MLB_BATTER_TB_SLG_LEGACY_TAB);
   }
   sh.setTabColor('#6a1b9a');
 
