@@ -747,7 +747,7 @@ git commit -m "feat(hr-promo): refresh sheet from lineups and SP context"
 
 ---
 
-### Task 5: `MLBHrPromoEval.js` — Platt fit + menu hook
+### Task 5: `MLBHrPromoEval.js` — Platt fit from results log
 
 **Files:**
 
@@ -860,7 +860,7 @@ function runMlbHrPromoBacktestMenu_() {
 
 - [ ] **Step 2: `clasp push`, run `mlbHrPromoFitPlattFromResultsLogBestEffort_` once (expect alert if n < min rows)**
 
-- [ ] **Step 4: Commit** (Eval only; menu is Task 6)
+- [ ] **Step 3: Commit** (Eval only; menu is Task 6)
 
 ```powershell
 git add MLBHrPromoEval.js
