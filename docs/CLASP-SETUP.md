@@ -69,11 +69,19 @@ Optional: set **rootDir** if script files live in a subfolder; here `""` means t
 
 ## 5. Push
 
-From `C:\Users\Garage\Documents\Cursor\mlb-boiz`:
+From your clone of this repo (e.g. `C:\Users\Lee\Documents\Cursor\MLB`):
 
 ```bash
 clasp push
 ```
+
+If clasp warns that the **remote manifest** (`appsscript.json`) was updated and asks to overwrite, and your **local** manifest is what you want, run:
+
+```bash
+clasp push --force
+```
+
+(`-f` is the short form.) That **forcibly overwrites the remote manifest** with your local `appsscript.json`.
 
 First push may ask to enable the Apps Script API — follow the link clasp prints, enable it, wait a minute, retry.
 

@@ -1,7 +1,7 @@
 // ============================================================
 // 🃏 MLB Bet Card — single ranked sheet (NBA-style product)
 // ============================================================
-// Staging: 🎰 Pitcher_K_Card → ⚡ Sim_Pitcher_K; 🎰 Batter_Hits_Card / 🎰 Batter_TB_Card
+// Staging: 🎰 cards → ⚡ Sim tabs (K, Hits, TB). Pipeline rebuilds these before 🃏.
 // automatically when you run this from the menu. Pipeline calls
 // merge-only to avoid double work.
 // ============================================================
@@ -9,6 +9,10 @@
 const MLB_BET_CARD_TAB = '🃏 MLB_Bet_Card';
 /** K plays on 🃏 are sourced from ⚡ Sim_Pitcher_K — keep in sync with MLBSimPitcherK.js */
 const MLB_PITCHER_K_SIM_TAB = '⚡ Sim_Pitcher_K';
+/** sync MLBSimBatterHits.js */
+const MLB_BATTER_HITS_SIM_TAB = '⚡ Sim_Batter_Hits';
+/** sync MLBSimBatterTB.js */
+const MLB_BATTER_TB_SIM_TAB = '⚡ Sim_Batter_TB';
 const MLB_BET_CARD_MAX_PLAYS = 30;
 /** Same spirit as AI-BOIZ: cap straights per game across all markets on this card. */
 const MLB_BET_CARD_MAX_PER_GAME = 2;
@@ -92,12 +96,14 @@ function mlbRebuildStagingForBetCard_(ss) {
   refreshPitcherKBetCard();
   refreshPitcherKSimEngine_();
   refreshBatterHitsCard();
+  refreshBatterHitsSimEngine_();
   refreshBatterTBCard();
+  refreshBatterTBSimEngine_();
   return true;
 }
 
 /**
- * @param {string} srcTab MLB_PITCHER_K_SIM_TAB | MLB_BATTER_HITS_CARD_TAB | MLB_BATTER_TB_CARD_TAB
+ * @param {string} srcTab MLB_PITCHER_K_SIM_TAB | MLB_BATTER_HITS_SIM_TAB | MLB_BATTER_TB_SIM_TAB
  * @param {string} marketLabel e.g. Pitcher strikeouts
  * @param {string} statVerb short label in pick text (K | BB)
  * @param {string} disclaimer row note
@@ -189,6 +195,7 @@ function refreshMLBBetCard() {
 /** Called from PipelineMenu after queues/cards already ran. */
 function refreshMLBBetCardMergeOnly_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+  mlbEnsureAllSimsForBetCard_(ss);
   const cfg = getConfig();
   const minEvCfg = parseFloat(String(cfg['MIN_EV_BET_CARD'] != null ? cfg['MIN_EV_BET_CARD'] : '0').trim(), 10);
   const minEvFloor = !isNaN(minEvCfg) && minEvCfg > 0 ? minEvCfg : 0;
@@ -203,16 +210,20 @@ function refreshMLBBetCardMergeOnly_() {
   const slateDate    = getSlateDateString_(cfg);
 
   const simTab = ss.getSheetByName(MLB_PITCHER_K_SIM_TAB);
+  const simHits = ss.getSheetByName(MLB_BATTER_HITS_SIM_TAB);
+  const simTb = ss.getSheetByName(MLB_BATTER_TB_SIM_TAB);
   const hitTab = ss.getSheetByName(MLB_BATTER_HITS_CARD_TAB);
   const tbTab  = ss.getSheetByName(MLB_BATTER_TB_CARD_TAB);
   if (
     (!simTab || simTab.getLastRow() < 4) &&
+    (!simHits || simHits.getLastRow() < 4) &&
+    (!simTb || simTb.getLastRow() < 4) &&
     (!hitTab || hitTab.getLastRow() < 4) &&
     (!tbTab  || tbTab.getLastRow()  < 4)
   ) {
     safeAlert_(
       'MLB Bet Card',
-      'No staging rows — run Morning (or ⚡ Sim + Hits + TB), or 🃏 MLB Bet Card only after K pipeline.'
+      'No staging rows — run Morning, or build 🎰 cards then 🃏 Bet Card only (sims refresh automatically).'
     );
     return;
   }
@@ -235,10 +246,10 @@ function refreshMLBBetCardMergeOnly_() {
     mlbCollectPlaysFromPitcherOddsCard_(
       ss,
       cfg,
-      MLB_BATTER_HITS_CARD_TAB,
+      MLB_BATTER_HITS_SIM_TAB,
       'Batter hits',
       'H',
-      'Model: Binomial P(≥k hits) on λ=BA×est_AB; season BA from Stats API; not devigged.',
+      'Model: Anchored binomial (ANCHOR_WEIGHT_BATTER_HITS) after 🎰 card; EV from ⚡ Sim. Not devigged.',
       minEvFloor,
       maxOddsCap,
       minOddsFloor
@@ -248,10 +259,10 @@ function refreshMLBBetCardMergeOnly_() {
     mlbCollectPlaysFromPitcherOddsCard_(
       ss,
       cfg,
-      MLB_BATTER_TB_CARD_TAB,
+      MLB_BATTER_TB_SIM_TAB,
       'Batter total bases',
       'TB',
-      'Model: Poisson P(≥k TB) on λ=SLG×est_AB; season SLG from Stats API; not devigged.',
+      'Model: Anchored Poisson (ANCHOR_WEIGHT_BATTER_TB) after 🎰 card; EV from ⚡ Sim. Not devigged.',
       minEvFloor,
       maxOddsCap,
       minOddsFloor
@@ -815,4 +826,56 @@ function mlbAppendBetTrackerSection_(ss, sh, startRow, slateDate, p) {
   });
 
   return r;
+}
+
+/**
+ * Rebuild ⚡ sim tabs from any 🎰 staging tabs that already have data rows.
+ * Lets "🃏 Bet Card only" work after running individual card menu items.
+ */
+function mlbEnsureAllSimsForBetCard_(ss) {
+  try {
+    var kc = ss.getSheetByName(MLB_PITCHER_K_CARD_TAB);
+    if (kc && kc.getLastRow() >= 4) refreshPitcherKSimEngine_();
+  } catch (e) {
+    Logger.log('mlbEnsureAllSimsForBetCard_ K: ' + e);
+  }
+  try {
+    var hc = ss.getSheetByName(MLB_BATTER_HITS_CARD_TAB);
+    if (hc && hc.getLastRow() >= 4) refreshBatterHitsSimEngine_();
+  } catch (e) {
+    Logger.log('mlbEnsureAllSimsForBetCard_ Hits: ' + e);
+  }
+  try {
+    var tc = ss.getSheetByName(MLB_BATTER_TB_CARD_TAB);
+    if (tc && tc.getLastRow() >= 4) refreshBatterTBSimEngine_();
+  } catch (e) {
+    Logger.log('mlbEnsureAllSimsForBetCard_ TB: ' + e);
+  }
+}
+
+/**
+ * Debug: log row counts for staging + sim + bet card (no UI required for logs).
+ * Menu calls this for a quick health check after deploy.
+ */
+function mlbRunDebugSanityCheck_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  function n(tab) {
+    const sh = ss.getSheetByName(tab);
+    if (!sh) return 'missing';
+    const lr = sh.getLastRow();
+    return lr < 4 ? 0 : lr - 3;
+  }
+  const lines = [
+    'MLB debug sanity — data rows (excl. 3 header rows)',
+    'K card: ' + n(MLB_PITCHER_K_CARD_TAB) + ' | K sim: ' + n(MLB_PITCHER_K_SIM_TAB),
+    'Hits card: ' + n(MLB_BATTER_HITS_CARD_TAB) + ' | Hits sim: ' + n(MLB_BATTER_HITS_SIM_TAB),
+    'TB card: ' + n(MLB_BATTER_TB_CARD_TAB) + ' | TB sim: ' + n(MLB_BATTER_TB_SIM_TAB),
+    'Bet card: ' + n(MLB_BET_CARD_TAB),
+  ];
+  lines.forEach(function (L) {
+    Logger.log(L);
+  });
+  try {
+    ss.toast(lines.slice(1).join(' · '), 'MLB debug', 12);
+  } catch (e) {}
 }

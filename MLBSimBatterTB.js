@@ -1,52 +1,45 @@
 // ============================================================
-// ⚡ Sim_Pitcher_K — anchored Poisson (Phase 1)
+// ⚡ Sim_Batter_TB — anchored Poisson (Phase 2)
 // ============================================================
-// Reads 🎰 Pitcher_K_Card (22 cols, row 4+). Writes ⚡ Sim_Pitcher_K
-// with the SAME 22-column schema so MLBBetCard merge is unchanged.
-// Cols 23–24: lambda_K_model, context_score (audit; not read by merge).
-// anchoredLambda = line*(1-w) + lambda*w, w = ANCHOR_WEIGHT_K.
+// Reads 🎰 Batter_TB_Card (22 cols). Writes ⚡ Sim_Batter_TB same schema.
 // ============================================================
 
-const MLB_PITCHER_K_SIM_TAB = '⚡ Sim_Pitcher_K';
+const MLB_BATTER_TB_SIM_TAB = '⚡ Sim_Batter_TB';
 
-/**
- * Rebuild sim rows from the current K card. Idempotent.
- * Call only after refreshPitcherKBetCard().
- */
-function refreshPitcherKSimEngine_() {
+function refreshBatterTBSimEngine_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const cfg = getConfig();
-  const wRaw = String(cfg['ANCHOR_WEIGHT_K'] != null ? cfg['ANCHOR_WEIGHT_K'] : '0.35').trim();
+  const wRaw = String(cfg['ANCHOR_WEIGHT_BATTER_TB'] != null ? cfg['ANCHOR_WEIGHT_BATTER_TB'] : '0.35').trim();
   let w = parseFloat(wRaw, 10);
   if (isNaN(w)) w = 0.35;
   w = Math.max(0, Math.min(1, w));
 
-  const src = ss.getSheetByName(MLB_PITCHER_K_CARD_TAB);
+  const src = ss.getSheetByName(MLB_BATTER_TB_CARD_TAB);
   if (!src || src.getLastRow() < 4) {
-    mlbClearPitcherKSimSheet_(ss);
+    mlbClearBatterTBSimSheet_(ss);
     return;
   }
 
   const last = src.getLastRow();
   const rows = src.getRange(4, 1, last, 22).getValues();
-  const out = [];
+  const pairs = [];
 
   rows.forEach(function (r) {
     const gamePk = r[0];
     const matchup = r[1];
     const side = r[2];
-    const pitcher = r[3];
+    const batter = r[3];
     const line = r[4];
     const fdOver = r[5];
     const fdUnder = r[6];
-    const projIp = r[7];
+    const estAb = r[7];
     const lambdaModel = parseFloat(String(r[8]), 10);
     const lineNum = parseFloat(String(line), 10);
 
     let lamAnch = NaN;
     if (!isNaN(lambdaModel) && lambdaModel > 0 && !isNaN(lineNum)) {
       lamAnch = lineNum * (1 - w) + lambdaModel * w;
-      lamAnch = Math.round(lamAnch * 100) / 100;
+      lamAnch = Math.round(lamAnch * 1000) / 1000;
     }
 
     let edge = '';
@@ -88,15 +81,16 @@ function refreshPitcherKSimEngine_() {
       bestEv = evU;
     }
 
-    out.push([
+    pairs.push({
+      main: [
       gamePk,
       matchup,
       side,
-      pitcher,
+      batter,
       line,
       fdOver,
       fdUnder,
-      projIp,
+      estAb,
       !isNaN(lamAnch) ? lamAnch : '',
       edge,
       pOver,
@@ -111,39 +105,46 @@ function refreshPitcherKSimEngine_() {
       r[19],
       r[20],
       r[21],
-    ]);
+      ],
+      aud: [!isNaN(lambdaModel) ? lambdaModel : '', 0],
+    });
   });
 
-  out.sort(function (a, b) {
-    const be = parseFloat(b[17], 10);
-    const ae = parseFloat(a[17], 10);
+  pairs.sort(function (a, b) {
+    const be = parseFloat(b.main[17], 10);
+    const ae = parseFloat(a.main[17], 10);
     if (isNaN(be) && isNaN(ae)) return 0;
     if (isNaN(be)) return -1;
     if (isNaN(ae)) return 1;
     return be - ae;
   });
 
-  let sh = ss.getSheetByName(MLB_PITCHER_K_SIM_TAB);
+  const out = pairs.map(function (p) {
+    return p.main;
+  });
+  const audit = pairs.map(function (p) {
+    return p.aud;
+  });
+
+  let sh = ss.getSheetByName(MLB_BATTER_TB_SIM_TAB);
   if (sh) {
     const cr = Math.max(sh.getLastRow(), 3);
-    const cc = Math.max(sh.getLastColumn(), 22);
+    const cc = Math.max(sh.getLastColumn(), 24);
     try {
       sh.getRange(1, 1, cr, cc).breakApart();
     } catch (e) {}
     sh.clearContents();
     sh.clearFormats();
   } else {
-    sh = ss.insertSheet(MLB_PITCHER_K_SIM_TAB);
+    sh = ss.insertSheet(MLB_BATTER_TB_SIM_TAB);
   }
-  sh.setTabColor('#1565c0');
+  sh.setTabColor('#5e35b1');
 
   sh.getRange(1, 1, 1, 22)
     .merge()
-    .setValue(
-      '⚡ Sim_Pitcher_K — anchored Poisson (ANCHOR_WEIGHT_K); EV is authoritative for 🃏 K rows.'
-    )
+    .setValue('⚡ Sim_Batter_TB — anchored Poisson (ANCHOR_WEIGHT_BATTER_TB); 🃏 TB rows use this tab.')
     .setFontWeight('bold')
-    .setBackground('#0d47a1')
+    .setBackground('#4a148c')
     .setFontColor('#ffffff')
     .setHorizontalAlignment('center')
     .setWrap(true);
@@ -153,12 +154,12 @@ function refreshPitcherKSimEngine_() {
     'gamePk',
     'matchup',
     'side',
-    'pitcher',
-    'fd_k_line',
+    'batter',
+    'fd_tb_line',
     'fd_over',
     'fd_under',
-    'proj_IP',
-    'lambda_K_anchored',
+    'est_AB',
+    'lambda_TB_anchored',
     'edge_vs_line',
     'p_over',
     'p_under',
@@ -169,32 +170,37 @@ function refreshPitcherKSimEngine_() {
     'best_side',
     'best_ev_$1',
     'flags',
-    'pitcher_id',
-    'hp_umpire',
-    'throws',
+    'batter_id',
+    '',
+    'team_abbr',
   ];
   sh.getRange(3, 1, 1, headers.length)
     .setValues([headers])
     .setFontWeight('bold')
-    .setBackground('#1976d2')
+    .setBackground('#6a1b9a')
     .setFontColor('#ffffff');
 
   if (out.length) {
     sh.getRange(4, 1, out.length, headers.length).setValues(out);
     try {
-      ss.setNamedRange('MLB_PITCHER_K_SIM', sh.getRange(4, 1, out.length, headers.length));
+      ss.setNamedRange('MLB_BATTER_TB_SIM', sh.getRange(4, 1, out.length, headers.length));
     } catch (e) {}
+    sh.getRange(3, 23, 3, 24)
+      .setValues([['lambda_TB_model', 'context_score']])
+      .setFontWeight('bold')
+      .setBackground('#6a1b9a')
+      .setFontColor('#ffffff');
+    sh.getRange(4, 23, out.length, 24).setValues(audit);
   }
   sh.setFrozenRows(3);
   try {
-    ss.toast(out.length + ' sim rows · anchored λ', 'Pitcher K Sim', 6);
+    ss.toast(out.length + ' batter TB sim rows', 'Sim Batter TB', 6);
   } catch (e) {}
 }
 
-/** Empty K card → clear sim tab and leave a one-line hint (no data rows). */
-function mlbClearPitcherKSimSheet_(ss) {
-  let sh = ss.getSheetByName(MLB_PITCHER_K_SIM_TAB);
-  if (!sh) sh = ss.insertSheet(MLB_PITCHER_K_SIM_TAB);
+function mlbClearBatterTBSimSheet_(ss) {
+  let sh = ss.getSheetByName(MLB_BATTER_TB_SIM_TAB);
+  if (!sh) sh = ss.insertSheet(MLB_BATTER_TB_SIM_TAB);
   sh.clear();
-  sh.getRange(1, 1).setValue('⚡ Sim_Pitcher_K — run 🎰 Pitcher_K_Card first');
+  sh.getRange(1, 1).setValue('⚡ Sim_Batter_TB — run 🎰 Batter_TB_Card first');
 }

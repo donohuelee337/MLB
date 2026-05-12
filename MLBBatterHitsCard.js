@@ -116,40 +116,6 @@ function mlbBuildBatterHitsOddsIndex_(ss) {
   return mlbBuildPitcherOddsIndexForMarkets_(ss, ['batter_hits', 'batter_hits_alternate']);
 }
 
-// ── Binomial helpers ─────────────────────────────────────────────────────────
-
-function mlbBinomCoeff_(n, k) {
-  if (k > n - k) k = n - k;
-  let r = 1;
-  for (let i = 0; i < k; i++) r = r * (n - i) / (i + 1);
-  return r;
-}
-
-/**
- * P(X >= k) for Binomial(n, ba) where n is rounded to the nearest integer.
- * For hit props: P(≥k hits in estAB at-bats with per-AB hit rate ba).
- */
-function mlbBinomialPGeqK_(k, n, ba) {
-  const nInt = Math.round(n);
-  if (k <= 0) return 1;
-  if (ba <= 0 || nInt <= 0) return 0;
-  if (ba >= 1) return 1;
-  // Sum P(X=0) … P(X=k-1) then subtract from 1
-  let pLess = 0;
-  const q = 1 - ba;
-  for (let i = 0; i < k && i <= nInt; i++) {
-    pLess += mlbBinomCoeff_(nInt, i) * Math.pow(ba, i) * Math.pow(q, nInt - i);
-  }
-  return Math.max(0, Math.min(1, 1 - pLess));
-}
-
-/**
- * P(X <= k) for Binomial(n, ba). Complement of P(X >= k+1).
- */
-function mlbBinomialPLeqK_(k, n, ba) {
-  return 1 - mlbBinomialPGeqK_(k + 1, n, ba);
-}
-
 // ── Main card builder ─────────────────────────────────────────────────────────
 
 /**
