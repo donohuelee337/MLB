@@ -211,26 +211,6 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   } catch (e) {}
 }
 
-function runPitcherOutsQueueAndCard_() {
-  refreshPitcherOutsSlateQueue();
-  refreshPitcherOutsBetCard();
-}
-
-function runPitcherBbQueueAndCard_() {
-  refreshPitcherWalksSlateQueue();
-  refreshPitcherWalksBetCard();
-}
-
-function runPitcherHaQueueAndCard_() {
-  refreshPitcherHitsAllowedSlateQueue();
-  refreshPitcherHaBetCard();
-}
-
-function runBatterHrQueueAndCard_() {
-  refreshBatterHrSlateQueue();
-  refreshBatterHrBetCard();
-}
-
 /**
  * Diagnostic: tally the FanDuel odds tab by market key, so we can see
  * whether walks / outs / HA / batter markets actually arrived from FD.
