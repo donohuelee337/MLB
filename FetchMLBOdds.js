@@ -17,6 +17,8 @@ const MLB_ODDS_CONFIG = {
     [
       'pitcher_strikeouts',
       'pitcher_strikeouts_alternate',
+      'pitcher_walks',
+      'pitcher_walks_alternate',
     ],
     ['pitcher_outs', 'pitcher_hits_allowed', 'pitcher_earned_runs', 'pitcher_record_a_win'],
     [
@@ -26,6 +28,7 @@ const MLB_ODDS_CONFIG = {
       'batter_rbis',
       'batter_runs_scored',
       'batter_stolen_bases',
+      'batter_walks',
       'batter_strikeouts',
       'batter_hits_runs_rbis',
     ],
@@ -42,6 +45,7 @@ const MLB_ODDS_CONFIG = {
       'batter_home_runs_alternate',
       'batter_rbis_alternate',
       'batter_runs_scored_alternate',
+      'batter_walks_alternate',
       'batter_strikeouts_alternate',
     ],
     ['h2h', 'spreads', 'totals', 'team_totals'],
@@ -53,6 +57,7 @@ function fetchMLBFanDuelOdds() {
   const apiKey = getOddsApiKey_();
   if (!apiKey) return;
 
+  ensureMlbPipelineSlateDateAdvanced_(getConfig());
   const cfg = getConfig();
   const slateDate = getSlateDateString_(cfg);
   const eventIds = getMLEventIdsForDate_(apiKey, slateDate);

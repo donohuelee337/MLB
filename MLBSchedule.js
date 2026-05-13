@@ -45,6 +45,113 @@ function mlbFetchScheduleJsonForDate_(dateStr) {
   }
 }
 
+/** Today's calendar date in America/New_York (MLB slate date). */
+function mlbTodayYmdNy_() {
+  return Utilities.formatDate(new Date(), 'America/New_York', 'yyyy-MM-dd');
+}
+
+/** Tomorrow's calendar date in America/New_York (same logic as menu “tomorrow + Morning”). */
+function mlbTomorrowYmdNy_() {
+  const tz = 'America/New_York';
+  const d = new Date();
+  d.setDate(d.getDate() + 1);
+  return Utilities.formatDate(d, tz, 'yyyy-MM-dd');
+}
+
+/** Flatten statsapi schedule payload → game objects. */
+function mlbScheduleGamesFlat_(payload) {
+  const games = [];
+  const dates = (payload && payload.dates) || [];
+  for (let i = 0; i < dates.length; i++) {
+    const gs = dates[i].games || [];
+    for (let j = 0; j < gs.length; j++) games.push(gs[j]);
+  }
+  return games;
+}
+
+/**
+ * Game “done” for slate-roll: Final, or postponed/cancelled (nothing left to play tonight).
+ * Suspended excluded — may resume.
+ */
+function mlbGameIsTerminalForSlateRoll_(g) {
+  const st = g.status || {};
+  const abs = String(st.abstractGameState || '').toLowerCase();
+  if (abs === 'final') return true;
+  const det = String(st.detailedState || '').toLowerCase();
+  if (det.indexOf('postponed') !== -1) return true;
+  if (det.indexOf('cancel') !== -1) return true;
+  return false;
+}
+
+/**
+ * When ⚙️ SLATE_DATE is “today” (NY) and that calendar day has no unfinished MLB games,
+ * updates SLATE_DATE to tomorrow so schedule/odds queues target the next slate before midnight.
+ * Controlled by SLATE_AUTO_ADVANCE_WHEN_COMPLETE (default true).
+ * @returns {string} Effective yyyy-MM-dd after possible advance.
+ */
+function ensureMlbPipelineSlateDateAdvanced_(cfg) {
+  const c = cfg || getConfig();
+  const autoRaw = c['SLATE_AUTO_ADVANCE_WHEN_COMPLETE'];
+  const autoOff = String(autoRaw != null ? autoRaw : 'true')
+    .trim()
+    .toLowerCase();
+  if (autoOff === 'false' || autoOff === '0' || autoOff === 'no') {
+    return getSlateDateString_(c);
+  }
+
+  const base = getSlateDateString_(c);
+  const todayNy = mlbTodayYmdNy_();
+  if (base !== todayNy) {
+    return base;
+  }
+
+  const payload = mlbFetchScheduleJsonForDate_(base);
+  if (!payload) {
+    return base;
+  }
+
+  const games = mlbScheduleGamesFlat_(payload);
+  let shouldRoll = false;
+  let rollReason = '';
+
+  if (games.length === 0) {
+    shouldRoll = true;
+    rollReason = 'no MLB games listed for ' + base;
+  } else {
+    let allTerminal = true;
+    for (let i = 0; i < games.length; i++) {
+      if (!mlbGameIsTerminalForSlateRoll_(games[i])) {
+        allTerminal = false;
+        break;
+      }
+    }
+    if (allTerminal) {
+      shouldRoll = true;
+      rollReason = 'all games finished (or postponed/cancelled) for ' + base;
+    }
+  }
+
+  if (!shouldRoll) {
+    return base;
+  }
+
+  const tom = mlbTomorrowYmdNy_();
+  if (tom === base) {
+    return base;
+  }
+
+  setConfigValue_('SLATE_DATE', tom);
+  try {
+    SpreadsheetApp.getActiveSpreadsheet().toast(
+      'SLATE_DATE → ' + tom + ' (' + rollReason + ')',
+      'MLB-BOIZ slate',
+      12
+    );
+  } catch (e) {}
+  Logger.log('ensureMlbPipelineSlateDateAdvanced_: rolled ' + base + ' → ' + tom + ' · ' + rollReason);
+  return tom;
+}
+
 /** Matchup string from 📅 MLB_Schedule for a gamePk (for odds joins / CLV backfill). */
 /** Home team abbreviation from schedule row (col `home`). */
 function mlbScheduleHomeAbbrForGamePk_(ss, gamePk) {
@@ -77,8 +184,31 @@ function mlbScheduleMatchupForGamePk_(ss, gamePk) {
   return '';
 }
 
+/** @returns {{ matchup: string, away: string, home: string, hpUmp: string }} */
+function mlbScheduleMetaForGamePk_(ss, gamePk) {
+  const g = parseInt(gamePk, 10);
+  const empty = { matchup: '', away: '', home: '', hpUmp: '' };
+  if (!g) return empty;
+  const sh = ss.getSheetByName(MLB_SCHEDULE_TAB);
+  if (!sh || sh.getLastRow() < 4) return empty;
+  const last = sh.getLastRow();
+  const block = sh.getRange(4, 1, last, 14).getValues();
+  for (let i = 0; i < block.length; i++) {
+    if (parseInt(block[i][0], 10) === g) {
+      return {
+        matchup: String(block[i][5] || '').trim(),
+        away: String(block[i][3] || '').trim(),
+        home: String(block[i][4] || '').trim(),
+        hpUmp: String(block[i][13] || '').trim(),
+      };
+    }
+  }
+  return empty;
+}
+
 function fetchMLBScheduleForSlate() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+  ensureMlbPipelineSlateDateAdvanced_(getConfig());
   const cfg = getConfig();
   const dateStr = getSlateDateString_(cfg);
   const payload = mlbFetchScheduleJsonForDate_(dateStr);
@@ -102,8 +232,8 @@ function fetchMLBScheduleForSlate() {
         g.gamePk,
         Utilities.formatDate(new Date(g.gameDate), Session.getScriptTimeZone(), 'yyyy-MM-dd'),
         g.gameDate,
-        away.abbreviation || '',
-        home.abbreviation || '',
+        away.abbreviation || MLB_TEAM_ABBREV[away.id] || '',
+        home.abbreviation || MLB_TEAM_ABBREV[home.id] || '',
         (away.name || '') + ' @ ' + (home.name || ''),
         awayProb.fullName || '',
         homeProb.fullName || '',

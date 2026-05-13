@@ -40,9 +40,30 @@ const MLB_ABBR_TO_ODDS_TEAM_NAME = {
   WSN: 'Washington Nationals',
 };
 
-/** Extra odds-style strings for the same club (relocation / branding). */
+/** Extra odds-style strings for the same club (relocation, legacy names, abbreviations). */
 const MLB_ABBR_ODDS_TEAM_ALTERNATES = {
-  OAK: ['Las Vegas Athletics', 'Athletics'],
+  ARI: ['Arizona D-backs', 'Arizona Dbacks'],
+  CHC: ['Chi Cubs'],
+  CLE: ['Cleveland Indians'],
+  CWS: ['Chi White Sox', 'Chi Sox'],
+  KC: ['KC Royals'],
+  LAA: ['LA Angels', 'Los Angeles Angels of Anaheim', 'Anaheim Angels'],
+  LAD: ['LA Dodgers'],
+  MIA: ['Florida Marlins'],
+  NYM: ['NY Mets'],
+  NYY: ['NY Yankees'],
+  OAK: [
+    'Las Vegas Athletics',
+    'Athletics',
+    'Oakland A\'s',
+    'Oakland As',
+    'Las Vegas A\'s',
+  ],
+  SD: ['SD Padres'],
+  SF: ['SF Giants'],
+  STL: ['St Louis Cardinals', 'Saint Louis Cardinals'],
+  TB: ['Tampa Bay Devil Rays', 'Devil Rays'],
+  WSN: ['Washington Nats', 'Washington DC Nationals'],
 };
 
 function mlbNormalizeGameLabel_(s) {
@@ -114,11 +135,119 @@ function mlbCandidateGameKeys_(matchup, awayAbbr, homeAbbr) {
  * @param {string[]} gameKeys from mlbCandidateGameKeys_
  * @param {string} pitcherNorm mlbNormalizePersonName_(fullName)
  */
-function mlbOddsPointMapForPitcher_(oddsIdx, gameKeys, pitcherNorm) {
+/**
+ * FanDuel tab → index: normalizedGame||normalizedPlayerName → { line: { Over, Under } }.
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss
+ * @param {string} marketKey e.g. pitcher_strikeouts | batter_total_bases
+ */
+function mlbBuildPersonPropOddsIndex_(ss, marketKey) {
+  const want = String(marketKey || '').trim();
+  const byGamePlayer = {};
+  const sh = ss.getSheetByName(MLB_ODDS_CONFIG.tabName);
+  if (!sh || sh.getLastRow() < 4 || !want) return byGamePlayer;
+  const last = sh.getLastRow();
+  const block = sh.getRange(4, 1, last, 6).getValues();
+  for (let i = 0; i < block.length; i++) {
+    const player = block[i][0];
+    const gameLabel = block[i][1];
+    const market = String(block[i][2] || '');
+    const side = String(block[i][3] || '');
+    const lineRaw = block[i][4];
+    const price = block[i][5];
+    if (market !== want) continue;
+    const g = mlbNormalizeGameLabel_(gameLabel);
+    const p = mlbNormalizePersonName_(player);
+    if (!g || !p) continue;
+    const pt = parseFloat(lineRaw);
+    if (isNaN(pt)) continue;
+    const key = g + '||' + p;
+    if (!byGamePlayer[key]) byGamePlayer[key] = {};
+    if (!byGamePlayer[key][pt]) byGamePlayer[key][pt] = {};
+    const sl = side.toLowerCase();
+    if (sl.indexOf('over') !== -1) byGamePlayer[key][pt].Over = price;
+    if (sl.indexOf('under') !== -1) byGamePlayer[key][pt].Under = price;
+  }
+  return byGamePlayer;
+}
+
+/**
+ * Merge alternate lines (same game||player keys) when FanDuel posts only _alternate
+ * for a slate (common for walks / hits allowed).
+ * @param {string} altKey e.g. pitcher_walks_alternate — optional, pass '' to skip
+ */
+function mlbBuildPersonPropOddsIndexMerged_(ss, mainKey, altKey) {
+  const main = mlbBuildPersonPropOddsIndex_(ss, mainKey);
+  const ak = String(altKey || '').trim();
+  if (!ak) return main;
+  const alt = mlbBuildPersonPropOddsIndex_(ss, ak);
+  for (const k in alt) {
+    if (!Object.prototype.hasOwnProperty.call(alt, k)) continue;
+    if (!main[k]) main[k] = {};
+    for (const pt in alt[k]) {
+      if (!Object.prototype.hasOwnProperty.call(alt[k], pt)) continue;
+      if (!main[k][pt]) main[k][pt] = {};
+      const mo = main[k][pt];
+      const ao = alt[k][pt];
+      if (ao.Over != null && mo.Over == null) mo.Over = ao.Over;
+      if (ao.Under != null && mo.Under == null) mo.Under = ao.Under;
+    }
+  }
+  return main;
+}
+
+function mlbOddsPointMapForPerson_(oddsIdx, gameKeys, personNorm) {
   for (let i = 0; i < gameKeys.length; i++) {
-    const k = gameKeys[i] + '||' + pitcherNorm;
+    const k = gameKeys[i] + '||' + personNorm;
     const pm = oddsIdx[k];
     if (pm && Object.keys(pm).length) return pm;
   }
   return null;
+}
+
+function mlbOddsPointMapForPitcher_(oddsIdx, gameKeys, pitcherNorm) {
+  return mlbOddsPointMapForPerson_(oddsIdx, gameKeys, pitcherNorm);
+}
+
+/**
+ * Normalized Odds API game labels → statsapi gamePk (from 📅 MLB_Schedule).
+ */
+function mlbBuildOddsGameNormToGamePk_(ss) {
+  const map = {};
+  const sch = ss.getSheetByName(MLB_SCHEDULE_TAB);
+  if (!sch || sch.getLastRow() < 4) return map;
+  const last = sch.getLastRow();
+  const block = sch.getRange(4, 1, last, 6).getValues();
+  for (let i = 0; i < block.length; i++) {
+    const gamePk = block[i][0];
+    const matchup = block[i][5];
+    const awayAbbr = block[i][3];
+    const homeAbbr = block[i][4];
+    const keys = mlbCandidateGameKeys_(matchup, awayAbbr, homeAbbr);
+    for (let k = 0; k < keys.length; k++) {
+      const kk = keys[k];
+      // Doubleheaders: same normalized label maps to two gamePks — keep first schedule row
+      // (usually game 1) so we do not silently overwrite with the later game.
+      if (map[kk] == null || map[kk] === '') map[kk] = gamePk;
+    }
+  }
+  return map;
+}
+
+/**
+ * Map FanDuel / Odds API game string → statsapi gamePk.
+ * Uses label variants first, then exact normalized 📅 matchup.
+ */
+function mlbResolveGamePkFromFdGameLabel_(ss, fdGameLabel, gamePkMap) {
+  const map = gamePkMap || {};
+  const g = mlbNormalizeGameLabel_(fdGameLabel);
+  if (map[g] != null && map[g] !== '') return map[g];
+  const sch = ss.getSheetByName(MLB_SCHEDULE_TAB);
+  if (!sch || sch.getLastRow() < 4) return '';
+  const last = sch.getLastRow();
+  const block = sch.getRange(4, 1, last, 6).getValues();
+  for (let i = 0; i < block.length; i++) {
+    const m = mlbNormalizeGameLabel_(block[i][5]);
+    if (m === g) return block[i][0];
+  }
+  return '';
 }
