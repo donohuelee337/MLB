@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(sed -n '409,440p' MLBPitcherSecondaryMarkets.js)",
+      "Bash(sed -n '556,600p' MLBPitcherSecondaryMarkets.js)",
+      "Bash(xargs grep *)",
+      "Bash(node -e ' *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(clasp push *)"
+    ]
+  }
+}

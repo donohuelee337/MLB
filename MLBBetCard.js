@@ -57,7 +57,9 @@ function refreshMLBBetCard() {
   const srcPha = ss.getSheetByName(MLB_PITCHER_HA_CARD_TAB);
   const srcTb = ss.getSheetByName(MLB_BATTER_TB_CARD_TAB);
   const srcHits = ss.getSheetByName(MLB_BATTER_HITS_CARD_TAB);
-  const srcHr = ss.getSheetByName(MLB_BATTER_HR_CARD_TAB);
+  const includeHr = String(cfg['MLB_INCLUDE_HR_BET_CARD'] != null ? cfg['MLB_INCLUDE_HR_BET_CARD'] : 'false').trim().toLowerCase();
+  const srcHr = includeHr === 'true' || includeHr === '1' || includeHr === 'yes'
+    ? ss.getSheetByName(MLB_BATTER_HR_CARD_TAB) : null;
 
   const anyCard =
     (srcK && srcK.getLastRow() >= 4) ||
@@ -65,8 +67,7 @@ function refreshMLBBetCard() {
     (srcPbb && srcPbb.getLastRow() >= 4) ||
     (srcPha && srcPha.getLastRow() >= 4) ||
     (srcTb && srcTb.getLastRow() >= 4) ||
-    (srcHits && srcHits.getLastRow() >= 4) ||
-    (srcHr && srcHr.getLastRow() >= 4);
+    (srcHits && srcHits.getLastRow() >= 4);
 
   if (!anyCard) {
     safeAlert_(
@@ -76,8 +77,24 @@ function refreshMLBBetCard() {
     return;
   }
 
+  // CARD_ALLOWED_MARKETS: comma-separated market labels for main card (default: K + Hits).
+  const allowedMarketsRaw = String(cfg['CARD_ALLOWED_MARKETS'] != null
+    ? cfg['CARD_ALLOWED_MARKETS'] : 'Pitcher strikeouts,Batter hits').trim();
+  const allowedMarkets = allowedMarketsRaw.split(',').reduce(function (m, s) {
+    m[s.trim().toLowerCase()] = true; return m;
+  }, {});
+
+  const sgpMinEvCfg = parseFloat(String(cfg['SGP_MIN_EV'] != null ? cfg['SGP_MIN_EV'] : '0.01').trim());
+  const sgpMinEv = !isNaN(sgpMinEvCfg) && sgpMinEvCfg >= 0 ? sgpMinEvCfg : 0.01;
+
+  // plays[]    — passed all filters + allowed market → main card candidates
+  // sgpPool[]  — passed hard filters (positive EV, valid data, no injury) → SGP 3rd-leg candidates
   const plays = [];
+  const sgpPool = [];
   const rejects = [];
+
+  // softPlays retained for TB-over cap routing (logged to debug, not used elsewhere).
+  const softPlays = [];
 
   function logReject_(obj) {
     rejects.push([
@@ -136,14 +153,6 @@ function refreshMLBBetCard() {
       logReject_({ stage: 'edge-filter', reason: 'non_positive_ev', market: marketLabel, gamePk: gamePk, matchup: matchup, player: pitcher, side: bestSide, line: line, american: american, ev: evRaw, flags: flags });
       return;
     }
-    if (!relaxWalks && minEvFloor > 0 && ev < minEvFloor) {
-      logReject_({ stage: 'edge-filter', reason: 'below_min_ev_floor', market: marketLabel, gamePk: gamePk, matchup: matchup, player: pitcher, side: bestSide, line: line, american: american, ev: ev, flags: flags });
-      return;
-    }
-    if (!relaxWalks && !mlbCardSinglesOddsBandOk_(american, cfg)) {
-      logReject_({ stage: 'odds-filter', reason: 'outside_odds_band', market: marketLabel, gamePk: gamePk, matchup: matchup, player: pitcher, side: bestSide, line: line, american: american, ev: ev, flags: flags });
-      return;
-    }
     const pWin = bestSide === 'Over' ? r[8] : r[9];
     const hand =
       throws.toUpperCase() === 'R' ? 'RHP' : throws.toUpperCase() === 'L' ? 'LHP' : throws ? throws : '';
@@ -157,7 +166,7 @@ function refreshMLBBetCard() {
       ' ' +
       String(line) +
       (hpUmp ? ' · HP ' + hpUmp : '');
-    plays.push({
+    var pmPlayObj = {
       gamePk: r[0],
       matchup: r[1],
       pickLabel: pickLabel,
@@ -173,17 +182,30 @@ function refreshMLBBetCard() {
       edge: r[7],
       flags: flags,
       market: marketLabel,
-      disclaimer:
-        'Poisson λ vs FD main line; ⚙️ MIN_EV_BET_CARD & CARD_USE_NBA_ODDS_BAND; not alt markets in builders.' +
-        (relaxWalks
-          ? ' MLB_FORCE_PITCHER_WALKS_BET_CARD: band+min-EV floor waived for walks.'
-          : ''),
-    });
+      disclaimer: 'Poisson λ vs FD main line; ⚙️ CARD_ALLOWED_MARKETS, MIN_EV_BET_CARD, CARD_USE_NBA_ODDS_BAND.',
+    };
+    // Always add to SGP pool if positive EV.
+    sgpPool.push(pmPlayObj);
+    // Only add to main card if market is allowed and passes band + EV floor.
+    const inAllowed = allowedMarkets[marketLabel.toLowerCase()];
+    var pmSoftReason = '';
+    if (!inAllowed) pmSoftReason = 'market_not_in_card_allowed';
+    if (inAllowed && !relaxWalks && minEvFloor > 0 && ev < minEvFloor) pmSoftReason = 'below_min_ev_floor';
+    if (inAllowed && !relaxWalks && !mlbCardSinglesOddsBandOk_(american, cfg)) {
+      pmSoftReason = pmSoftReason ? pmSoftReason + '+outside_odds_band' : 'outside_odds_band';
+    }
+    if (pmSoftReason) {
+      pmPlayObj.softReason = pmSoftReason;
+      softPlays.push(pmPlayObj);
+      logReject_({ stage: 'soft-reject', reason: pmSoftReason, market: marketLabel, gamePk: gamePk, matchup: matchup, player: pitcher, side: bestSide, line: line, american: american, ev: ev, flags: flags });
+    } else {
+      plays.push(pmPlayObj);
+    }
   }
 
   if (srcK && srcK.getLastRow() >= 4) {
     const lastK = srcK.getLastRow();
-    const vals = srcK.getRange(4, 1, lastK, MLB_PITCHER_K_CARD_COLS).getValues();
+    const vals = srcK.getRange(4, 1, lastK - 3, MLB_PITCHER_K_CARD_COLS).getValues();
     vals.forEach(function (r) {
       const flags = String(r[18] || '');
       const pitcherId = r[19];
@@ -222,14 +244,6 @@ function refreshMLBBetCard() {
         logReject_({ stage: 'edge-filter', reason: 'non_positive_ev', market: 'Pitcher strikeouts', gamePk: gamePk, matchup: matchup, player: pitcher, side: bestSide, line: line, american: american, ev: r[17], flags: flags });
         return;
       }
-      if (minEvFloor > 0 && ev < minEvFloor) {
-        logReject_({ stage: 'edge-filter', reason: 'below_min_ev_floor', market: 'Pitcher strikeouts', gamePk: gamePk, matchup: matchup, player: pitcher, side: bestSide, line: line, american: american, ev: ev, flags: flags });
-        return;
-      }
-      if (!mlbCardSinglesOddsBandOk_(american, cfg)) {
-        logReject_({ stage: 'odds-filter', reason: 'outside_odds_band', market: 'Pitcher strikeouts', gamePk: gamePk, matchup: matchup, player: pitcher, side: bestSide, line: line, american: american, ev: ev, flags: flags });
-        return;
-      }
       const pWin = bestSide === 'Over' ? r[10] : r[11];
       const hand =
         throws.toUpperCase() === 'R' ? 'RHP' : throws.toUpperCase() === 'L' ? 'LHP' : throws ? throws : '';
@@ -241,7 +255,7 @@ function refreshMLBBetCard() {
         ' ' +
         String(line) +
         (hpUmp ? ' · HP ' + hpUmp : '');
-      plays.push({
+      var kPlayObj = {
         gamePk: r[0],
         matchup: r[1],
         pickLabel: pickLabel,
@@ -257,14 +271,29 @@ function refreshMLBBetCard() {
         edge: r[9],
         flags: flags,
         market: 'Pitcher strikeouts',
-        disclaimer: 'Poisson λ K/9×IP; ⚙️ MIN_EV & NBA-style odds band on card.',
-      });
+        disclaimer: 'Poisson λ K/9×IP; ⚙️ CARD_ALLOWED_MARKETS, MIN_EV, odds band.',
+      };
+      sgpPool.push(kPlayObj);
+      var kSoftReason = '';
+      const kAllowed = allowedMarkets['pitcher strikeouts'];
+      if (!kAllowed) kSoftReason = 'market_not_in_card_allowed';
+      if (kAllowed && minEvFloor > 0 && ev < minEvFloor) kSoftReason = 'below_min_ev_floor';
+      if (kAllowed && !mlbCardSinglesOddsBandOk_(american, cfg)) {
+        kSoftReason = kSoftReason ? kSoftReason + '+outside_odds_band' : 'outside_odds_band';
+      }
+      if (kSoftReason) {
+        kPlayObj.softReason = kSoftReason;
+        softPlays.push(kPlayObj);
+        logReject_({ stage: 'soft-reject', reason: kSoftReason, market: 'Pitcher strikeouts', gamePk: gamePk, matchup: matchup, player: pitcher, side: bestSide, line: line, american: american, ev: ev, flags: flags });
+      } else {
+        plays.push(kPlayObj);
+      }
     });
   }
 
   if (srcPo && srcPo.getLastRow() >= 4) {
     const last = srcPo.getLastRow();
-    srcPo.getRange(4, 1, last, MLB_PITCHER_SEC_CARD_COLS)
+    srcPo.getRange(4, 1, last - 3, MLB_PITCHER_SEC_CARD_COLS)
       .getValues()
       .forEach(function (r) {
         pushPitcherMirror_(r, 'Pitcher outs', 'Outs', 6);
@@ -272,7 +301,7 @@ function refreshMLBBetCard() {
   }
   if (srcPbb && srcPbb.getLastRow() >= 4) {
     const last = srcPbb.getLastRow();
-    srcPbb.getRange(4, 1, last, MLB_PITCHER_SEC_CARD_COLS)
+    srcPbb.getRange(4, 1, last - 3, MLB_PITCHER_SEC_CARD_COLS)
       .getValues()
       .forEach(function (r) {
         pushPitcherMirror_(r, 'Pitcher walks', 'BB', 6);
@@ -280,7 +309,7 @@ function refreshMLBBetCard() {
   }
   if (srcPha && srcPha.getLastRow() >= 4) {
     const last = srcPha.getLastRow();
-    srcPha.getRange(4, 1, last, MLB_PITCHER_SEC_CARD_COLS)
+    srcPha.getRange(4, 1, last - 3, MLB_PITCHER_SEC_CARD_COLS)
       .getValues()
       .forEach(function (r) {
         pushPitcherMirror_(r, 'Pitcher hits allowed', 'HA', 6);
@@ -324,18 +353,10 @@ function refreshMLBBetCard() {
       logReject_({ stage: 'edge-filter', reason: 'non_positive_ev', market: marketLabel, gamePk: gamePk, matchup: matchup, player: batter, side: bestSide, line: line, american: american, ev: r[15], flags: flags });
       return;
     }
-    if (minEvFloor > 0 && ev < minEvFloor) {
-      logReject_({ stage: 'edge-filter', reason: 'below_min_ev_floor', market: marketLabel, gamePk: gamePk, matchup: matchup, player: batter, side: bestSide, line: line, american: american, ev: ev, flags: flags });
-      return;
-    }
-    if (!mlbCardSinglesOddsBandOk_(american, cfg)) {
-      logReject_({ stage: 'odds-filter', reason: 'outside_odds_band', market: marketLabel, gamePk: gamePk, matchup: matchup, player: batter, side: bestSide, line: line, american: american, ev: ev, flags: flags });
-      return;
-    }
     const pWin = bestSide === 'Over' ? r[8] : r[9];
     const pickLabel =
       batter + ' — ' + mid + ' ' + bestSide + ' ' + String(line) + (hpUmp ? ' · HP ' + hpUmp : '');
-    plays.push({
+    var bmPlayObj = {
       gamePk: r[0],
       matchup: r[1],
       pickLabel: pickLabel,
@@ -351,26 +372,50 @@ function refreshMLBBetCard() {
       edge: r[7],
       flags: flags,
       market: marketLabel,
-      disclaimer: 'Batter Poisson λ; ⚙️ TB_BLEND & odds band.',
-    });
+      disclaimer: 'Batter Poisson λ; ⚙️ CARD_ALLOWED_MARKETS, TB_BLEND, odds band.',
+    };
+    // Always add to SGP pool if positive EV.
+    sgpPool.push(bmPlayObj);
+    // Route to main card only if market is allowed and passes band + EV floor.
+    const bmAllowed = allowedMarkets[marketLabel.toLowerCase()];
+    var bmSoftReason = '';
+    if (!bmAllowed) bmSoftReason = 'market_not_in_card_allowed';
+    if (bmAllowed && minEvFloor > 0 && ev < minEvFloor) bmSoftReason = 'below_min_ev_floor';
+    if (bmAllowed && !mlbCardSinglesOddsBandOk_(american, cfg)) {
+      bmSoftReason = bmSoftReason ? bmSoftReason + '+outside_odds_band' : 'outside_odds_band';
+    }
+    if (bmAllowed && marketLabel === 'Batter total bases' && bestSide === 'Over') {
+      const tbOverMax = parseFloat(String(cfg['BATTER_TB_OVER_MAX_AMERICAN'] != null ? cfg['BATTER_TB_OVER_MAX_AMERICAN'] : '0').trim());
+      const amer = parseFloat(String(american));
+      if (!isNaN(amer) && !isNaN(tbOverMax) && amer > tbOverMax) {
+        bmSoftReason = bmSoftReason ? bmSoftReason + '+tb_over_plus_odds' : 'tb_over_plus_odds';
+      }
+    }
+    if (bmSoftReason) {
+      bmPlayObj.softReason = bmSoftReason;
+      softPlays.push(bmPlayObj);
+      logReject_({ stage: 'soft-reject', reason: bmSoftReason, market: marketLabel, gamePk: gamePk, matchup: matchup, player: batter, side: bestSide, line: line, american: american, ev: ev, flags: flags });
+    } else {
+      plays.push(bmPlayObj);
+    }
   }
 
   if (srcTb && srcTb.getLastRow() >= 4) {
-    srcTb.getRange(4, 1, srcTb.getLastRow(), MLB_BATTER_PROP_CARD_COLS)
+    srcTb.getRange(4, 1, srcTb.getLastRow() - 3, MLB_BATTER_PROP_CARD_COLS)
       .getValues()
       .forEach(function (r) {
         pushBatterMirror_(r, 'Batter total bases', 'TB');
       });
   }
   if (srcHits && srcHits.getLastRow() >= 4) {
-    srcHits.getRange(4, 1, srcHits.getLastRow(), MLB_BATTER_PROP_CARD_COLS)
+    srcHits.getRange(4, 1, srcHits.getLastRow() - 3, MLB_BATTER_PROP_CARD_COLS)
       .getValues()
       .forEach(function (r) {
         pushBatterMirror_(r, 'Batter hits', 'H');
       });
   }
   if (srcHr && srcHr.getLastRow() >= 4) {
-    srcHr.getRange(4, 1, srcHr.getLastRow(), MLB_BATTER_PROP_CARD_COLS)
+    srcHr.getRange(4, 1, srcHr.getLastRow() - 3, MLB_BATTER_PROP_CARD_COLS)
       .getValues()
       .forEach(function (r) {
         pushBatterMirror_(r, 'Batter home runs', 'HR');
@@ -386,49 +431,31 @@ function refreshMLBBetCard() {
     return be - ae;
   });
 
+  // No per-game cap: all A/A+ plays from allowed markets make the card.
+  // Only the total card cap (MLB_BET_CARD_MAX_PLAYS=48) applies.
   const top = [];
   const perGame = {};
-  /** Count of non–Pitcher-walks plays already on the card for this game (for bonus BB slot). */
-  const nonWalksInGame = {};
-  const forceBb = mlbBetCardForcePitcherBb_(cfg);
   for (let i = 0; i < plays.length && top.length < MLB_BET_CARD_MAX_PLAYS; i++) {
     const p = plays[i];
     const gKey = String(p.gamePk != null ? p.gamePk : p.matchup || '').trim() || 'unknown';
-    const n = perGame[gKey] || 0;
-    const nw = nonWalksInGame[gKey] || 0;
-    const atCap = n >= MLB_BET_CARD_MAX_PER_GAME;
-    const bbExtra =
-      forceBb &&
-      p.market === 'Pitcher walks' &&
-      n === MLB_BET_CARD_MAX_PER_GAME &&
-      nw > 0;
-    if (atCap && !bbExtra) {
-      logReject_({
-        stage: 'portfolio-cap',
-        reason: 'per_game_cap_reached',
-        market: p.market,
-        gamePk: p.gamePk,
-        matchup: p.matchup,
-        player: p.player,
-        side: p.side,
-        line: p.line,
-        american: p.american,
-        ev: p.ev,
-        flags: p.flags,
-      });
-      continue;
-    }
-    if (p.market !== 'Pitcher walks') nonWalksInGame[gKey] = nw + 1;
-    perGame[gKey] = n + 1;
+    perGame[gKey] = (perGame[gKey] || 0) + 1;
     top.push(p);
   }
 
-  // Honorable mentions: next-best plays cut by per-game cap or total cap (up to 5).
-  const honorable = [];
+  // ── SGP candidates: best additional play per game (any market, EV ≥ SGP_MIN_EV),
+  //    only for games that have exactly 2 main card plays — gives 3rd leg for SGP/parlay.
   const topSet = new Set(top);
-  for (let i = 0; i < plays.length && honorable.length < 5; i++) {
-    if (!topSet.has(plays[i])) honorable.push(plays[i]);
-  }
+  const sgpByGame = {};
+  sgpPool.sort(function (a, b) {
+    return parseFloat(String(b.ev)) - parseFloat(String(a.ev));
+  });
+  sgpPool.forEach(function (p) {
+    if (topSet.has(p)) return;
+    if (parseFloat(String(p.ev)) < sgpMinEv) return;
+    const gKey = String(p.gamePk != null ? p.gamePk : p.matchup || '').trim() || 'unknown';
+    if ((perGame[gKey] || 0) < 1) return; // game must have at least 1 main card play
+    if (!sgpByGame[gKey]) sgpByGame[gKey] = p; // pool is EV-sorted, first wins
+  });
 
   // ── Debug rejects tab ──────────────────────────────────────────
 
@@ -502,13 +529,37 @@ function refreshMLBBetCard() {
   const kellyFracRaw = parseFloat(String(cfg && cfg['KELLY_FRACTION'] != null ? cfg['KELLY_FRACTION'] : '0.25').trim());
   const kellyFrac    = !isNaN(kellyFracRaw) && kellyFracRaw > 0 ? Math.min(kellyFracRaw, 1) : 0.25;
 
-  // Group plays by matchup (preserving EV-rank order across games).
+  // Build gamePk → startTime lookup. Mirror MLBSlateBoard: read schLast rows (not schLast-3)
+  // and skip blank rows via guard — same pattern proven to work there.
+  const gameStartTime = {};
+  const schSh = ss.getSheetByName(MLB_SCHEDULE_TAB);
+  if (schSh && schSh.getLastRow() >= 4) {
+    const schLast = schSh.getLastRow();
+    schSh.getRange(4, 1, schLast, 3).getValues().forEach(function (r) {
+      const pk = r[0];
+      const rawVal = r[2]; // gameDateRaw — may be Date object or ISO string
+      if (!pk || !rawVal) return;
+      const t = rawVal instanceof Date ? rawVal.getTime() : new Date(String(rawVal)).getTime();
+      if (!isNaN(t)) gameStartTime[String(pk)] = t;
+    });
+  }
+
+  // Group plays by matchup, then sort groups by game start time.
   const gameOrder = [];
   const gameMap = {};
   top.forEach(function (p) {
     const gKey = p.matchup || String(p.gamePk || '') || 'unknown';
     if (!gameMap[gKey]) { gameMap[gKey] = []; gameOrder.push(gKey); }
     gameMap[gKey].push(p);
+  });
+  gameOrder.sort(function (a, b) {
+    const pA = gameMap[a][0] || {};
+    const pB = gameMap[b][0] || {};
+    const pkA = pA.gamePk != null ? String(pA.gamePk) : '';
+    const pkB = pB.gamePk != null ? String(pB.gamePk) : '';
+    const tA = (pkA && gameStartTime[pkA]) ? gameStartTime[pkA] : 0;
+    const tB = (pkB && gameStartTime[pkB]) ? gameStartTime[pkB] : 0;
+    return tA - tB;
   });
 
   const totalGames = gameOrder.length;
@@ -519,7 +570,7 @@ function refreshMLBBetCard() {
     .setValue(
       '🃏 MLB BET CARD — ' + slateDate +
       '  ·  ' + totalPlays + ' plays · ' + totalGames + ' games' +
-      '  ·  NBA-style odds band (⚙️)  ·  max ' + MLB_BET_CARD_MAX_PER_GAME + '/game' +
+      '  ·  markets: ' + allowedMarketsRaw +
       '  ·  build ' + MLB_BET_CARD_BUILD_STAMP
     )
     .setFontWeight('bold')
@@ -609,12 +660,84 @@ function refreshMLBBetCard() {
       sheetRow++;
     });
 
-    // ── Honorable mentions ──
-    if (honorable.length > 0) {
+    // ── SGP candidates: 3rd-leg suggestions grouped by game ──
+    const sgpGames = gameOrder.filter(function (gKey) { return !!sgpByGame[gKey]; });
+    if (sgpGames.length > 0) {
       sh.getRange(sheetRow, 1, 1, BC_COL).merge()
         .setValue(
-          '⭐ HONORABLE MENTIONS — next-best plays cut by per-game cap or total cap (' +
-          honorable.length + ')'
+          '🎯 SGP / 3-LEG CANDIDATES — best qualifying 3rd leg per game (EV ≥ ' + sgpMinEv + ', any market) · not Kelly-sized · use to build SGP'
+        )
+        .setBackground('#1565C0')
+        .setFontColor('#ffffff')
+        .setFontWeight('bold')
+        .setFontSize(9);
+      sh.setRowHeight(sheetRow, 24);
+      sheetRow++;
+
+      sgpGames.forEach(function (gKey) {
+        const p = sgpByGame[gKey];
+        const sConf = mlbConfidenceTier_(p.ev);
+        const playFull = String(p.pickLabel || '');
+        const playDisplay = playFull.length > 60 ? playFull.substring(0, 57) + '…' : playFull;
+        sh.getRange(sheetRow, 1, 1, BC_COL).setValues([[
+          slateDate, 'SGP', p.gamePk, p.matchup,
+          playDisplay, p.player, p.market, p.side,
+          p.line, p.american, p.book, p.pWin, p.ev,
+          p.lambda, p.edge, p.flags,
+          p.playerId != null && p.playerId !== '' ? p.playerId : '',
+          p.disclaimer,
+          sConf, '', '',
+        ]]).setBackground('#E3F2FD').setFontSize(9).setWrap(false);
+        if (playFull.length > 60) sh.getRange(sheetRow, 5).setNote(playFull);
+        sh.setRowHeight(sheetRow, 22);
+        sheetRow++;
+      });
+    }
+
+    // ── FD Pick'Em Top 10 — players most likely to hit a HR today ──
+    // Always reads HR card regardless of MLB_INCLUDE_HR_BET_CARD flag (free pick, not a bet).
+    // Ranked by p_over (probability of going Over HR line, i.e. actually hitting a HR).
+    const srcHrPickEm = ss.getSheetByName(MLB_BATTER_HR_CARD_TAB);
+    const hrPickEmPool = [];
+    if (srcHrPickEm && srcHrPickEm.getLastRow() >= 4) {
+      srcHrPickEm.getRange(4, 1, srcHrPickEm.getLastRow() - 3, MLB_BATTER_PROP_CARD_COLS)
+        .getValues()
+        .forEach(function (r) {
+          const batter = String(r[2] || '').trim();
+          if (!batter) return;
+          const flags = String(r[16] || '');
+          if (flags.indexOf('injury') !== -1) return;
+          const lambda = parseFloat(String(r[6]));
+          if (isNaN(lambda) || lambda <= 0) return;
+          // P(hits at least 1 HR) = 1 - e^(-λ), regardless of FD line
+          const pHitHr = 1 - Math.exp(-lambda);
+          const fdOver = r[4];
+          const evOver = parseFloat(String(r[12]));
+          hrPickEmPool.push({
+            gamePk:   r[0],
+            matchup:  r[1],
+            batter:   batter,
+            line:     r[3],
+            american: fdOver,
+            pHitHr:   Math.round(pHitHr * 10000) / 10000,
+            lambda:   lambda,
+            ev:       isNaN(evOver) ? 0 : evOver,
+            flags:    flags,
+            batterId: r[17],
+          });
+        });
+    }
+    hrPickEmPool.sort(function (a, b) { return b.pHitHr - a.pHitHr; });
+    const pickEm = hrPickEmPool.slice(0, 10);
+
+    if (pickEm.length > 0) {
+      // Spacer
+      sh.setRowHeight(sheetRow, 8);
+      sheetRow++;
+
+      sh.getRange(sheetRow, 1, 1, BC_COL).merge()
+        .setValue(
+          '🎁 FD PICK\'EM TOP 10 — most likely to hit a HR today (ranked by model p_over) · free Pick\'Em bonus · not a straight bet'
         )
         .setBackground('#E65100')
         .setFontColor('#ffffff')
@@ -623,22 +746,21 @@ function refreshMLBBetCard() {
       sh.setRowHeight(sheetRow, 24);
       sheetRow++;
 
-      honorable.forEach(function (p) {
-        const hConf    = mlbConfidenceTier_(p.ev);
-        const hKellyAmt = mlbKellyDollars_(p.pWin, p.american, cfg);
-        const playFull = String(p.pickLabel || '');
-        const playDisplay = playFull.length > 60 ? playFull.substring(0, 57) + '…' : playFull;
-        // rank is '' — snapshot skips these rows (no rank = not a card play)
+      pickEm.forEach(function (p, idx) {
+        const pHrPct = Math.round(p.pHitHr * 1000) / 10 + '%';
+        const playFull = p.batter + ' — hits a HR (P≥1: ' + pHrPct + ')';
+        const bg = p.pHitHr >= 0.18 ? '#A5D6A7' :
+                   p.pHitHr >= 0.14 ? '#C8E6C9' :
+                   p.pHitHr >= 0.10 ? '#E8F5E9' : '#FFF8E1';
         sh.getRange(sheetRow, 1, 1, BC_COL).setValues([[
-          slateDate, '', p.gamePk, p.matchup,
-          playDisplay, p.player, p.market, p.side,
-          p.line, p.american, p.book, p.pWin, p.ev,
-          p.lambda, p.edge, p.flags,
-          p.playerId != null && p.playerId !== '' ? p.playerId : '',
-          p.disclaimer,
-          hConf, '', hKellyAmt,
-        ]]).setBackground('#FFF3E0').setFontSize(9).setWrap(false);
-        if (playFull.length > 60) sh.getRange(sheetRow, 5).setNote(playFull);
+          slateDate, '#' + (idx + 1), p.gamePk, p.matchup,
+          playFull, p.batter, 'Batter home runs', 'Over',
+          p.line, p.american, 'fanduel', pHrPct, p.ev,
+          p.lambda, '', p.flags,
+          p.batterId != null && p.batterId !== '' ? p.batterId : '',
+          'P(≥1 HR) = 1−e^(−λ); free Pick\'Em only; HR model lacks park/hand splits',
+          '', '', '',
+        ]]).setBackground(bg).setFontSize(9).setWrap(false);
         sh.setRowHeight(sheetRow, 22);
         sheetRow++;
       });

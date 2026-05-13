@@ -9,11 +9,11 @@ const CONFIG_TAB_NAME = '⚙️ Config';
 
 function safeAlert_(title, message) {
   try {
-    SpreadsheetApp.getUi().alert(title, message || title, SpreadsheetApp.getUi().ButtonSet.OK);
+    SpreadsheetApp.getActiveSpreadsheet().toast(message || title, title, 8);
   } catch (e) {
     Logger.log('ALERT [' + title + ']: ' + (message || ''));
     try {
-      SpreadsheetApp.getActiveSpreadsheet().toast((title + ' — ' + (message || '').slice(0, 80)), 'Notice', 8);
+      SpreadsheetApp.getUi().alert(title, message || title, SpreadsheetApp.getUi().ButtonSet.OK);
     } catch (_) {}
   }
 }
@@ -129,6 +129,10 @@ function buildConfigTab() {
     '',
     'CSV: columns pitcher_id + abs_k_mult. Per-pitcher shadow-zone K dependency mult (< 1 = loses Ks to ABS challenges). Loaded when SAVANT_INGEST_ENABLED is true.'
   );
+  row_('CARD_ALLOWED_MARKETS', 'Pitcher strikeouts,Batter hits,Batter total bases', 'Comma-separated market labels for 🃏 main card. All other markets are SGP-pool only (see SGP section). Default: K + Hits + TB.');
+  row_('SGP_MIN_EV', '0.01', 'Min EV per $1 for SGP 3rd-leg candidates shown below main card. Default 0.01 (B tier). Must be positive EV; market need not be in CARD_ALLOWED_MARKETS.');
+  row_('BATTER_TB_OVER_MAX_AMERICAN', '0', 'Cap on American odds for Batter TB Over bets on 🃏 card. Default 0 (even odds): plus-odds TB Overs are soft-rejected (noisy λ at long prices). Set to 150 to restore full band, or -100 to require short favorites only.');
+  row_('MLB_INCLUDE_HR_BET_CARD', 'false', 'true | false — include Batter HR in 🃏 merge. Default false: HR park factors and pitcher HR/9 not yet modeled; re-enable when those signals are added.');
   row_('KELLY_BANKROLL', '1000', 'Total bankroll in dollars used for Kelly sizing on 🃏 bet card. Set to your actual roll; Kelly $ scales proportionally.');
   row_('KELLY_FRACTION', '0.25', 'Fractional Kelly multiplier (0..1). 0.25 = quarter-Kelly (recommended for props). Full Kelly (1.0) is theoretically optimal but high-variance.');
   row_('KELLY_MAX_BET_PCT', '0.05', 'Hard cap: max bet as fraction of bankroll regardless of Kelly output (default 0.05 = 5%). Prevents runaway sizing on thin samples.');
