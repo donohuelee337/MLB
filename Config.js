@@ -100,6 +100,7 @@ function buildConfigTab() {
   row_('HR_PROMO_WEATHER_ENABLED', 'false', 'Reserved: phase-1 code keeps weather mult at 1. When true + parks allowlisted, future version applies bounded wind/temp mult.');
   row_('HR_PROMO_WEATHER_PARKS', 'CHC,BOS', 'Comma abbrev list — only used when HR_PROMO_WEATHER_ENABLED is true (phase 2).');
   row_('MIN_EV_BET_CARD', '0', 'Min EV per $1 on 🃏 card; 0 = any positive EV; e.g. 0.03 for 3¢ floor');
+  row_('MIN_MODEL_PROB_BET_CARD', '0.60', 'Min model win probability (0..1) for a play to make 🃏; any qualifying play makes the card (no per-game cap).');
   row_('MAX_ODDS_BET_CARD', '', 'Max American odds on 🃏 card; blank = no cap; e.g. 130 to exclude bets over +130');
   row_('MIN_ODDS_BET_CARD', '-250', 'Min American odds on 🃏 card (heavy-chalk floor); blank = no floor; e.g. -250 to exclude -260 and worse');
   row_('EST_AB_PER_GAME', '3.5', 'Estimated AB per game for 🎰 Batter Hits model (fallback when season AB/G unavailable)');

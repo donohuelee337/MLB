@@ -7,9 +7,8 @@
 // ============================================================
 
 const MLB_BET_CARD_TAB = '🃏 MLB_Bet_Card';
-const MLB_BET_CARD_MAX_PLAYS = 30;
-/** Same spirit as AI-BOIZ: cap straights per game across all markets on this card. */
-const MLB_BET_CARD_MAX_PER_GAME = 2;
+/** Safety-net total cap; rule is "any qualifying play makes the card," so this should rarely bind. */
+const MLB_BET_CARD_MAX_PLAYS = 100;
 /** Total column count on the 🃏 sheet (slate..game_time). Snapshot mirrors this. */
 const MLB_BET_CARD_NCOL = 20;
 
@@ -99,7 +98,7 @@ function mlbRebuildStagingForBetCard_(ss) {
  * @param {string} statVerb short label in pick text (K | BB)
  * @param {string} disclaimer row note
  */
-function mlbCollectPlaysFromPitcherOddsCard_(ss, cfg, srcTab, marketLabel, statVerb, disclaimer, minEvFloor, maxOddsCap, minOddsFloor) {
+function mlbCollectPlaysFromPitcherOddsCard_(ss, cfg, srcTab, marketLabel, statVerb, disclaimer, minEvFloor, maxOddsCap, minOddsFloor, minProbFloor) {
   const src = ss.getSheetByName(srcTab);
   if (!src || src.getLastRow() < 4) return [];
   const last = src.getLastRow();
@@ -135,6 +134,10 @@ function mlbCollectPlaysFromPitcherOddsCard_(ss, cfg, srcTab, marketLabel, statV
     if (minOddsFloor != null && parseFloat(String(american)) < minOddsFloor) return;
 
     const pWin    = bestSide === 'Over' ? r[10] : r[11];
+    if (minProbFloor != null) {
+      const pn = parseFloat(String(pWin));
+      if (isNaN(pn) || pn < minProbFloor) return;
+    }
     const implied = bestSide === 'Over' ? r[12] : r[13];
     const matchup = r[1];
     const gamePk  = r[0];
@@ -190,6 +193,8 @@ function refreshMLBBetCardMergeOnly_() {
   const maxOddsCap = !isNaN(maxOddsCfg) ? maxOddsCfg : null;
   const minOddsCfg = parseFloat(String(cfg['MIN_ODDS_BET_CARD'] != null ? cfg['MIN_ODDS_BET_CARD'] : '-250').trim());
   const minOddsFloor = !isNaN(minOddsCfg) ? minOddsCfg : null;
+  const minProbCfg = parseFloat(String(cfg['MIN_MODEL_PROB_BET_CARD'] != null ? cfg['MIN_MODEL_PROB_BET_CARD'] : '0.60').trim());
+  const minProbFloor = !isNaN(minProbCfg) && minProbCfg > 0 ? minProbCfg : 0.60;
   const bankrollCfg = parseFloat(String(cfg['BANKROLL'] != null ? cfg['BANKROLL'] : '1000').trim());
   const bankroll    = !isNaN(bankrollCfg) && bankrollCfg > 0 ? bankrollCfg : 1000;
   const kellyFracCfg = parseFloat(String(cfg['KELLY_FRACTION'] != null ? cfg['KELLY_FRACTION'] : '0.25').trim());
@@ -222,7 +227,8 @@ function refreshMLBBetCardMergeOnly_() {
       'Model: Poisson on λ=blended K/9×proj_IP×park×L/R×optional HP; not devigged.',
       minEvFloor,
       maxOddsCap,
-      minOddsFloor
+      minOddsFloor,
+      minProbFloor
     )
   );
   plays = plays.concat(
@@ -235,7 +241,8 @@ function refreshMLBBetCardMergeOnly_() {
       'Model: Binomial P(≥k hits) on λ=BA×est_AB; season BA from Stats API; not devigged.',
       minEvFloor,
       maxOddsCap,
-      minOddsFloor
+      minOddsFloor,
+      minProbFloor
     )
   );
   plays = plays.concat(
@@ -248,7 +255,8 @@ function refreshMLBBetCardMergeOnly_() {
       'Model: Poisson P(≥k TB) on λ=SLG×est_AB; season SLG from Stats API; not devigged.',
       minEvFloor,
       maxOddsCap,
-      minOddsFloor
+      minOddsFloor,
+      minProbFloor
     )
   );
 
@@ -271,30 +279,11 @@ function refreshMLBBetCardMergeOnly_() {
     return be - ae;
   });
 
-  // Selection: A+ plays bypass both the per-game cap and the total cap.
-  // Non-A+ plays still respect MLB_BET_CARD_MAX_PER_GAME and MLB_BET_CARD_MAX_PLAYS,
-  // counted against the same game buckets that A+ plays already filled.
+  // Selection: any qualifying play (passed prob/EV/odds filters in the collector) makes the card.
+  // No per-game cap; MLB_BET_CARD_MAX_PLAYS is just a safety-net total to avoid runaway slates.
   const selected = [];
-  const perGame  = {};
-  // Pass 1: take every A+ play
-  plays.forEach(function (p) {
-    if (p.grade !== 'A+') return;
-    const gKey = String(p.gamePk != null ? p.gamePk : p.matchup || '').trim() || 'unknown';
-    perGame[gKey] = (perGame[gKey] || 0) + 1;
-    selected.push(p);
-  });
-  // Pass 2: fill remaining slots with non-A+ plays under existing caps.
-  // A+ plays already counted in perGame[] count against MAX_PER_GAME for non-A+ fills.
-  let nonAPlus = 0;
-  for (let i = 0; i < plays.length; i++) {
-    const p = plays[i];
-    if (p.grade === 'A+') continue;
-    if (nonAPlus >= MLB_BET_CARD_MAX_PLAYS) break;
-    const gKey = String(p.gamePk != null ? p.gamePk : p.matchup || '').trim() || 'unknown';
-    if ((perGame[gKey] || 0) >= MLB_BET_CARD_MAX_PER_GAME) continue;
-    perGame[gKey] = (perGame[gKey] || 0) + 1;
-    selected.push(p);
-    nonAPlus++;
+  for (let i = 0; i < plays.length && selected.length < MLB_BET_CARD_MAX_PLAYS; i++) {
+    selected.push(plays[i]);
   }
 
   // Display order: game start time asc → group by gamePk when times tie → EV desc within game
@@ -352,9 +341,9 @@ function refreshMLBBetCardMergeOnly_() {
     const oddsHint = maxOddsCap != null ? 'odds≤+' + maxOddsCap + ' (⚙️ MAX_ODDS_BET_CARD), ' : '';
     const blank = new Array(MLB_BET_CARD_NCOL).fill('');
     blank[0] = slateDate;
-    blank[5] = 'No qualifying plays — need 🎰 K and/or Hits cards with ' +
+    blank[5] = 'No qualifying plays — need 🎰 K and/or Hits/TB cards with ' +
       evHint + oddsHint +
-      'both FD prices, no injury flag (max ' + MLB_BET_CARD_MAX_PER_GAME + ' per game; A+ plays bypass).';
+      'model_prob ≥ ' + minProbFloor + ' (⚙️ MIN_MODEL_PROB_BET_CARD), both FD prices, no injury flag.';
     rows.push(blank);
   }
 
