@@ -91,18 +91,8 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   } catch (e) {
     Logger.log('gradeMLBPendingResults_: ' + e);
   }
-  try {
-    ensureMlbPipelineSlateDateAdvanced_(getConfig());
-  } catch (e) {
-    Logger.log('ensureMlbPipelineSlateDateAdvanced_: ' + e);
-  }
   mlbResetPitchGameLogFetchCache_();
   mlbResetPitchHandCache_();
-  mlbResetTeamHittingSeasonCache_();
-  mlbResetSavantAbsCache_();
-  mlbResetBatterTbCaches_();
-  let savantTeamCount = -1;
-  let savantPitcherCount = -1;
   const outcomes = [];
 
   function step(name, fn) {
@@ -167,8 +157,6 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   logStep_('Batter TB card',   0, oTb.ok       ? mlbTabDataRowsBelowHeader3_(ss, MLB_BATTER_TB_CARD_TAB)    : 0, oTb.ok       ? '' : oTb.err       || 'failed');
   logStep_('Batter HR promo',  0, oHrPromo.ok  ? mlbTabDataRowsBelowHeader3_(ss, '📣 Batter_HR_Promo')      : 0, oHrPromo.ok  ? '' : oHrPromo.err  || 'failed');
   logStep_('MLB Bet Card',     0, oBet.ok      ? mlbTabDataRowsBelowHeader3_(ss, MLB_BET_CARD_TAB)          : 0, oBet.ok      ? '' : oBet.err      || 'failed');
-
-  mlbAppendAllMarketNearMisses_(ss);
 
   if (oBet.ok) {
     try {
