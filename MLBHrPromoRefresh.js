@@ -116,6 +116,7 @@ function mlbHrPromoRowForBatter_(ctx) {
   const sznPa = parseInt(hit.pa, 10) || 0;
   const shrunk = mlbHrPromoShrinkHrPerPa_(sznHr, sznPa, prior, shrinkMin);
 
+  mlbHrPromoRememberPlayerName_(ctx.batterId, hit.name || ctx.nameFallback || '');
   const l14 = mlbHrPromoL14HrFromSplits_(ctx.batterId, season);
   const denomRecent = Math.max(1, l14.l14g) * exPa;
   const recentHrPerPa = l14.l14hr / denomRecent;
@@ -385,5 +386,13 @@ function refreshBatterHrPromoSheet_() {
     } catch (e) {}
   }
   sh.setFrozenRows(3);
+
+  try {
+    const flushed = mlbHrPromoFlushBatterGameLogWrites_();
+    if (flushed) Logger.log('Batter_Game_Logs: persisted splits for ' + flushed + ' players');
+  } catch (e) {
+    Logger.log('mlbHrPromoFlushBatterGameLogWrites_: ' + (e.message || e));
+  }
+
   ss.toast(rowsOut.length + ' promo HR rows', 'Batter HR promo', 8);
 }

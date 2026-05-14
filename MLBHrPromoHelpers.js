@@ -10,6 +10,51 @@
 // ============================================================
 
 var __mlbHitGameLogSplitCache = {};
+/** Lazy-loaded once per script run: { playerId: { loggedAt, splits[] } } from 🥎 Batter_Game_Logs */
+var __mlbHitGameLogTabIndex = null;
+/** Player names captured during the run, used when we need to write new tab rows. */
+var __mlbHitGameLogPlayerNames = {};
+/** Queue of {playerId, playerName, season, loggedAt, splits} pending tab append. */
+var __mlbHitGameLogPendingWrites = [];
+
+/** Helper for HR promo to label players when we call the API (so writes get a name). */
+function mlbHrPromoRememberPlayerName_(playerId, playerName) {
+  const id = parseInt(playerId, 10);
+  if (id && playerName) __mlbHitGameLogPlayerNames[id] = String(playerName);
+}
+
+function __mlbHitGameLogTabIndex_(ss) {
+  if (__mlbHitGameLogTabIndex !== null) return __mlbHitGameLogTabIndex;
+  __mlbHitGameLogTabIndex = mlbBatterGameLogsReadIndex_(ss, mlbHrPromoCurrentSeason_());
+  return __mlbHitGameLogTabIndex;
+}
+
+function mlbHrPromoCurrentSeason_() {
+  // Falls back to schedule-derived season if available; HR promo always passes season explicitly,
+  // but the cache index needs a default for read-time grouping.
+  try {
+    return mlbSlateSeasonYear_(getConfig());
+  } catch (e) {
+    return new Date().getFullYear();
+  }
+}
+
+/** Called at the end of HR promo refresh to persist all newly-fetched splits. */
+function mlbHrPromoFlushBatterGameLogWrites_() {
+  if (!__mlbHitGameLogPendingWrites.length) return 0;
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const rows = [];
+  __mlbHitGameLogPendingWrites.forEach(function (w) {
+    const name = w.playerName || __mlbHitGameLogPlayerNames[w.playerId] || '';
+    for (let i = 0; i < w.splits.length; i++) {
+      rows.push(mlbBatterGameLogsSplitToRow_(w.loggedAt, w.playerId, name, w.season, w.splits[i]));
+    }
+  });
+  mlbBatterGameLogsAppendRows_(ss, rows);
+  const n = __mlbHitGameLogPendingWrites.length;
+  __mlbHitGameLogPendingWrites = [];
+  return n;
+}
 
 function mlbAbbrToTeamId_() {
   var out = {};
@@ -63,6 +108,16 @@ function mlbStatsApiGetHittingGameSplits_(playerId, season) {
   const key = id + ':' + se;
   if (__mlbHitGameLogSplitCache[key]) return __mlbHitGameLogSplitCache[key];
 
+  // Try 🥎 Batter_Game_Logs first — if we already fetched this player today (NY), reuse.
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const today = Utilities.formatDate(new Date(), 'America/New_York', 'yyyy-MM-dd');
+  const tabIndex = __mlbHitGameLogTabIndex_(ss);
+  const entry = tabIndex[id];
+  if (entry && entry.loggedAt === today && entry.splits && entry.splits.length > 0) {
+    __mlbHitGameLogSplitCache[key] = entry.splits;
+    return entry.splits;
+  }
+
   const url =
     mlbStatsApiBaseUrl_() +
     '/people/' + id +
@@ -78,6 +133,16 @@ function mlbStatsApiGetHittingGameSplits_(playerId, season) {
     const stats = payload.stats && payload.stats[0] ? payload.stats[0] : {};
     const sorted = mlbSortSplitsNewestFirst_(stats.splits || []);
     __mlbHitGameLogSplitCache[key] = sorted;
+    // Queue a tab write so future runs today (and tomorrow as historical) can reuse this.
+    if (sorted.length > 0) {
+      __mlbHitGameLogPendingWrites.push({
+        playerId: id,
+        playerName: __mlbHitGameLogPlayerNames[id] || '',
+        season: se,
+        loggedAt: today,
+        splits: sorted,
+      });
+    }
     return sorted;
   } catch (e) {
     Logger.log('mlbStatsApiGetHittingGameSplits_: ' + e.message);

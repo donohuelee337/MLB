@@ -30,6 +30,7 @@ function onOpen() {
     .addItem('🃏 MLB Bet Card only (all picks — primary sheet)', 'refreshMLBBetCard')
     .addItem('📊 Grade pending MLB results (boxscore)', 'gradeMLBPendingResults_')
     .addItem('📈 Backfill closing lines (Results Log)', 'mlbBackfillClosingMenu_')
+    .addItem('🥎 Batter game logs — row count', 'mlbBatterGameLogsStats_')
     .addItem('📋 Open Pipeline Log', 'mlbActivatePipelineLog_')
     .addItem('🔍 Diagnose FD market counts', 'mlbDiagnoseFdMarkets_')
     .addToUi();
