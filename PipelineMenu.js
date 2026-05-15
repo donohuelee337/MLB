@@ -28,6 +28,17 @@ function onOpen() {
     .addItem('📊 Grade pending MLB results (boxscore)', 'gradeMLBPendingResults_')
     .addItem('📈 Backfill closing K (Results Log)', 'mlbBackfillClosingMenu_')
     .addItem('📋 Open Pipeline Log', 'mlbActivatePipelineLog_')
+    .addSeparator()
+    .addSubMenu(
+      SpreadsheetApp.getUi()
+        .createMenu('🧪 Hits v2 (shadow)')
+        .addItem('🧪 Rebuild Batter Hits v2 card', 'refreshBatterHitsV2BetCard')
+        .addItem('🧪 Snapshot v2 card → log (MIDDAY tag)', 'mlbSnapshotHitsV2Midday_')
+        .addItem('📊 Grade pending v2 hits rows', 'gradeMLBHitsV2PendingResults_')
+        .addItem('🔬 Refresh Hits Model Compare panel', 'refreshHitsModelCompare')
+        .addItem('🔬 Open Compare panel', 'mlbActivateHitsCompareTab_')
+        .addItem('🧪 Open v2 Results Log', 'mlbActivateHitsV2LogTab_')
+    )
     .addToUi();
 }
 
@@ -77,6 +88,11 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   } catch (e) {
     Logger.log('gradeMLBPendingResults_: ' + e);
   }
+  try {
+    gradeMLBHitsV2PendingResults_();
+  } catch (e) {
+    Logger.log('gradeMLBHitsV2PendingResults_: ' + e);
+  }
   mlbResetPitchGameLogFetchCache_();
   mlbResetPitchHandCache_();
   mlbResetTeamHittingSeasonCache_();
@@ -123,6 +139,7 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   step('Batter TB card', refreshBatterTbBetCard);
   step('Batter Hits queue', refreshBatterHitsSlateQueue);
   step('Batter Hits card', refreshBatterHitsBetCard);
+  step('Batter Hits v2 card (shadow)', refreshBatterHitsV2BetCard);
   step('MLB Bet Card', refreshMLBBetCard);
 
   const oCfg = outcomes[0] || { ok: true };
@@ -138,7 +155,8 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   const oTbCard = outcomes[10] || { ok: true };
   const oHitsQ = outcomes[11] || { ok: true };
   const oHitsCard = outcomes[12] || { ok: true };
-  const oBet = outcomes[13] || { ok: true };
+  const oHitsV2 = outcomes[13] || { ok: true };
+  const oBet = outcomes[14] || { ok: true };
 
   logStep_('Config', 1, oCfg.ok ? 1 : 0, oCfg.ok ? '' : oCfg.err || 'failed');
   logStep_(
@@ -220,6 +238,12 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
     oHitsCard.ok ? '' : oHitsCard.err || 'failed'
   );
   logStep_(
+    'Batter Hits v2 card (shadow)',
+    0,
+    oHitsV2.ok ? mlbTabDataRowsBelowHeader3_(ss, MLB_BATTER_HITS_V2_CARD_TAB) : 0,
+    oHitsV2.ok ? '' : oHitsV2.err || 'failed'
+  );
+  logStep_(
     'MLB Bet Card',
     0,
     oBet.ok ? mlbTabDataRowsBelowHeader3_(ss, MLB_BET_CARD_TAB) : 0,
@@ -234,6 +258,20 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
     } catch (e) {
       addPipelineWarning_('Results snapshot: ' + (e.message || e));
     }
+  }
+
+  if (oHitsV2.ok) {
+    try {
+      snapshotMLBHitsV2BetCardToLog(windowTag);
+    } catch (e) {
+      addPipelineWarning_('Hits v2 snapshot: ' + (e.message || e));
+    }
+  }
+
+  try {
+    refreshHitsModelCompare();
+  } catch (e) {
+    addPipelineWarning_('Hits compare panel: ' + (e.message || e));
   }
 
   if (windowTag === 'FINAL' && oOdds.ok) {
