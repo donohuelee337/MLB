@@ -138,20 +138,20 @@ function mlbClvNoteFromOpenClose_(openLine, openOdds, closeLine, closeOdds, side
 
 /**
  * Map a log market label (lowercase) to the FanDuel Odds API market key(s).
- * Returns { main: string, alt: string } — alt is ‘’ when no alternate market exists.
+ * Returns { main: string, alt: string } — alt is '' when no alternate market exists.
  * @param {string} marketLower  row[5].toLowerCase()
  * @returns {{ main: string, alt: string }|null}
  */
 function mlbMarketLabelToFdKey_(marketLower) {
   const m = marketLower;
-  if (m.indexOf(‘strikeout’) !== -1)    return { main: ‘pitcher_strikeouts’,   alt: ‘’ };
-  if (m.indexOf(‘pitcher outs’) !== -1) return { main: ‘pitcher_outs’,          alt: ‘’ };
-  if (m.indexOf(‘pitcher walks’) !== -1 || m.indexOf(‘walk’) !== -1)
-                                         return { main: ‘pitcher_walks’,         alt: ‘pitcher_walks_alternate’ };
-  if (m.indexOf(‘hits allowed’) !== -1) return { main: ‘pitcher_hits_allowed’,  alt: ‘pitcher_hits_allowed_alternate’ };
-  if (m.indexOf(‘total base’) !== -1)   return { main: ‘batter_total_bases’,    alt: ‘’ };
-  if (m.indexOf(‘batter hits’) !== -1)  return { main: ‘batter_hits’,           alt: ‘’ };
-  if (m.indexOf(‘home run’) !== -1)     return { main: ‘batter_home_runs’,      alt: ‘’ };
+  if (m.indexOf('strikeout') !== -1)    return { main: 'pitcher_strikeouts',   alt: '' };
+  if (m.indexOf('pitcher outs') !== -1) return { main: 'pitcher_outs',          alt: '' };
+  if (m.indexOf('pitcher walks') !== -1 || m.indexOf('walk') !== -1)
+                                         return { main: 'pitcher_walks',         alt: 'pitcher_walks_alternate' };
+  if (m.indexOf('hits allowed') !== -1) return { main: 'pitcher_hits_allowed',  alt: 'pitcher_hits_allowed_alternate' };
+  if (m.indexOf('total base') !== -1)   return { main: 'batter_total_bases',    alt: '' };
+  if (m.indexOf('batter hits') !== -1)  return { main: 'batter_hits',           alt: '' };
+  if (m.indexOf('home run') !== -1)     return { main: 'batter_home_runs',      alt: '' };
   return null;
 }
 
@@ -166,20 +166,20 @@ function mlbLookupClosingLine_(ss, gameStr, playerStr, betSide, gamePk, fdKeys) 
     : mlbBuildPersonPropOddsIndex_(ss, fdKeys.main);
   const pNorm = mlbNormalizePersonName_(playerStr);
   const labels = [];
-  const a = String(gameStr || ‘’).trim();
+  const a = String(gameStr || '').trim();
   if (a) labels.push(a);
   const fromSch = mlbScheduleMatchupForGamePk_(ss, gamePk);
   if (fromSch && labels.indexOf(fromSch) === -1) labels.push(fromSch);
-  const sl = String(betSide || ‘’).toLowerCase();
+  const sl = String(betSide || '').toLowerCase();
   for (let t = 0; t < labels.length; t++) {
-    const gKeys = mlbCandidateGameKeys_(labels[t], ‘’, ‘’);
+    const gKeys = mlbCandidateGameKeys_(labels[t], '', '');
     const pointMap = mlbOddsPointMapForPerson_(oddsIdx, gKeys, pNorm);
     if (!pointMap || !Object.keys(pointMap).length) continue;
     const mainPt = mlbPickMainKPoint_(pointMap);
     if (mainPt == null) continue;
     const px = mlbMainKPrices_(pointMap, mainPt);
-    const american = sl.indexOf(‘over’) !== -1 ? px.over : sl.indexOf(‘under’) !== -1 ? px.under : ‘’;
-    if (american === ‘’ || american == null) continue;
+    const american = sl.indexOf('over') !== -1 ? px.over : sl.indexOf('under') !== -1 ? px.under : '';
+    if (american === '' || american == null) continue;
     return { line: mainPt, american: american };
   }
   return null;
@@ -187,7 +187,7 @@ function mlbLookupClosingLine_(ss, gameStr, playerStr, betSide, gamePk, fdKeys) 
 
 /** Backward-compat wrapper kept for mlbBackfillClosingMenu_ (K-only menu item). */
 function mlbLookupClosingPitcherK_(ss, gameStr, playerStr, betSide, gamePk) {
-  return mlbLookupClosingLine_(ss, gameStr, playerStr, betSide, gamePk, { main: ‘pitcher_strikeouts’, alt: ‘’ });
+  return mlbLookupClosingLine_(ss, gameStr, playerStr, betSide, gamePk, { main: 'pitcher_strikeouts', alt: '' });
 }
 
 /**
@@ -207,7 +207,7 @@ function mlbBackfillResultsLogClosingK_(ss) {
   // Build one odds index per market key that actually appears in the log (avoid duplicate fetches).
   const indexCache = {};
   function getOddsIdx_(fdKeys) {
-    const cacheKey = fdKeys.main + ‘|’ + fdKeys.alt;
+    const cacheKey = fdKeys.main + '|' + fdKeys.alt;
     if (!indexCache[cacheKey]) {
       indexCache[cacheKey] = fdKeys.alt
         ? mlbBuildPersonPropOddsIndexMerged_(ss, fdKeys.main, fdKeys.alt)
@@ -219,16 +219,16 @@ function mlbBackfillResultsLogClosingK_(ss) {
   let n = 0;
   for (let i = 0; i < data.length; i++) {
     const row = data[i];
-    const slateStr = String(row[1] || ‘’).trim();
+    const slateStr = String(row[1] || '').trim();
     if (slateStr !== slateWant) continue;
-    const marketRaw = String(row[5] || ‘’).toLowerCase();
+    const marketRaw = String(row[5] || '').toLowerCase();
     const fdKeys = mlbMarketLabelToFdKey_(marketRaw);
     if (!fdKeys) continue;
-    const player = String(row[3] || ‘’).trim();
-    const game = String(row[4] || ‘’).trim();
-    const side = String(row[7] || ‘’).trim();
-    const openLine = row[22] !== ‘’ && row[22] != null ? row[22] : row[6];
-    const openOdds = row[23] !== ‘’ && row[23] != null ? row[23] : row[8];
+    const player = String(row[3] || '').trim();
+    const game = String(row[4] || '').trim();
+    const side = String(row[7] || '').trim();
+    const openLine = row[22] !== '' && row[22] != null ? row[22] : row[6];
+    const openOdds = row[23] !== '' && row[23] != null ? row[23] : row[8];
     const gamePkLog = row[13];
     if (!player) continue;
     if (!game && !parseInt(gamePkLog, 10)) continue;
@@ -242,19 +242,19 @@ function mlbBackfillResultsLogClosingK_(ss) {
     const sl = side.toLowerCase();
     let cl = null;
     for (let t = 0; t < labels.length; t++) {
-      const gKeys = mlbCandidateGameKeys_(labels[t], ‘’, ‘’);
+      const gKeys = mlbCandidateGameKeys_(labels[t], '', '');
       const pointMap = mlbOddsPointMapForPerson_(oddsIdx, gKeys, pNorm);
       if (!pointMap || !Object.keys(pointMap).length) continue;
       const mainPt = mlbPickMainKPoint_(pointMap);
       if (mainPt == null) continue;
       const px = mlbMainKPrices_(pointMap, mainPt);
-      const american = sl.indexOf(‘over’) !== -1 ? px.over : sl.indexOf(‘under’) !== -1 ? px.under : ‘’;
-      if (american === ‘’ || american == null) continue;
+      const american = sl.indexOf('over') !== -1 ? px.over : sl.indexOf('under') !== -1 ? px.under : '';
+      if (american === '' || american == null) continue;
       cl = { line: mainPt, american: american };
       break;
     }
     if (!cl) {
-      logSh.getRange(4 + i, 19, 1, 3).setValues([[‘’, ‘’, ‘no FD match at close (‘ + fdKeys.main + ‘)’]]);
+      logSh.getRange(4 + i, 19, 1, 3).setValues([['', '', 'no FD match at close (' + fdKeys.main + ')']]);
       continue;
     }
     const note = mlbClvNoteFromOpenClose_(openLine, openOdds, cl.line, cl.american, side);

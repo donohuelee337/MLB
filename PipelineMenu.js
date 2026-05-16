@@ -64,7 +64,7 @@ function mlbBackfillClosingMenu_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const n = mlbBackfillResultsLogClosingK_(ss);
   try {
-    ss.toast(‘Results log: updated ‘ + n + ‘ row(s) across all markets’, ‘MLB-BOIZ’, 7);
+    ss.toast('Results log: updated ' + n + ' row(s) across all markets', 'MLB-BOIZ', 7);
   } catch (e) {}
 }
 
