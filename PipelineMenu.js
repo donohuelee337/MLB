@@ -60,6 +60,12 @@ function onOpen() {
         .addItem('🔬 Refresh HR promo feature-ablation', 'refreshHrPromoFeatureAblation')
         .addItem('🔬 Open HR promo ablation tab', 'mlbActivateHrPromoAblationTab_')
     )
+    .addSubMenu(
+      SpreadsheetApp.getUi()
+        .createMenu('💎 GS Promo')
+        .addItem('💎 Refresh GS Promo tab (rebuild picks)', 'refreshBatterGsPromoSheet_')
+        .addItem('📋 Open GS Promo tab', 'mlbActivateGsPromoTab_')
+    )
     .addToUi();
 }
 
@@ -209,6 +215,8 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   // HR Promo built last so the snapshot block (after this) can read it.
   // Appended (not inserted) so the existing outcomes[] indices stay stable.
   step('Batter HR Promo refresh', refreshBatterHrPromoSheet_);
+  // GS Promo reuses the HR-promo row builder, so it must run AFTER the HR refresh.
+  step('Batter GS Promo refresh', refreshBatterGsPromoSheet_);
 
   const oCfg = outcomes[0] || { ok: true };
   const oInj = outcomes[1] || { ok: true };

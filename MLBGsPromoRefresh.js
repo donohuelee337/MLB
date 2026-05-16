@@ -293,7 +293,50 @@ function refreshBatterGsPromoSheet_() {
     try {
       ss.setNamedRange(MLB_BATTER_GS_PROMO_NAMED_RANGE, sh.getRange(4, 1, grid.length, headers.length));
     } catch (e) {}
+
+    // FanDuel "Grand Slam" promo: pick 3 batters from the same team. Highlight
+    // the trio anchored at the top of the list — i.e. take row 0's team, then
+    // walk down and grab the next two rows for that same team. rowsOut is
+    // already sorted by pPoisson DESC → lambdaGs DESC, so this surfaces the
+    // top-3 best GS candidates from the highest-ranked team in the slate.
+    const anchorTeam = String(rowsOut[0].team || '').trim().toUpperCase();
+    const trioRowIdxs = [];
+    for (let i = 0; i < rowsOut.length; i++) {
+      if (String(rowsOut[i].team || '').trim().toUpperCase() === anchorTeam) {
+        trioRowIdxs.push(i);
+        if (trioRowIdxs.length === 3) break;
+      }
+    }
+    if (trioRowIdxs.length > 0) {
+      const anchorRow = rowsOut[trioRowIdxs[0]];
+      const noteText =
+        '💎 GS Promo trio · ' + anchorTeam +
+        ' · pick 3 batters from the same team. Top GS candidates on this team' +
+        ' (anchored at #' + (trioRowIdxs[0] + 1) + ', then next ' + (trioRowIdxs.length - 1) + ' from same team).' +
+        ' Lead bat: ' + anchorRow.batter + '.';
+      trioRowIdxs.forEach(function (rowIdx, pos) {
+        const sheetRow = 4 + rowIdx;
+        // Batter (col 4) + team (col 6) so the "same team" visual reads clearly.
+        sh.getRange(sheetRow, 4)
+          .setBackground('#fde047')
+          .setFontColor('#7c2d12')
+          .setFontWeight('bold');
+        sh.getRange(sheetRow, 6)
+          .setBackground('#fde047')
+          .setFontColor('#7c2d12')
+          .setFontWeight('bold');
+        if (pos === 0) sh.getRange(sheetRow, 4).setNote(noteText);
+      });
+    }
   }
   sh.setFrozenRows(3);
   ss.toast(rowsOut.length + ' promo GS rows', 'Batter GS promo', 8);
+}
+
+/** Menu wrapper — jump to the 📣 Batter_GS_Promo tab if it exists. */
+function mlbActivateGsPromoTab_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sh = ss.getSheetByName(MLB_BATTER_GS_PROMO_TAB);
+  if (sh) sh.activate();
+  else ss.toast('Run the pipeline (or 💎 Refresh GS Promo tab) to create ' + MLB_BATTER_GS_PROMO_TAB, 'MLB-BOIZ', 5);
 }
