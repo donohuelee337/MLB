@@ -7,7 +7,7 @@
 // ============================================================
 
 const MLB_RESULTS_LOG_TAB = '📋 MLB_Results_Log';
-const MLB_RESULTS_LOG_NCOL = 26;
+const MLB_RESULTS_LOG_NCOL = 27;
 
 const MLB_RESULTS_HEADERS = [
   'Logged At',
@@ -36,6 +36,7 @@ const MLB_RESULTS_HEADERS = [
   'open_odds',
   'stake $',
   'pnl $',
+  'proj',
 ];
 
 /** Profit (in $) for a graded row at this American price. Stake is in $. */
@@ -71,6 +72,7 @@ function mlbFindResultsLogSheetRowForUpsert_(logSh, slateWant, betKey, gamePk, p
   if (last < 4) return -1;
   const nc = Math.max(MLB_RESULTS_LOG_NCOL, logSh.getLastColumn());
   const data = logSh.getRange(4, 1, last, nc).getValues();
+  const tz = Session.getScriptTimeZone();
   const wantG = parseInt(gamePk, 10);
   const wantP = parseInt(pitcherId, 10);
   const sideN = String(side || '')
@@ -78,8 +80,13 @@ function mlbFindResultsLogSheetRowForUpsert_(logSh, slateWant, betKey, gamePk, p
     .toLowerCase()
     .replace(/\s+/g, '');
   const lineS = String(line != null ? line : '').trim();
+  const slateWantS = String(slateWant || '').trim();
   for (let i = data.length - 1; i >= 0; i--) {
-    if (String(data[i][1] || '').trim() !== slateWant) continue;
+    const cellSlate = data[i][1];
+    const cellSlateS = cellSlate instanceof Date
+      ? Utilities.formatDate(cellSlate, tz, 'yyyy-MM-dd')
+      : String(cellSlate || '').trim();
+    if (cellSlateS !== slateWantS) continue;
     const stored = String(data[i][21] || '').trim();
     if (stored && stored === betKey) {
       return 4 + i;
@@ -254,12 +261,9 @@ function snapshotMLBBetCardToLog(windowTag) {
 
   const last = bc.getLastRow();
   // Bet card column layout (0-indexed) — keep in sync with MLBBetCard.js headers:
-  //  0:date 1:# 2:grade 3:gamePk 4:matchup 5:play 6:player 7:market
-  //  8:side 9:line 10:odds 11:model% 12:book% 13:ev 14:stake$
-  //  15:proj 16:proj−line 17:flags 18:player_id 19:time
-  // Note: col 14 was historically labeled "kelly $" but now writes the
-  // tier-snapped stake ($2.50/$5/$7.50). Old comments in other files may
-  // still say "kelly$" — same column, same value.
+  //  0:date 1:# 2:gamePk 3:matchup 4:play 5:player 6:market
+  //  7:side 8:line 9:odds 10:model% 11:book% 12:ev 13:stake$
+  //  14:proj 15:proj−line 16:flags 17:player_id 18:time
   const block = bc.getRange(4, 1, last, MLB_BET_CARD_NCOL).getValues();
   const window = windowTag || 'UNKNOWN';
   const now = new Date();
@@ -292,27 +296,36 @@ function snapshotMLBBetCardToLog(windowTag) {
     logSh.getRange(4, 25, Math.max(logSh.getLastRow() - 3, 1), 1).setNumberFormat('$0.00');
     logSh.getRange(4, 26, Math.max(logSh.getLastRow() - 3, 1), 1).setNumberFormat('+$0.00;-$0.00');
   }
+  if (String(logSh.getRange(HEADER_ROW, 27).getValue() || '').trim() !== 'proj') {
+    logSh.getRange(HEADER_ROW, 27).setValue('proj');
+  }
 
   let appended = 0;
   let updated = 0;
 
   block.forEach(function (row) {
-    const playText = String(row[5] || '');
+    const playText = String(row[4] || '');
     if (!playText || playText.indexOf('No qualifying') !== -1) return;
-    const player = String(row[6] || '').trim();
+    const player = String(row[5] || '').trim();
     if (!player) return;
 
-    const slate = row[0] || slateFallback;
-    const gamePk = row[3];
-    const matchup = String(row[4] || '').trim();
-    const market = String(row[7] || '').trim();
-    const side = String(row[8] || '').trim();
-    const line = row[9];
-    const odds = row[10];
-    const modelProb = row[11];
-    const ev = row[13];
-    const stake = row[14];
-    const playerId = row[18];
+    // Bet card slate cell often reads back as Date (Sheets auto-format); normalize
+    // to 'yyyy-MM-dd' so bet_key + upsert comparisons aren't tripped by toString().
+    const slateRaw = row[0] || slateFallback;
+    const slate = slateRaw instanceof Date
+      ? Utilities.formatDate(slateRaw, tz, 'yyyy-MM-dd')
+      : String(slateRaw || '').trim();
+    const gamePk = row[2];
+    const matchup = String(row[3] || '').trim();
+    const market = String(row[6] || '').trim();
+    const side = String(row[7] || '').trim();
+    const line = row[8];
+    const odds = row[9];
+    const modelProb = row[10];
+    const ev = row[12];
+    const stake = row[13];
+    const proj = row[14];
+    const playerId = row[17];
     const betKey = mlbBetResultKey_(slate, gamePk, playerId, side, line);
     const hitRow = mlbFindResultsLogSheetRowForUpsert_(logSh, slate, betKey, gamePk, playerId, side, line);
 
@@ -351,11 +364,13 @@ function snapshotMLBBetCardToLog(windowTag) {
       logSh.getRange(hitRow, 14).setValue(gamePk);
       logSh.getRange(hitRow, 15).setValue(playerId);
       logSh.getRange(hitRow, 19, 1, 3).setValues([[line, odds, clv]]);
-      // Only fill stake if currently blank — don't overwrite a manually-edited stake.
+      // stake at col 25 — only fill if currently blank, never overwrite a manual edit.
       const prevStake = prev[24];
       if ((prevStake === '' || prevStake == null) && stake !== '' && stake != null) {
         logSh.getRange(hitRow, 25).setValue(stake);
       }
+      // proj at col 27 — always refresh from latest snapshot.
+      if (proj !== '' && proj != null) logSh.getRange(hitRow, 27).setValue(proj);
       updated++;
       return;
     }
@@ -390,7 +405,8 @@ function snapshotMLBBetCardToLog(windowTag) {
           line,
           odds,
           stake !== '' && stake != null ? stake : '',
-          '',
+          '',  // pnl filled in by grader / backfill
+          proj,
         ],
       ]);
     appended++;
@@ -407,11 +423,6 @@ function snapshotMLBBetCardToLog(windowTag) {
  * (default $2.50) for every historical row, and (re)compute `pnl $` for any
  * row that already has a graded result. Does NOT overwrite a stake you've
  * manually edited. Safe to re-run.
- *
- * Why this exists: the 1x/2x/3x tier system was introduced after some slates
- * had already been graded; historical rows have no recorded stake, so ROI
- * can't be measured. User chose "Backfill at fixed unit" in onboarding —
- * this assumes a flat $2.50 (one unit) per pre-tier bet.
  *
  * @returns {{ stakeFilled: number, pnlFilled: number }}
  */
@@ -449,13 +460,11 @@ function mlbBackfillHistoricalStakes_() {
     const odds = row[8];
     let stake = row[24];
 
-    // Fill stake if blank
     if (stake === '' || stake == null) {
       stake = legacyUnit;
       stakeUpdates.push({ r: 4 + i, v: legacyUnit });
     }
 
-    // Compute pnl if we have a final result and stake
     if (result === 'WIN' || result === 'LOSS' || result === 'PUSH' || result === 'VOID') {
       const pnl = mlbPnlFromResult_(result, stake, odds);
       const prevPnl = row[25];

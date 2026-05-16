@@ -321,11 +321,11 @@ function mlbAppendBetCardPipelineCoverage_(ss) {
   if (!pipelineLog_) return;
   const sh = ss.getSheetByName(MLB_BET_CARD_TAB);
   if (!sh || sh.getLastRow() < 4) return;
-  // Bet card 0-indexed: 4=matchup, 5=play. See MLBBetCard.js headers.
-  const data = sh.getRange(4, 1, sh.getLastRow(), 6).getValues();
+  // Bet card 0-indexed: 3=matchup, 4=play. See MLBBetCard.js headers.
+  const data = sh.getRange(4, 1, sh.getLastRow(), 5).getValues();
   data.forEach(function (r) {
-    const matchup = String(r[4] || '').trim();
-    const play = String(r[5] || '');
+    const matchup = String(r[3] || '').trim();
+    const play = String(r[4] || '');
     if (!matchup || play.indexOf('No qualifying') !== -1) return;
     logGameCoverage_(matchup, undefined, undefined, 0, 1);
   });
