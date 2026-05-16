@@ -114,6 +114,7 @@ function diagnoseSheet_(sh) {
   let blankCellCount = 0;
   let totalCellCount = 0;
   let sampleRow = [];
+  let formulaSummary = '';
 
   if (dataRowCount > 0) {
     const data = sh.getRange(dataStartRow, 1, dataRowCount, lastCol).getDisplayValues();
@@ -127,6 +128,17 @@ function diagnoseSheet_(sh) {
       }
       if (!rowHasValue) blankRowCount += 1;
       if (rowHasValue && !sampleRow.length) sampleRow = data[r];
+    }
+
+    // Sample the first data row's formulas to classify the data source.
+    const firstFormulas = sh.getRange(dataStartRow, 1, 1, lastCol).getFormulas()[0];
+    formulaSummary = classifyFormulaSource_(firstFormulas);
+    if (dataStartRow === 4) {
+      // ARRAYFORMULA/IMPORTRANGE typically live in the first data cell only.
+      const anchorFormula = sh.getRange(dataStartRow, 1).getFormula();
+      if (anchorFormula && /array.?formula|importrange|importdata|query|filter\b/i.test(anchorFormula)) {
+        formulaSummary = 'anchor: ' + anchorFormula.substring(0, 80);
+      }
     }
   }
 
@@ -147,8 +159,36 @@ function diagnoseSheet_(sh) {
     blankRowCount: blankRowCount,
     blankCellPct: blankCellPct,
     sampleRow: sampleRow,
+    formulaSummary: formulaSummary,
     issues: issues,
   };
+}
+
+/** Inspects a row's formulas and returns a short data-source classification. */
+function classifyFormulaSource_(formulas) {
+  if (!formulas || !formulas.length) return 'literal values';
+  let formulaCount = 0;
+  let arrayFormula = false;
+  let importRange = false;
+  let importData = false;
+  let firstFormula = '';
+  for (let i = 0; i < formulas.length; i++) {
+    const f = formulas[i];
+    if (!f) continue;
+    formulaCount += 1;
+    if (!firstFormula) firstFormula = f;
+    if (/^=array.?formula/i.test(f.replace(/\s/g, ''))) arrayFormula = true;
+    if (/importrange/i.test(f)) importRange = true;
+    if (/importdata/i.test(f)) importData = true;
+  }
+  if (formulaCount === 0) return 'literal values (manual or written by GAS)';
+  const tags = [];
+  if (arrayFormula) tags.push('ARRAYFORMULA');
+  if (importRange) tags.push('IMPORTRANGE');
+  if (importData) tags.push('IMPORTDATA');
+  const tagStr = tags.length ? ' [' + tags.join(',') + ']' : '';
+  return formulaCount + '/' + formulas.length + ' formula cells' + tagStr +
+    (firstFormula ? ' — ' + firstFormula.substring(0, 60) : '');
 }
 
 /** Prefer row 3 (project convention); fall back to row 1 if row 3 is empty. */
@@ -190,6 +230,7 @@ function writeHRSlamDiagnosticTab_(ss, report) {
     'Data rows',
     'Blank rows',
     'Blank %',
+    'Data source',
     'Issues',
     'Sample row (first 6 cells)',
   ];
@@ -215,6 +256,7 @@ function writeHRSlamDiagnosticTab_(ss, report) {
       r.dataRows,
       r.blankRowCount,
       r.dataRows > 0 ? Math.round(r.blankCellPct * 100) + '%' : '',
+      r.formulaSummary || '',
       r.issues.length ? r.issues.join('; ') : 'OK',
       (r.sampleRow || []).slice(0, 6).join(' | '),
     ];
