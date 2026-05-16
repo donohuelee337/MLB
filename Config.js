@@ -27,6 +27,27 @@ const MLB_TEAM_ABBREV = {
   147: 'NYY', 158: 'MIL',
 };
 
+/** Common team-name → abbreviation map. Used when statsapi ships empty abbreviation. */
+const MLB_TEAM_NAME_TO_ABBR = {
+  'los angeles angels': 'LAA', 'arizona diamondbacks': 'ARI', 'baltimore orioles': 'BAL',
+  'boston red sox': 'BOS', 'chicago cubs': 'CHC', 'cincinnati reds': 'CIN',
+  'cleveland guardians': 'CLE', 'colorado rockies': 'COL', 'detroit tigers': 'DET',
+  'houston astros': 'HOU', 'kansas city royals': 'KC', 'los angeles dodgers': 'LAD',
+  'washington nationals': 'WSN', 'new york mets': 'NYM', 'athletics': 'OAK',
+  'oakland athletics': 'OAK', 'pittsburgh pirates': 'PIT', 'san diego padres': 'SD',
+  'seattle mariners': 'SEA', 'san francisco giants': 'SF', 'st. louis cardinals': 'STL',
+  'tampa bay rays': 'TB', 'texas rangers': 'TEX', 'toronto blue jays': 'TOR',
+  'minnesota twins': 'MIN', 'philadelphia phillies': 'PHI', 'atlanta braves': 'ATL',
+  'chicago white sox': 'CWS', 'miami marlins': 'MIA', 'new york yankees': 'NYY',
+  'milwaukee brewers': 'MIL',
+};
+
+function mlbAbbrFromTeamName_(name) {
+  const n = String(name || '').trim().toLowerCase();
+  if (!n) return '';
+  return MLB_TEAM_NAME_TO_ABBR[n] || '';
+}
+
 /** @returns {number} MLB team id or NaN if abbreviation is unknown. */
 function mlbTeamIdFromAbbr_(abbr) {
   const a = String(abbr || '').trim().toUpperCase();

@@ -25,6 +25,7 @@ function onOpen() {
     .addItem('📋 Batter Hits queue only (FD hits + hitting logs)', 'refreshBatterHitsSlateQueue')
     .addItem('🎯 Batter Hits card only (Poisson + EV)', 'refreshBatterHitsBetCard')
     .addItem('🃏 MLB Bet Card only (final plays)', 'refreshMLBBetCard')
+    .addItem('🔍 Diagnose Hits → BetCard inclusion', 'diagnoseHitsBetCardInclusion')
     .addItem('📊 Grade pending MLB results (boxscore)', 'gradeMLBPendingResults_')
     .addItem('📈 Backfill closing K (Results Log)', 'mlbBackfillClosingMenu_')
     .addItem('💵 Backfill historical stake + P/L (legacy unit)', 'mlbBackfillStakesMenu_')
@@ -40,8 +41,26 @@ function onOpen() {
         .addItem('🔬 Refresh Hits Model Compare panel', 'refreshHitsModelCompare')
         .addItem('🔬 Open Compare panel', 'mlbActivateHitsCompareTab_')
         .addItem('🧪 Open v2 Results Log', 'mlbActivateHitsV2LogTab_')
+        .addSeparator()
+        .addItem('🔬 Refresh feature-ablation backtest', 'refreshHitsFeatureAblation')
+        .addItem('🔬 Open feature-ablation tab', 'mlbActivateHitsAblationTab_')
+    )
+    .addSubMenu(
+      SpreadsheetApp.getUi()
+        .createMenu('📣 HR Promo')
+        .addItem('📋 Snapshot HR picks → log', 'mlbSnapshotHrPromoMidday_')
+        .addItem('📊 Grade pending HR promo rows', 'gradeHrPromoPendingResults_')
+        .addItem('📋 Open HR Promo Results Log', 'mlbActivateHrPromoResultsLogTab_')
+        .addSeparator()
+        .addItem('🔬 Refresh HR promo feature-ablation', 'refreshHrPromoFeatureAblation')
+        .addItem('🔬 Open HR promo ablation tab', 'mlbActivateHrPromoAblationTab_')
     )
     .addToUi();
+}
+
+/** Menu wrapper — snapshot HR promo picks with MIDDAY tag. */
+function mlbSnapshotHrPromoMidday_() {
+  if (typeof snapshotHrPromoToLog === 'function') snapshotHrPromoToLog('MIDDAY');
 }
 
 /**
@@ -99,6 +118,11 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
     gradeMLBHitsV2PendingResults_();
   } catch (e) {
     Logger.log('gradeMLBHitsV2PendingResults_: ' + e);
+  }
+  try {
+    if (typeof gradeHrPromoPendingResults_ === 'function') gradeHrPromoPendingResults_();
+  } catch (e) {
+    Logger.log('gradeHrPromoPendingResults_: ' + e);
   }
   mlbResetPitchGameLogFetchCache_();
   mlbResetPitchHandCache_();
@@ -272,6 +296,16 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
       snapshotMLBHitsV2BetCardToLog(windowTag);
     } catch (e) {
       addPipelineWarning_('Hits v2 snapshot: ' + (e.message || e));
+    }
+  }
+
+  // HR promo snapshot — picks live on the promo sheet built earlier in the
+  // pipeline (separate flow). Snapshot only if the tab is populated.
+  if (typeof snapshotHrPromoToLog === 'function' && ss.getSheetByName(MLB_BATTER_HR_PROMO_TAB)) {
+    try {
+      snapshotHrPromoToLog(windowTag);
+    } catch (e) {
+      addPipelineWarning_('HR promo snapshot: ' + (e.message || e));
     }
   }
 

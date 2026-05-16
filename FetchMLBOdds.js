@@ -12,44 +12,16 @@ const MLB_ODDS_CONFIG = {
   bookmaker: 'fanduel',
   tabName: '✅ FanDuel_MLB_Odds',
   tabColor: '#0d47a1',
+  // Only markets consumed downstream (H, TB, K). FanDuel posts batter props on main and/or
+  // _alternate keys; the queues merge both, so we fetch both.
   marketBatches: [
     [
-      'pitcher_strikeouts',
-      'pitcher_outs',
-      'pitcher_hits_allowed',
-      'pitcher_walks',
-      'pitcher_earned_runs',
-      'pitcher_record_a_win',
-    ],
-    [
       'batter_hits',
-      'batter_total_bases',
-      'batter_home_runs',
-      'batter_rbis',
-      'batter_runs_scored',
-      'batter_stolen_bases',
-      'batter_walks',
-      'batter_strikeouts',
-      'batter_hits_runs_rbis',
-    ],
-    [
-      'batter_singles',
-      'batter_doubles',
-      'batter_triples',
-      'batter_first_home_run',
-    ],
-    [
-      'pitcher_hits_allowed_alternate',
-      'pitcher_walks_alternate',
-      'batter_total_bases_alternate',
       'batter_hits_alternate',
-      'batter_home_runs_alternate',
-      'batter_rbis_alternate',
-      'batter_runs_scored_alternate',
-      'batter_walks_alternate',
-      'batter_strikeouts_alternate',
+      'batter_total_bases',
+      'batter_total_bases_alternate',
+      'pitcher_strikeouts',
     ],
-    ['h2h', 'spreads', 'totals', 'team_totals'],
   ],
 };
 
@@ -72,10 +44,19 @@ function fetchMLBFanDuelOdds() {
   const allRows = [];
   eventIds.forEach(function (event) {
     MLB_ODDS_CONFIG.marketBatches.forEach(function (batch) {
-      fetchMLEventMarkets_(apiKey, region, book, event.id, event.label, batch).forEach(function (r) {
-        allRows.push(r);
-      });
+      const batchRes = fetchMLEventMarkets_(apiKey, region, book, event.id, event.label, batch);
+      batchRes.rows.forEach(function (r) { allRows.push(r); });
       Utilities.sleep(350);
+      // If the whole batch was rejected (e.g. one bad market in the comma list), retry markets one at a time
+      // so a single invalid market can't suppress the rest of the batch.
+      if (batchRes.status >= 400 && batch.length > 1) {
+        batch.forEach(function (mkt) {
+          fetchMLEventMarkets_(apiKey, region, book, event.id, event.label, [mkt]).rows.forEach(function (r) {
+            allRows.push(r);
+          });
+          Utilities.sleep(250);
+        });
+      }
     });
   });
 
@@ -85,6 +66,30 @@ function fetchMLBFanDuelOdds() {
   }
 
   buildMLBFanDuelOddsTab_(ss, allRows, slateDate);
+
+  // Per-market row counts — scream early if a market we depend on came back empty.
+  const counts = {};
+  allRows.forEach(function (r) {
+    const k = String(r[2] || '');
+    counts[k] = (counts[k] || 0) + 1;
+  });
+  Logger.log('MLB odds market counts: ' + JSON.stringify(counts));
+  const requiredFamilies = [
+    { label: 'batter_hits',          keys: ['batter_hits', 'batter_hits_alternate'] },
+    { label: 'batter_total_bases',   keys: ['batter_total_bases', 'batter_total_bases_alternate'] },
+    { label: 'pitcher_strikeouts',   keys: ['pitcher_strikeouts'] },
+  ];
+  const missing = requiredFamilies.filter(function (m) {
+    return m.keys.every(function (k) { return !counts[k]; });
+  }).map(function (m) { return m.label; });
+  if (missing.length) {
+    safeAlert_(
+      'MLB Odds — markets missing',
+      'FanDuel returned 0 rows for: ' + missing.join(', ') +
+      '. Downstream queues will be empty. See View → Executions in Apps Script for HTTP details.'
+    );
+  }
+
   ss.toast(eventIds.length + ' games · ' + allRows.length + ' lines · ' + slateDate, 'MLB Odds', 6);
 }
 
@@ -141,15 +146,20 @@ function fetchMLEventMarkets_(apiKey, region, bookmaker, eventId, gameLabel, mar
     encodeURIComponent(bookmaker) +
     '&dateFormat=iso&oddsFormat=american';
   const rows = [];
+  let status = 0;
   try {
     const response = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
-    if (response.getResponseCode() !== 200) return rows;
+    status = response.getResponseCode();
+    if (status !== 200) {
+      Logger.log('fetchMLEventMarkets_ HTTP ' + status + ' for [' + marketsStr + '] on ' + gameLabel);
+      return { rows: rows, status: status };
+    }
     const data = JSON.parse(response.getContentText());
-    if (!data.bookmakers || data.bookmakers.length === 0) return rows;
+    if (!data.bookmakers || data.bookmakers.length === 0) return { rows: rows, status: status };
     const fdBook = data.bookmakers.find(function (b) {
       return b.key === bookmaker;
     });
-    if (!fdBook) return rows;
+    if (!fdBook) return { rows: rows, status: status };
     fdBook.markets.forEach(function (market) {
       market.outcomes.forEach(function (outcome) {
         rows.push([
@@ -167,7 +177,7 @@ function fetchMLEventMarkets_(apiKey, region, bookmaker, eventId, gameLabel, mar
   } catch (err) {
     Logger.log('fetchMLEventMarkets_: ' + err.message);
   }
-  return rows;
+  return { rows: rows, status: status };
 }
 
 function buildMLBFanDuelOddsTab_(ss, allRows, slateDate) {

@@ -509,6 +509,11 @@ function refreshBatterHitsV2BetCard() {
     sh = ss.insertSheet(MLB_BATTER_HITS_V2_CARD_TAB);
   }
   sh.setTabColor('#6a1b9a');
+  // Default new sheets ship with 26 columns; this layout writes through col 32.
+  const NEED_COLS = 32;
+  if (sh.getMaxColumns() < NEED_COLS) {
+    sh.insertColumnsAfter(sh.getMaxColumns(), NEED_COLS - sh.getMaxColumns());
+  }
 
   const widths = [
     72, 200, 150, 56, 64, 64, 56, 56, 52, 52, 52, 52, 56, 56, 56, 56, 140, 88,

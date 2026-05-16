@@ -120,12 +120,14 @@ function fetchMLBScheduleForSlate() {
       const venue = g.venue && g.venue.name ? g.venue.name : '';
       const status = g.status && g.status.detailedState ? g.status.detailedState : '';
       const hp = mlbHomePlateFromScheduleGame_(g);
+      const awayAbbr = away.abbreviation || mlbAbbrFromTeamName_(away.name || '') || '';
+      const homeAbbr = home.abbreviation || mlbAbbrFromTeamName_(home.name || '') || '';
       rows.push([
         g.gamePk,
         Utilities.formatDate(new Date(g.gameDate), Session.getScriptTimeZone(), 'yyyy-MM-dd'),
         g.gameDate,
-        away.abbreviation || '',
-        home.abbreviation || '',
+        awayAbbr,
+        homeAbbr,
         (away.name || '') + ' @ ' + (home.name || ''),
         awayProb.fullName || '',
         homeProb.fullName || '',
