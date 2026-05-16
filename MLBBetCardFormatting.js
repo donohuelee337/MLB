@@ -326,6 +326,46 @@ function mlbApplyBetCardFormatting_(sh, rows, headers, slateDate) {
     .setFontStyle('italic')
     .setFontSize(10)
     .setHorizontalAlignment('right');
+
+  // MLB The Streak picks — highlight the two players with the highest projected
+  // H total. Streak is a daily pick-one promo (player needs ≥1 H to keep streak),
+  // so the two strongest projections are the natural picks to surface.
+  // Filters out 'Batter hits (shadow)' to avoid double-highlighting v2 rows.
+  const streakCandidates = [];
+  for (let i = 0; i < rows.length; i++) {
+    const market = String(rows[i][6] || '').toLowerCase();
+    if (market !== 'batter hits') continue;
+    const proj = parseFloat(String(rows[i][14]));
+    if (isNaN(proj)) continue;
+    streakCandidates.push({ rowIdx: i, proj: proj, player: String(rows[i][5] || '').trim() });
+  }
+  // Dedupe by player (keep highest proj per player), then take top 2.
+  const bestPerPlayer = {};
+  streakCandidates.forEach(function (c) {
+    if (!c.player) return;
+    if (!bestPerPlayer[c.player] || c.proj > bestPerPlayer[c.player].proj) {
+      bestPerPlayer[c.player] = c;
+    }
+  });
+  const streakPicks = Object.keys(bestPerPlayer)
+    .map(function (k) { return bestPerPlayer[k]; })
+    .sort(function (a, b) { return b.proj - a.proj; })
+    .slice(0, 2);
+
+  streakPicks.forEach(function (pick, idx) {
+    const rank = idx + 1;
+    // Bold gold on player cell (col 6) + the same on proj cell (col 15) so the
+    // pair reads as "this player at this projection".
+    sh.getRange(4 + pick.rowIdx, 6)
+      .setBackground('#fde047')      // tailwind yellow-300
+      .setFontColor('#7c2d12')       // tailwind orange-900 for high contrast
+      .setFontWeight('bold')
+      .setNote('🔥 MLB The Streak — Pick #' + rank + ' · projected ' + pick.proj.toFixed(2) + ' H');
+    sh.getRange(4 + pick.rowIdx, 15)
+      .setBackground('#fde047')
+      .setFontColor('#7c2d12')
+      .setFontWeight('bold');
+  });
 }
 
 /**
