@@ -7,7 +7,7 @@
 // ============================================================
 
 const MLB_RESULTS_LOG_TAB = '📋 MLB_Results_Log';
-const MLB_RESULTS_LOG_NCOL = 24;
+const MLB_RESULTS_LOG_NCOL = 27;
 
 const MLB_RESULTS_HEADERS = [
   'Logged At',
@@ -24,8 +24,8 @@ const MLB_RESULTS_HEADERS = [
   'Window',
   'Play',
   'gamePk',
-  'player_id',
-  'actual',
+  'pitcher_id',
+  'actual_K',
   'result',
   'grade_notes',
   'close_line',
@@ -34,7 +34,24 @@ const MLB_RESULTS_HEADERS = [
   'bet_key',
   'open_line',
   'open_odds',
+  'stake $',
+  'pnl $',
+  'proj',
 ];
+
+/** Profit (in $) for a graded row at this American price. Stake is in $. */
+function mlbPnlFromResult_(result, stake, american) {
+  const r = String(result || '').trim().toUpperCase();
+  const s = parseFloat(String(stake));
+  if (!isFinite(s) || s <= 0) return 0;
+  if (r === 'WIN') {
+    const b = mlbAmericanToB_(american);
+    if (!isFinite(b) || b <= 0) return 0;
+    return Math.round(s * b * 100) / 100;
+  }
+  if (r === 'LOSS') return -s;
+  return 0; // PUSH / VOID / PENDING
+}
 
 function mlbBetResultKey_(slate, gamePk, pitcherId, side, line) {
   return [
@@ -55,6 +72,7 @@ function mlbFindResultsLogSheetRowForUpsert_(logSh, slateWant, betKey, gamePk, p
   if (last < 4) return -1;
   const nc = Math.max(MLB_RESULTS_LOG_NCOL, logSh.getLastColumn());
   const data = logSh.getRange(4, 1, last, nc).getValues();
+  const tz = Session.getScriptTimeZone();
   const wantG = parseInt(gamePk, 10);
   const wantP = parseInt(pitcherId, 10);
   const sideN = String(side || '')
@@ -62,8 +80,13 @@ function mlbFindResultsLogSheetRowForUpsert_(logSh, slateWant, betKey, gamePk, p
     .toLowerCase()
     .replace(/\s+/g, '');
   const lineS = String(line != null ? line : '').trim();
+  const slateWantS = String(slateWant || '').trim();
   for (let i = data.length - 1; i >= 0; i--) {
-    if (String(data[i][1] || '').trim() !== slateWant) continue;
+    const cellSlate = data[i][1];
+    const cellSlateS = cellSlate instanceof Date
+      ? Utilities.formatDate(cellSlate, tz, 'yyyy-MM-dd')
+      : String(cellSlate || '').trim();
+    if (cellSlateS !== slateWantS) continue;
     const stored = String(data[i][21] || '').trim();
     if (stored && stored === betKey) {
       return 4 + i;
@@ -137,43 +160,24 @@ function mlbClvNoteFromOpenClose_(openLine, openOdds, closeLine, closeOdds, side
 }
 
 /**
- * Map a log market label (lowercase) to the FanDuel Odds API market key(s).
- * Returns { main: string, alt: string } — alt is '' when no alternate market exists.
- * @param {string} marketLower  row[5].toLowerCase()
- * @returns {{ main: string, alt: string }|null}
- */
-function mlbMarketLabelToFdKey_(marketLower) {
-  const m = marketLower;
-  if (m.indexOf('strikeout') !== -1)    return { main: 'pitcher_strikeouts',   alt: '' };
-  if (m.indexOf('pitcher outs') !== -1) return { main: 'pitcher_outs',          alt: '' };
-  if (m.indexOf('pitcher walks') !== -1 || m.indexOf('walk') !== -1)
-                                         return { main: 'pitcher_walks',         alt: 'pitcher_walks_alternate' };
-  if (m.indexOf('hits allowed') !== -1) return { main: 'pitcher_hits_allowed',  alt: 'pitcher_hits_allowed_alternate' };
-  if (m.indexOf('total base') !== -1)   return { main: 'batter_total_bases',    alt: '' };
-  if (m.indexOf('batter hits') !== -1)  return { main: 'batter_hits',           alt: '' };
-  if (m.indexOf('home run') !== -1)     return { main: 'batter_home_runs',      alt: '' };
-  return null;
-}
-
-/**
- * Look up the current FanDuel line + price for any supported market.
+ * Current FanDuel main pitcher_strikeouts line + price for side from ✅ tab.
  * Tries log `Game` text first, then schedule matchup for gamePk (label drift).
  * @returns {{ line: *, american: * }|null}
  */
-function mlbLookupClosingLine_(ss, gameStr, playerStr, betSide, gamePk, fdKeys) {
-  const oddsIdx = fdKeys.alt
-    ? mlbBuildPersonPropOddsIndexMerged_(ss, fdKeys.main, fdKeys.alt)
-    : mlbBuildPersonPropOddsIndex_(ss, fdKeys.main);
+function mlbLookupClosingPitcherK_(ss, gameStr, playerStr, betSide, gamePk) {
+  const oddsIdx = mlbBuildPitcherKOddsIndex_(ss);
   const pNorm = mlbNormalizePersonName_(playerStr);
   const labels = [];
   const a = String(gameStr || '').trim();
   if (a) labels.push(a);
   const fromSch = mlbScheduleMatchupForGamePk_(ss, gamePk);
-  if (fromSch && labels.indexOf(fromSch) === -1) labels.push(fromSch);
+  if (fromSch && labels.indexOf(fromSch) === -1) {
+    labels.push(fromSch);
+  }
   const sl = String(betSide || '').toLowerCase();
   for (let t = 0; t < labels.length; t++) {
     const gKeys = mlbCandidateGameKeys_(labels[t], '', '');
-    const pointMap = mlbOddsPointMapForPerson_(oddsIdx, gKeys, pNorm);
+    const pointMap = mlbOddsPointMapForPitcher_(oddsIdx, gKeys, pNorm);
     if (!pointMap || !Object.keys(pointMap).length) continue;
     const mainPt = mlbPickMainKPoint_(pointMap);
     if (mainPt == null) continue;
@@ -185,15 +189,9 @@ function mlbLookupClosingLine_(ss, gameStr, playerStr, betSide, gamePk, fdKeys) 
   return null;
 }
 
-/** Backward-compat wrapper kept for mlbBackfillClosingMenu_ (K-only menu item). */
-function mlbLookupClosingPitcherK_(ss, gameStr, playerStr, betSide, gamePk) {
-  return mlbLookupClosingLine_(ss, gameStr, playerStr, betSide, gamePk, { main: 'pitcher_strikeouts', alt: '' });
-}
-
 /**
- * After FINAL odds refresh: fill close_line / close_odds / clv_note for all 7 markets
- * on the current slate. Overwrites prior close columns when re-run.
- * @returns {number} rows updated
+ * After FINAL odds refresh: fill close_line / close_odds / clv_note for this slate’s K rows.
+ * Overwrites prior close columns when re-run (latest tab = “close” proxy).
  */
 function mlbBackfillResultsLogClosingK_(ss) {
   const logSh = ss.getSheetByName(MLB_RESULTS_LOG_TAB);
@@ -203,27 +201,14 @@ function mlbBackfillResultsLogClosingK_(ss) {
   const slateWant = getSlateDateString_(cfg);
   const last = logSh.getLastRow();
   const data = logSh.getRange(4, 1, last, MLB_RESULTS_LOG_NCOL).getValues();
-
-  // Build one odds index per market key that actually appears in the log (avoid duplicate fetches).
-  const indexCache = {};
-  function getOddsIdx_(fdKeys) {
-    const cacheKey = fdKeys.main + '|' + fdKeys.alt;
-    if (!indexCache[cacheKey]) {
-      indexCache[cacheKey] = fdKeys.alt
-        ? mlbBuildPersonPropOddsIndexMerged_(ss, fdKeys.main, fdKeys.alt)
-        : mlbBuildPersonPropOddsIndex_(ss, fdKeys.main);
-    }
-    return indexCache[cacheKey];
-  }
-
   let n = 0;
+
   for (let i = 0; i < data.length; i++) {
     const row = data[i];
     const slateStr = String(row[1] || '').trim();
     if (slateStr !== slateWant) continue;
-    const marketRaw = String(row[5] || '').toLowerCase();
-    const fdKeys = mlbMarketLabelToFdKey_(marketRaw);
-    if (!fdKeys) continue;
+    const market = String(row[5] || '').toLowerCase();
+    if (market.indexOf('strikeout') === -1) continue;
     const player = String(row[3] || '').trim();
     const game = String(row[4] || '').trim();
     const side = String(row[7] || '').trim();
@@ -231,30 +216,11 @@ function mlbBackfillResultsLogClosingK_(ss) {
     const openOdds = row[23] !== '' && row[23] != null ? row[23] : row[8];
     const gamePkLog = row[13];
     if (!player) continue;
-    if (!game && !parseInt(gamePkLog, 10)) continue;
+    if (!String(game || '').trim() && !parseInt(gamePkLog, 10)) continue;
 
-    const oddsIdx = getOddsIdx_(fdKeys);
-    const pNorm = mlbNormalizePersonName_(player);
-    const labels = [];
-    if (game) labels.push(game);
-    const fromSch = mlbScheduleMatchupForGamePk_(ss, gamePkLog);
-    if (fromSch && labels.indexOf(fromSch) === -1) labels.push(fromSch);
-    const sl = side.toLowerCase();
-    let cl = null;
-    for (let t = 0; t < labels.length; t++) {
-      const gKeys = mlbCandidateGameKeys_(labels[t], '', '');
-      const pointMap = mlbOddsPointMapForPerson_(oddsIdx, gKeys, pNorm);
-      if (!pointMap || !Object.keys(pointMap).length) continue;
-      const mainPt = mlbPickMainKPoint_(pointMap);
-      if (mainPt == null) continue;
-      const px = mlbMainKPrices_(pointMap, mainPt);
-      const american = sl.indexOf('over') !== -1 ? px.over : sl.indexOf('under') !== -1 ? px.under : '';
-      if (american === '' || american == null) continue;
-      cl = { line: mainPt, american: american };
-      break;
-    }
+    const cl = mlbLookupClosingPitcherK_(ss, game, player, side, gamePkLog);
     if (!cl) {
-      logSh.getRange(4 + i, 19, 1, 3).setValues([['', '', 'no FD match at close (' + fdKeys.main + ')']]);
+      logSh.getRange(4 + i, 19, 1, 3).setValues([['', '', 'no FD K match at close']]);
       continue;
     }
     const note = mlbClvNoteFromOpenClose_(openLine, openOdds, cl.line, cl.american, side);
@@ -294,7 +260,11 @@ function snapshotMLBBetCardToLog(windowTag) {
   }
 
   const last = bc.getLastRow();
-  const block = bc.getRange(4, 1, last, 21).getValues();
+  // Bet card column layout (0-indexed) — keep in sync with MLBBetCard.js headers:
+  //  0:date 1:# 2:gamePk 3:matchup 4:play 5:player 6:market
+  //  7:side 8:line 9:odds 10:model% 11:book% 12:ev 13:stake$
+  //  14:proj 15:proj−line 16:flags 17:player_id 18:time
+  const block = bc.getRange(4, 1, last, MLB_BET_CARD_NCOL).getValues();
   const window = windowTag || 'UNKNOWN';
   const now = new Date();
   const tz = Session.getScriptTimeZone();
@@ -317,6 +287,18 @@ function snapshotMLBBetCardToLog(windowTag) {
   if (String(logSh.getRange(HEADER_ROW, 22).getValue() || '').trim() !== 'bet_key') {
     logSh.getRange(HEADER_ROW, 22, 1, 3).setValues([['bet_key', 'open_line', 'open_odds']]);
   }
+  if (String(logSh.getRange(HEADER_ROW, 25).getValue() || '').trim() !== 'stake $') {
+    logSh.getRange(HEADER_ROW, 25, 1, 2)
+      .setValues([['stake $', 'pnl $']])
+      .setFontWeight('bold')
+      .setBackground('#1565C0')
+      .setFontColor('#ffffff');
+    logSh.getRange(4, 25, Math.max(logSh.getLastRow() - 3, 1), 1).setNumberFormat('$0.00');
+    logSh.getRange(4, 26, Math.max(logSh.getLastRow() - 3, 1), 1).setNumberFormat('+$0.00;-$0.00');
+  }
+  if (String(logSh.getRange(HEADER_ROW, 27).getValue() || '').trim() !== 'proj') {
+    logSh.getRange(HEADER_ROW, 27).setValue('proj');
+  }
 
   let appended = 0;
   let updated = 0;
@@ -326,15 +308,26 @@ function snapshotMLBBetCardToLog(windowTag) {
     if (!playText || playText.indexOf('No qualifying') !== -1) return;
     const player = String(row[5] || '').trim();
     if (!player) return;
-    // Skip game-header rows (play col empty) and honorable-mention rows (rank col empty).
-    const rank = row[1];
-    if (rank === '' || rank == null) return;
 
-    const slate = row[0] || slateFallback;
+    // Bet card slate cell often reads back as Date (Sheets auto-format); normalize
+    // to 'yyyy-MM-dd' so bet_key + upsert comparisons aren't tripped by toString().
+    const slateRaw = row[0] || slateFallback;
+    const slate = slateRaw instanceof Date
+      ? Utilities.formatDate(slateRaw, tz, 'yyyy-MM-dd')
+      : String(slateRaw || '').trim();
+    const gamePk = row[2];
+    const matchup = String(row[3] || '').trim();
+    const market = String(row[6] || '').trim();
+    const side = String(row[7] || '').trim();
     const line = row[8];
     const odds = row[9];
-    const betKey = mlbBetResultKey_(slate, row[2], row[16], row[7], line);
-    const hitRow = mlbFindResultsLogSheetRowForUpsert_(logSh, slate, betKey, row[2], row[16], row[7], line);
+    const modelProb = row[10];
+    const ev = row[12];
+    const stake = row[13];
+    const proj = row[14];
+    const playerId = row[17];
+    const betKey = mlbBetResultKey_(slate, gamePk, playerId, side, line);
+    const hitRow = mlbFindResultsLogSheetRowForUpsert_(logSh, slate, betKey, gamePk, playerId, side, line);
 
     if (hitRow > 0) {
       const nc = Math.max(MLB_RESULTS_LOG_NCOL, logSh.getLastColumn());
@@ -350,27 +343,34 @@ function snapshotMLBBetCardToLog(windowTag) {
       if (!String(prev[21] || '').trim()) {
         logSh.getRange(hitRow, 22).setValue(betKey);
       }
-      const clv = mlbClvNoteFromOpenClose_(openL, openO, line, odds, row[7]);
+      const clv = mlbClvNoteFromOpenClose_(openL, openO, line, odds, side);
       logSh.getRange(hitRow, 1, 1, 12).setValues([
         [
           loggedAt,
           slate,
           row[1],
           player,
-          String(row[3] || '').trim(),
-          String(row[6] || '').trim(),
+          matchup,
+          market,
           line,
-          String(row[7] || '').trim(),
+          side,
           odds,
-          row[11],
-          row[12],
+          modelProb,
+          ev,
           window,
         ],
       ]);
       logSh.getRange(hitRow, 13).setValue(playText);
-      logSh.getRange(hitRow, 14).setValue(row[2]);
-      logSh.getRange(hitRow, 15).setValue(row[16]);
+      logSh.getRange(hitRow, 14).setValue(gamePk);
+      logSh.getRange(hitRow, 15).setValue(playerId);
       logSh.getRange(hitRow, 19, 1, 3).setValues([[line, odds, clv]]);
+      // stake at col 25 — only fill if currently blank, never overwrite a manual edit.
+      const prevStake = prev[24];
+      if ((prevStake === '' || prevStake == null) && stake !== '' && stake != null) {
+        logSh.getRange(hitRow, 25).setValue(stake);
+      }
+      // proj at col 27 — always refresh from latest snapshot.
+      if (proj !== '' && proj != null) logSh.getRange(hitRow, 27).setValue(proj);
       updated++;
       return;
     }
@@ -384,17 +384,17 @@ function snapshotMLBBetCardToLog(windowTag) {
           slate,
           row[1],
           player,
-          String(row[3] || '').trim(),
-          String(row[6] || '').trim(),
+          matchup,
+          market,
           line,
-          String(row[7] || '').trim(),
+          side,
           odds,
-          row[11],
-          row[12],
+          modelProb,
+          ev,
           window,
           playText,
-          row[2],
-          row[16],
+          gamePk,
+          playerId,
           '',
           'PENDING',
           '',
@@ -404,6 +404,9 @@ function snapshotMLBBetCardToLog(windowTag) {
           betKey,
           line,
           odds,
+          stake !== '' && stake != null ? stake : '',
+          '',  // pnl filled in by grader / backfill
+          proj,
         ],
       ]);
     appended++;
@@ -413,4 +416,73 @@ function snapshotMLBBetCardToLog(windowTag) {
   try {
     ss.toast('Results log +' + appended + ' new · ' + updated + ' updated · ' + window, 'MLB-BOIZ', 6);
   } catch (e) {}
+}
+
+/**
+ * One-shot: fill blank `stake $` cells in the results log with LEGACY_UNIT_USD
+ * (default $2.50) for every historical row, and (re)compute `pnl $` for any
+ * row that already has a graded result. Does NOT overwrite a stake you've
+ * manually edited. Safe to re-run.
+ *
+ * @returns {{ stakeFilled: number, pnlFilled: number }}
+ */
+function mlbBackfillHistoricalStakes_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const logSh = ss.getSheetByName(MLB_RESULTS_LOG_TAB);
+  if (!logSh || logSh.getLastRow() < 4) return { stakeFilled: 0, pnlFilled: 0 };
+
+  // Make sure the new columns exist + are formatted.
+  const HEADER_ROW = 3;
+  if (String(logSh.getRange(HEADER_ROW, 25).getValue() || '').trim() !== 'stake $') {
+    logSh.getRange(HEADER_ROW, 25, 1, 2)
+      .setValues([['stake $', 'pnl $']])
+      .setFontWeight('bold')
+      .setBackground('#1565C0')
+      .setFontColor('#ffffff');
+  }
+  const dataRows = logSh.getLastRow() - 3;
+  logSh.getRange(4, 25, dataRows, 1).setNumberFormat('$0.00');
+  logSh.getRange(4, 26, dataRows, 1).setNumberFormat('+$0.00;-$0.00');
+
+  const cfg = getConfig();
+  const legacyUnit = parseFloat(String(cfg['LEGACY_UNIT_USD'] != null ? cfg['LEGACY_UNIT_USD'] : '2.50').trim(), 10) || 2.50;
+
+  const last = logSh.getLastRow();
+  const ncol = Math.max(MLB_RESULTS_LOG_NCOL, logSh.getLastColumn());
+  const data = logSh.getRange(4, 1, last - 3, ncol).getValues();
+
+  const stakeUpdates = [];
+  const pnlUpdates = [];
+
+  for (let i = 0; i < data.length; i++) {
+    const row = data[i];
+    const result = String(row[16] || '').trim().toUpperCase();
+    const odds = row[8];
+    let stake = row[24];
+
+    if (stake === '' || stake == null) {
+      stake = legacyUnit;
+      stakeUpdates.push({ r: 4 + i, v: legacyUnit });
+    }
+
+    if (result === 'WIN' || result === 'LOSS' || result === 'PUSH' || result === 'VOID') {
+      const pnl = mlbPnlFromResult_(result, stake, odds);
+      const prevPnl = row[25];
+      if (prevPnl === '' || prevPnl == null || parseFloat(prevPnl) !== pnl) {
+        pnlUpdates.push({ r: 4 + i, v: pnl });
+      }
+    }
+  }
+
+  stakeUpdates.forEach(function (u) { logSh.getRange(u.r, 25).setValue(u.v); });
+  pnlUpdates.forEach(function (u) { logSh.getRange(u.r, 26).setValue(u.v); });
+
+  try {
+    ss.toast(
+      'Backfilled stake: ' + stakeUpdates.length + ' · pnl: ' + pnlUpdates.length + ' (unit $' + legacyUnit.toFixed(2) + ')',
+      'MLB-BOIZ',
+      7
+    );
+  } catch (e) {}
+  return { stakeFilled: stakeUpdates.length, pnlFilled: pnlUpdates.length };
 }

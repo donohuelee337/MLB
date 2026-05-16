@@ -48,3 +48,47 @@ function mlbParkTbLambdaMultForHomeAbbr_(abbr) {
   if (m == null || isNaN(m)) return 1;
   return Math.max(0.9, Math.min(1.1, m));
 }
+
+// BABIP-leaning hits factor (singles + doubles weighted, HR contribution stripped).
+// Differs from TB: Coors still tops but the spread is narrower; big foul-territory
+// parks (Oakland legacy, SD) suppress singles less than they suppress TB.
+const MLB_HOME_PARK_HITS_MULT = {
+  COL: 1.05,
+  BOS: 1.025,
+  CIN: 1.02,
+  ARI: 1.02,
+  TEX: 1.015,
+  KC:  1.015,
+  PIT: 1.01,
+  MIN: 1.01,
+  CHC: 1.005,
+  NYY: 1.0,
+  LAD: 1.0,
+  ATL: 1.0,
+  HOU: 0.995,
+  PHI: 1.0,
+  WSH: 0.995,
+  BAL: 1.0,
+  CLE: 0.995,
+  TOR: 1.0,
+  STL: 0.995,
+  MIL: 0.99,
+  CWS: 0.99,
+  DET: 0.985,
+  TB:  0.985,
+  ATH: 0.98,
+  SEA: 0.975,
+  SF:  0.97,
+  SD:  0.97,
+  MIA: 0.965,
+  NYM: 0.985,
+  LAA: 0.99,
+};
+
+function mlbParkHitsLambdaMultForHomeAbbr_(abbr) {
+  const a = String(abbr || '').trim().toUpperCase();
+  if (!a) return 1;
+  const m = MLB_HOME_PARK_HITS_MULT[a];
+  if (m == null || isNaN(m)) return 1;
+  return Math.max(0.92, Math.min(1.08, m));
+}

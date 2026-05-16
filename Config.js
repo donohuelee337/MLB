@@ -9,11 +9,11 @@ const CONFIG_TAB_NAME = '⚙️ Config';
 
 function safeAlert_(title, message) {
   try {
-    SpreadsheetApp.getActiveSpreadsheet().toast(message || title, title, 8);
+    SpreadsheetApp.getUi().alert(title, message || title, SpreadsheetApp.getUi().ButtonSet.OK);
   } catch (e) {
     Logger.log('ALERT [' + title + ']: ' + (message || ''));
     try {
-      SpreadsheetApp.getUi().alert(title, message || title, SpreadsheetApp.getUi().ButtonSet.OK);
+      SpreadsheetApp.getActiveSpreadsheet().toast((title + ' — ' + (message || '').slice(0, 80)), 'Notice', 8);
     } catch (_) {}
   }
 }
@@ -26,6 +26,27 @@ const MLB_TEAM_ABBREV = {
   140: 'TEX', 141: 'TOR', 142: 'MIN', 143: 'PHI', 144: 'ATL', 145: 'CWS', 146: 'MIA',
   147: 'NYY', 158: 'MIL',
 };
+
+/** Common team-name → abbreviation map. Used when statsapi ships empty abbreviation. */
+const MLB_TEAM_NAME_TO_ABBR = {
+  'los angeles angels': 'LAA', 'arizona diamondbacks': 'ARI', 'baltimore orioles': 'BAL',
+  'boston red sox': 'BOS', 'chicago cubs': 'CHC', 'cincinnati reds': 'CIN',
+  'cleveland guardians': 'CLE', 'colorado rockies': 'COL', 'detroit tigers': 'DET',
+  'houston astros': 'HOU', 'kansas city royals': 'KC', 'los angeles dodgers': 'LAD',
+  'washington nationals': 'WSN', 'new york mets': 'NYM', 'athletics': 'OAK',
+  'oakland athletics': 'OAK', 'pittsburgh pirates': 'PIT', 'san diego padres': 'SD',
+  'seattle mariners': 'SEA', 'san francisco giants': 'SF', 'st. louis cardinals': 'STL',
+  'tampa bay rays': 'TB', 'texas rangers': 'TEX', 'toronto blue jays': 'TOR',
+  'minnesota twins': 'MIN', 'philadelphia phillies': 'PHI', 'atlanta braves': 'ATL',
+  'chicago white sox': 'CWS', 'miami marlins': 'MIA', 'new york yankees': 'NYY',
+  'milwaukee brewers': 'MIL',
+};
+
+function mlbAbbrFromTeamName_(name) {
+  const n = String(name || '').trim().toLowerCase();
+  if (!n) return '';
+  return MLB_TEAM_NAME_TO_ABBR[n] || '';
+}
 
 /** @returns {number} MLB team id or NaN if abbreviation is unknown. */
 function mlbTeamIdFromAbbr_(abbr) {
@@ -50,10 +71,11 @@ function buildConfigTab() {
       });
     }
   } catch (e) {}
+  const tz = Session.getScriptTimeZone();
   const defaultSlate =
     prevSlate && /^\d{4}-\d{2}-\d{2}$/.test(prevSlate)
       ? prevSlate
-      : Utilities.formatDate(new Date(), 'America/New_York', 'yyyy-MM-dd');
+      : Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
 
   if (!sheet) sheet = ss.insertSheet(CONFIG_TAB_NAME);
   sheet.clearContents().clearFormats();
@@ -68,38 +90,25 @@ function buildConfigTab() {
     row++;
   }
   row_('RUN_WINDOW', 'MORNING', 'MORNING | MIDDAY | FINAL');
-  row_('SLATE_DATE', defaultSlate, 'yyyy-MM-dd — slate for schedule + odds; auto can advance (see next row)');
-  row_(
-    'SLATE_AUTO_ADVANCE_WHEN_COMPLETE',
-    'true',
-    'true | false — when SLATE_DATE is today (America/New_York) and every MLB game that day is final/postponed/cancelled (or zero games), advance SLATE_DATE to tomorrow before fetch — prep next slate before midnight.'
-  );
+  row_('SLATE_DATE', defaultSlate, 'yyyy-MM-dd in script TZ — use menu "tomorrow" or set manually');
   row_('ODDS_BOOK', 'fanduel', 'the-odds-api bookmaker key');
   row_('ODDS_REGION', 'us', 'regions param');
   row_('K9_BLEND_L7_WEIGHT', '0.35', '0..1 blend of L3 K/9 vs season K9 for 🎰 λ (needs L3_IP in queue). Practical scan ~0.2–0.5 around default 0.35; tune iteratively after several slates using Pipeline_Log and 🎰 bet card outcomes. If this key is missing, re-run menu "0. Build Config tab".');
   row_(
     'TB_BLEND_RECENT_WEIGHT',
     '0.35',
-    '0..1 blend of L7 stat/game vs season stat/game for ALL batter prop cards (TB, Hits, HR). Same spirit as K9_BLEND. Tune after slates.'
+    '0..1 blend of last-7 games TB/game vs season TB/game for 🎲 Batter_TB_Card λ (same spirit as K9_BLEND). Tune after slates.'
   );
   row_('MIN_EV_BET_CARD', '0', 'Min EV per $1 on 🃏 card; 0 = any positive EV (any edge). Optional floor: try ~0.02–0.05 vs 0 to drop thin lines; iterate after several slates using Pipeline_Log and 🃏 outcomes. If this key is missing, re-run menu "0. Build Config tab".');
-  row_(
-    'CARD_USE_NBA_ODDS_BAND',
-    'true',
-    'true | false — when true, 🃏 straights only keep American odds in CARD_SINGLES_MIN..MAX (NBA-style band, default ~−150..+150).'
-  );
-  row_('CARD_SINGLES_MIN_AMERICAN', '-150', 'With CARD_USE_NBA_ODDS_BAND: min American for favorites (e.g. −150 means exclude −160).');
-  row_('CARD_SINGLES_MAX_AMERICAN', '150', 'With CARD_USE_NBA_ODDS_BAND: max American for underdogs on the card.');
-  row_(
-    'MLB_FORCE_PITCHER_WALKS_BET_CARD',
-    'true',
-    'true | false — when true, 🃏 Pitcher walks skip NBA odds band + MIN_EV_BET_CARD (still need +EV from model), and may add a 3rd straight when 2 non-walk plays already fill the per-game cap.'
-  );
-  row_(
-    'MLB_FORCE_PITCHER_BB_BET_CARD',
-    'true',
-    'Legacy alias for MLB_FORCE_PITCHER_WALKS_BET_CARD. Keep in sync if you edit manually.'
-  );
+  row_('BANKROLL', '500', 'Bankroll in $ for Kelly stake column on 🃏 card. Default $500 = max bet $7.50 ≈ 1.5% of roll. Edit to your actual roll as it grows.');
+  row_('KELLY_FRACTION', '0.25', 'Fractional-Kelly multiplier (0..1). Default 0.25 = quarter-Kelly (conservative, survives model overconfidence). Full-Kelly (1) is aggressive.');
+  row_('STAKE_TIER_1_USD', '2.50', '1u stake size in $. With $7.50 cap and 1:2:3 ladder → 1u/2u/3u = $2.50/$5/$7.50.');
+  row_('STAKE_TIER_2_USD', '5.00', '2u stake size in $. Edit together with TIER_1 / TIER_3 as your cap grows.');
+  row_('STAKE_TIER_3_USD', '7.50', '3u stake size in $ — your effective max bet. Raise as bankroll grows and your model proves +EV.');
+  row_('STAKE_TIER_1_KELLY_PCT', '0.5', 'Kelly% of bankroll → 1u tier. Default 0.5%: if quarter-Kelly says risk ≥0.5% of roll, place 1u. Below this floor → no bet.');
+  row_('STAKE_TIER_2_KELLY_PCT', '1.0', 'Kelly% of bankroll → 2u tier. Default 1.0%.');
+  row_('STAKE_TIER_3_KELLY_PCT', '1.5', 'Kelly% of bankroll → 3u tier. Default 1.5%: any Kelly recommendation ≥1.5% of roll is a max-bet conviction play.');
+  row_('LEGACY_UNIT_USD', '2.50', 'Flat $ assumed for pre-tier historical bets when running "Backfill historical stakes". Set to what you were actually averaging before the Kelly system.');
   row_('HP_UMP_LAMBDA_MULT', '1', 'Multiply 🎰 λ when hp_umpire listed (1=no change; try 1.02–1.05 cautiously)');
   row_('LHP_K_LAMBDA_MULT', '1', 'Extra λ mult when pitcher throws L (1=no change)');
   row_('RHP_K_LAMBDA_MULT', '1', 'Extra λ mult when pitcher throws R (1=no change)');
@@ -115,27 +124,13 @@ function buildConfigTab() {
     'League SO/PA for hitters vs RHP (tune yearly). Used when opp_k_pa_vs is present and starter throws R; else falls back to LEAGUE_HITTING_K_PA.'
   );
   row_('OPP_K_RATE_LAMBDA_STRENGTH', '0', '0 = off. Try 0.15–0.35: scales 🎰 λ from opponent team season K% vs LEAGUE_HITTING_K_PA (whiff-heavier lineups → higher λ). Tune with Pipeline_Log.');
-  row_('ABS_K_LAMBDA_MULT', '1', 'Per-team ABS opponent K environment fallback mult; 1 = neutral. Overridden per-team by SAVANT_ABS_CSV_URL when loaded.');
-  row_('ABS_PITCHER_K_LAMBDA_MULT', '1', 'Per-pitcher ABS shadow-zone fallback mult when SAVANT_PITCHER_ABS_CSV_URL not loaded; 1 = neutral. < 1 suppresses K λ for pitchers reliant on borderline calls.');
-  row_('BB9_BLEND_L7_WEIGHT', '0.35', '0..1 blend of L3 BB/9 vs season BB9 for 🪶 walks λ. 0 = season only; 1 = L3 only. Default 0.35 mirrors K9_BLEND_L7_WEIGHT — captures ABS-driven walk trend in recent starts.');
-  row_('SAVANT_INGEST_ENABLED', 'false', 'true | false — when true, pipeline probes SAVANT_ABS_CSV_URL and SAVANT_PITCHER_ABS_CSV_URL (best-effort; see MLBSavantIngest.js)');
+  row_('ABS_K_LAMBDA_MULT', '1', 'reserved for future Savant/ABS team K environment; 1 = neutral until wired.');
+  row_('SAVANT_INGEST_ENABLED', 'false', 'true | false — when true, pipeline probes SAVANT_ABS_CSV_URL (best-effort; see MLBSavantIngest.js)');
   row_(
     'SAVANT_ABS_CSV_URL',
     '',
     'Public CSV: columns team_id + abs_k_mult (or abbr + factor). Example row: 121,1.02 — loads per-team λ mult when SAVANT_INGEST_ENABLED is true.'
   );
-  row_(
-    'SAVANT_PITCHER_ABS_CSV_URL',
-    '',
-    'CSV: columns pitcher_id + abs_k_mult. Per-pitcher shadow-zone K dependency mult (< 1 = loses Ks to ABS challenges). Loaded when SAVANT_INGEST_ENABLED is true.'
-  );
-  row_('CARD_ALLOWED_MARKETS', 'Pitcher strikeouts,Batter hits,Batter total bases', 'Comma-separated market labels for 🃏 main card. All other markets are SGP-pool only (see SGP section). Default: K + Hits + TB.');
-  row_('SGP_MIN_EV', '0.01', 'Min EV per $1 for SGP 3rd-leg candidates shown below main card. Default 0.01 (B tier). Must be positive EV; market need not be in CARD_ALLOWED_MARKETS.');
-  row_('BATTER_TB_OVER_MAX_AMERICAN', '0', 'Cap on American odds for Batter TB Over bets on 🃏 card. Default 0 (even odds): plus-odds TB Overs are soft-rejected (noisy λ at long prices). Set to 150 to restore full band, or -100 to require short favorites only.');
-  row_('MLB_INCLUDE_HR_BET_CARD', 'false', 'true | false — include Batter HR in 🃏 merge. Default false: HR park factors and pitcher HR/9 not yet modeled; re-enable when those signals are added.');
-  row_('KELLY_BANKROLL', '1000', 'Total bankroll in dollars used for Kelly sizing on 🃏 bet card. Set to your actual roll; Kelly $ scales proportionally.');
-  row_('KELLY_FRACTION', '0.25', 'Fractional Kelly multiplier (0..1). 0.25 = quarter-Kelly (recommended for props). Full Kelly (1.0) is theoretically optimal but high-variance.');
-  row_('KELLY_MAX_BET_PCT', '0.05', 'Hard cap: max bet as fraction of bankroll regardless of Kelly output (default 0.05 = 5%). Prevents runaway sizing on thin samples.');
   ss.getNamedRanges().forEach(function (nr) {
     if (nr.getName() === 'CONFIG') nr.remove();
   });
@@ -167,9 +162,10 @@ function getOddsApiKey_() {
 }
 
 function getSlateDateString_(cfg) {
+  const tz = Session.getScriptTimeZone();
   const fromCfg = cfg && cfg['SLATE_DATE'] ? String(cfg['SLATE_DATE']).trim() : '';
   if (fromCfg && /^\d{4}-\d{2}-\d{2}$/.test(fromCfg)) return fromCfg;
-  return Utilities.formatDate(new Date(), 'America/New_York', 'yyyy-MM-dd');
+  return Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
 }
 
 /** Soft validation for tuning keys — logs pipeline warnings only (does not block). */
@@ -190,11 +186,6 @@ function validateMlbPipelineConfig_(cfg) {
   warnRange('HP_UMP_LAMBDA_MULT', c['HP_UMP_LAMBDA_MULT'], 0.85, 1.15);
   warnRange('LHP_K_LAMBDA_MULT', c['LHP_K_LAMBDA_MULT'], 0.92, 1.12);
   warnRange('RHP_K_LAMBDA_MULT', c['RHP_K_LAMBDA_MULT'], 0.92, 1.12);
-  const amin = parseFloat(String(c['CARD_SINGLES_MIN_AMERICAN'] != null ? c['CARD_SINGLES_MIN_AMERICAN'] : '').trim(), 10);
-  const amax = parseFloat(String(c['CARD_SINGLES_MAX_AMERICAN'] != null ? c['CARD_SINGLES_MAX_AMERICAN'] : '').trim(), 10);
-  if (!isNaN(amin) && !isNaN(amax) && amin > amax) {
-    addPipelineWarning_('⚙️ CARD_SINGLES_MIN_AMERICAN > CARD_SINGLES_MAX_AMERICAN (band inverted)');
-  }
 }
 
 function setConfigValue_(key, value) {

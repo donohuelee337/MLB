@@ -136,17 +136,23 @@ function mlbCandidateGameKeys_(matchup, awayAbbr, homeAbbr) {
  * @param {string} pitcherNorm mlbNormalizePersonName_(fullName)
  */
 /**
- * FanDuel tab → index: normalizedGame||normalizedPlayerName → { line: { Over, Under } }.
- * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss
- * @param {string} marketKey e.g. pitcher_strikeouts | batter_total_bases
+ * Canonical FanDuel-odds reader. Accepts one market key or a list (e.g. main + _alternate).
+ * Returns: { "gameNorm||personNorm": { gameLabel, displayName, pointMap: { pt: { Over, Under } } } }.
+ *
+ * All downstream queues/cards should go through this — single place to fix sheet-shape bugs.
  */
-function mlbBuildPersonPropOddsIndex_(ss, marketKey) {
-  const want = String(marketKey || '').trim();
-  const byGamePlayer = {};
+function mlbBuildPropOddsIndex_(ss, marketKeys) {
+  const keysArr = Array.isArray(marketKeys) ? marketKeys : [marketKeys];
+  const wanted = {};
+  keysArr.forEach(function (k) {
+    const t = String(k || '').trim();
+    if (t) wanted[t] = true;
+  });
+  const byKey = {};
   const sh = ss.getSheetByName(MLB_ODDS_CONFIG.tabName);
-  if (!sh || sh.getLastRow() < 4 || !want) return byGamePlayer;
+  if (!sh || sh.getLastRow() < 4 || !Object.keys(wanted).length) return byKey;
   const last = sh.getLastRow();
-  const block = sh.getRange(4, 1, last, 6).getValues();
+  const block = sh.getRange(4, 1, Math.max(0, last - 3), 6).getValues();
   for (let i = 0; i < block.length; i++) {
     const player = block[i][0];
     const gameLabel = block[i][1];
@@ -154,45 +160,42 @@ function mlbBuildPersonPropOddsIndex_(ss, marketKey) {
     const side = String(block[i][3] || '');
     const lineRaw = block[i][4];
     const price = block[i][5];
-    if (market !== want) continue;
+    if (!wanted[market]) continue;
     const g = mlbNormalizeGameLabel_(gameLabel);
     const p = mlbNormalizePersonName_(player);
     if (!g || !p) continue;
     const pt = parseFloat(lineRaw);
     if (isNaN(pt)) continue;
     const key = g + '||' + p;
-    if (!byGamePlayer[key]) byGamePlayer[key] = {};
-    if (!byGamePlayer[key][pt]) byGamePlayer[key][pt] = {};
+    if (!byKey[key]) {
+      byKey[key] = {
+        gameLabel: gameLabel,
+        displayName: String(player || '').trim(),
+        pointMap: {},
+      };
+    }
+    if (!byKey[key].pointMap[pt]) byKey[key].pointMap[pt] = {};
     const sl = side.toLowerCase();
-    if (sl.indexOf('over') !== -1) byGamePlayer[key][pt].Over = price;
-    if (sl.indexOf('under') !== -1) byGamePlayer[key][pt].Under = price;
+    if (sl.indexOf('over') !== -1) byKey[key].pointMap[pt].Over = price;
+    if (sl.indexOf('under') !== -1) byKey[key].pointMap[pt].Under = price;
   }
-  return byGamePlayer;
+  return byKey;
 }
 
-/**
- * Merge alternate lines (same game||player keys) when FanDuel posts only _alternate
- * for a slate (common for walks / hits allowed).
- * @param {string} altKey e.g. pitcher_walks_alternate — optional, pass '' to skip
- */
+/** Back-compat: returns just the pointMap shape used by the K queue. */
+function mlbBuildPersonPropOddsIndex_(ss, marketKey) {
+  const rich = mlbBuildPropOddsIndex_(ss, marketKey);
+  const out = {};
+  Object.keys(rich).forEach(function (k) { out[k] = rich[k].pointMap; });
+  return out;
+}
+
+/** Back-compat: main+alternate merged into the pointMap shape. */
 function mlbBuildPersonPropOddsIndexMerged_(ss, mainKey, altKey) {
-  const main = mlbBuildPersonPropOddsIndex_(ss, mainKey);
-  const ak = String(altKey || '').trim();
-  if (!ak) return main;
-  const alt = mlbBuildPersonPropOddsIndex_(ss, ak);
-  for (const k in alt) {
-    if (!Object.prototype.hasOwnProperty.call(alt, k)) continue;
-    if (!main[k]) main[k] = {};
-    for (const pt in alt[k]) {
-      if (!Object.prototype.hasOwnProperty.call(alt[k], pt)) continue;
-      if (!main[k][pt]) main[k][pt] = {};
-      const mo = main[k][pt];
-      const ao = alt[k][pt];
-      if (ao.Over != null && mo.Over == null) mo.Over = ao.Over;
-      if (ao.Under != null && mo.Under == null) mo.Under = ao.Under;
-    }
-  }
-  return main;
+  const rich = mlbBuildPropOddsIndex_(ss, [mainKey, altKey]);
+  const out = {};
+  Object.keys(rich).forEach(function (k) { out[k] = rich[k].pointMap; });
+  return out;
 }
 
 function mlbOddsPointMapForPerson_(oddsIdx, gameKeys, personNorm) {
@@ -216,7 +219,7 @@ function mlbBuildOddsGameNormToGamePk_(ss) {
   const sch = ss.getSheetByName(MLB_SCHEDULE_TAB);
   if (!sch || sch.getLastRow() < 4) return map;
   const last = sch.getLastRow();
-  const block = sch.getRange(4, 1, last, 6).getValues();
+  const block = sch.getRange(4, 1, Math.max(0, last - 3), 6).getValues();
   for (let i = 0; i < block.length; i++) {
     const gamePk = block[i][0];
     const matchup = block[i][5];
@@ -241,7 +244,7 @@ function mlbResolveGamePkFromFdGameLabel_(ss, fdGameLabel, gamePkMap) {
   const sch = ss.getSheetByName(MLB_SCHEDULE_TAB);
   if (!sch || sch.getLastRow() < 4) return '';
   const last = sch.getLastRow();
-  const block = sch.getRange(4, 1, last, 6).getValues();
+  const block = sch.getRange(4, 1, Math.max(0, last - 3), 6).getValues();
   for (let i = 0; i < block.length; i++) {
     const m = mlbNormalizeGameLabel_(block[i][5]);
     if (m === g) return block[i][0];
