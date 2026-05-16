@@ -92,3 +92,48 @@ function mlbParkHitsLambdaMultForHomeAbbr_(abbr) {
   if (m == null || isNaN(m)) return 1;
   return Math.max(0.92, Math.min(1.08, m));
 }
+
+// HR-specific park factor (multi-year public park factors averaged, rounded).
+// Wider spread than TB/Hits — Coors vs Oracle differ by ~40% on HR rate, so
+// the clamp here is 0.80..1.25 (vs 0.9..1.1 for the others). Tune annually.
+// Used by MLBHrPromoRefresh.js (HR promo λ) and MLBBatterHRQueue.js.
+const MLB_HOME_PARK_HR_MULT = {
+  COL: 1.22,  // Coors — altitude
+  CIN: 1.15,  // GABP — short porches both sides
+  NYY: 1.13,  // Yankee Stadium — short RF
+  TEX: 1.08,  // Globe Life — neutral roof, slight boost
+  CWS: 1.07,  // Rate Field — hitter-friendly
+  BAL: 1.05,  // Camden — short LF after the wall move still mid-tier
+  PHI: 1.04,  // CBP — slight boost
+  ARI: 1.04,  // Chase
+  MIL: 1.04,  // American Family
+  CHC: 1.02,  // Wrigley — wind dependent
+  ATL: 1.02,  // Truist
+  BOS: 1.02,  // Fenway — Monster compresses some HR
+  HOU: 1.00,  // Minute Maid
+  MIN: 1.00,  // Target Field
+  STL: 0.96,
+  CLE: 0.95,
+  TOR: 0.97,  // Rogers Centre
+  WSH: 0.98,
+  PIT: 0.95,  // PNC — deep LF
+  LAA: 0.95,  // Big A
+  LAD: 0.96,  // Dodger Stadium — slight suppress
+  KC:  0.94,  // Kauffman — deep alleys
+  TB:  0.95,
+  ATH: 0.93,  // Oakland legacy / Vegas Athletics
+  DET: 0.92,  // Comerica
+  SEA: 0.90,  // T-Mobile
+  NYM: 0.94,  // Citi Field
+  MIA: 0.87,  // loanDepot — large dimensions
+  SD:  0.87,  // Petco
+  SF:  0.83,  // Oracle — largest HR suppressor
+};
+
+function mlbParkHrLambdaMultForHomeAbbr_(abbr) {
+  const a = String(abbr || '').trim().toUpperCase();
+  if (!a) return 1;
+  const m = MLB_HOME_PARK_HR_MULT[a];
+  if (m == null || isNaN(m)) return 1;
+  return Math.max(0.80, Math.min(1.25, m));
+}
