@@ -131,6 +131,15 @@ function buildConfigTab() {
     '',
     'Public CSV: columns team_id + abs_k_mult (or abbr + factor). Example row: 121,1.02 — loads per-team λ mult when SAVANT_INGEST_ENABLED is true.'
   );
+  // HR promo tuning (📣 Batter_HR_Promo). Defaults match the in-code fallbacks
+  // — edit here to tune from the sheet instead of changing source.
+  row_('HR_PROMO_LINEUP_FALLBACK', 'roster', 'When boxscore lineup is missing: "roster" = score every batter w/ ≥30 PA & ≥1 HR; "skip" = drop the game and warn.');
+  row_('HR_PROMO_BLEND_L14_WEIGHT', '0.25', '0..1 blend of last-14-day HR/PA vs season HR/PA. Higher = more reactive to hot/cold streaks; lower = more season-anchored.');
+  row_('HR_PROMO_SHRINK_MIN_PA', '50', 'Bayesian shrink min-PA toward season prior. Lower (~25) trusts small samples; higher (~100) needs full season before deviating.');
+  row_('HR_PROMO_PITCHER_MULT_MIN', '0.85', 'Floor for SP HR9/league_HR9 multiplier (caps the boost vs HR-prone pitchers).');
+  row_('HR_PROMO_PITCHER_MULT_MAX', '1.15', 'Ceiling for SP HR9 multiplier.');
+  row_('HR_PROMO_CALIB_MIN_ROWS', '500', 'Min graded rows before Platt calibration fits — until then p_calibrated == p_poisson.');
+  row_('HR_PROMO_EXPECTED_PA_JSON', '', 'Optional: JSON array of 9 positive numbers — expected PA per lineup slot 1..9. Empty = built-in default [4.65, 4.55, ..., 3.6].');
   ss.getNamedRanges().forEach(function (nr) {
     if (nr.getName() === 'CONFIG') nr.remove();
   });

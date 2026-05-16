@@ -387,3 +387,11 @@ function refreshBatterHrPromoSheet_() {
   sh.setFrozenRows(3);
   ss.toast(rowsOut.length + ' promo HR rows', 'Batter HR promo', 8);
 }
+
+/** Menu wrapper — jump to the 📣 Batter_HR_Promo tab if it exists. */
+function mlbActivateHrPromoTab_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sh = ss.getSheetByName(MLB_BATTER_HR_PROMO_TAB);
+  if (sh) sh.activate();
+  else ss.toast('Run the pipeline (or 📣 Refresh HR Promo tab) to create ' + MLB_BATTER_HR_PROMO_TAB, 'MLB-BOIZ', 5);
+}

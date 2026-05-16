@@ -51,8 +51,10 @@ function onOpen() {
     .addSubMenu(
       SpreadsheetApp.getUi()
         .createMenu('📣 HR Promo')
+        .addItem('📣 Refresh HR Promo tab (rebuild picks)', 'refreshBatterHrPromoSheet_')
         .addItem('📋 Snapshot HR picks → log', 'mlbSnapshotHrPromoMidday_')
         .addItem('📊 Grade pending HR promo rows', 'gradeHrPromoPendingResults_')
+        .addItem('📋 Open HR Promo tab', 'mlbActivateHrPromoTab_')
         .addItem('📋 Open HR Promo Results Log', 'mlbActivateHrPromoResultsLogTab_')
         .addSeparator()
         .addItem('🔬 Refresh HR promo feature-ablation', 'refreshHrPromoFeatureAblation')
@@ -204,6 +206,9 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   step('Batter Hits card', refreshBatterHitsBetCard);
   step('Batter Hits v2 card (shadow)', refreshBatterHitsV2BetCard);
   step('MLB Bet Card', refreshMLBBetCard);
+  // HR Promo built last so the snapshot block (after this) can read it.
+  // Appended (not inserted) so the existing outcomes[] indices stay stable.
+  step('Batter HR Promo refresh', refreshBatterHrPromoSheet_);
 
   const oCfg = outcomes[0] || { ok: true };
   const oInj = outcomes[1] || { ok: true };
