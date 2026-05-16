@@ -36,19 +36,28 @@ function mlbBoxscoreIsFinal_(payload) {
   return false;
 }
 
+// ============================================================
+// ⚠️  REGRESSION GUARD — DO NOT CHANGE THE URL BELOW TO /boxscore  ⚠️
+// ============================================================
+// This URL has been silently reverted to /boxscore THREE times by GAS→git
+// syncs (commits 4e7ceb9, f8f38d4, ...). Each time, every past-slate row
+// gets "NOT_FINAL — will retry later" because /boxscore (v1) omits
+// gameData.status — mlbBoxscoreIsFinal_ then returns false on every payload
+// and the results tracker shows only dashes. mlbGraderSelfTest_() runs at
+// the start of every pipeline window to catch a regression immediately.
+// See: feedback_grader_endpoint.md memory entry.
+// ============================================================
+const MLB_GRADER_FEED_URL_TEMPLATE = 'https://statsapi.mlb.com/api/v1.1/game/{pk}/feed/live';
+
 /**
- * Fetch game payload for grading. Uses /feed/live (v1.1), NOT /boxscore (v1):
- * /boxscore omits gameData.status / liveData.game.status, so mlbBoxscoreIsFinal_
- * never sees 'Final' and the grader writes "NOT_FINAL — will retry later" on every
- * row forever. /feed/live carries both player stats (liveData.boxscore.teams,
- * same shape mlbBoxscoreTeams_ already reads) AND game status. Function name kept
- * as ...BoxscoreJson_ so callers don't need to change.
+ * Fetch game payload for grading. Uses /feed/live (v1.1). Carries both
+ * liveData.boxscore.teams (player stats) and the status blocks isFinal needs.
+ * Function name kept as ...BoxscoreJson_ so callers don't need to change.
  */
 function mlbFetchBoxscoreJson_(gamePk) {
   const g = parseInt(gamePk, 10);
   if (!g) return null;
-  // /feed/live is on v1.1, not v1 — going through mlbStatsApiBaseUrl_() returns 404.
-  const url = 'https://statsapi.mlb.com/api/v1.1/game/' + g + '/feed/live';
+  const url = MLB_GRADER_FEED_URL_TEMPLATE.replace('{pk}', String(g));
   try {
     const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
     if (res.getResponseCode() !== 200) return null;
@@ -57,6 +66,62 @@ function mlbFetchBoxscoreJson_(gamePk) {
     Logger.log('mlbFetchBoxscoreJson_: ' + e.message);
     return null;
   }
+}
+
+/**
+ * Self-test the grader plumbing end-to-end. Picks a known-final game from
+ * yesterday's NY schedule and walks the full path: fetch → isFinal → teams.
+ * Failures are reported to Pipeline_Log so a silent regression (especially
+ * /feed/live → /boxscore on GAS-sync) is impossible to ship unnoticed.
+ *
+ * @returns {{ ok: boolean, note: string, gamePk: number }}
+ */
+function mlbGraderSelfTest_() {
+  const tz = 'America/New_York';
+  const yest = Utilities.formatDate(new Date(Date.now() - 86400000), tz, 'yyyy-MM-dd');
+  let sched = null;
+  try {
+    sched = mlbFetchScheduleJsonForDate_(yest);
+  } catch (e) {
+    return { ok: false, note: 'self-test: schedule fetch threw: ' + e.message, gamePk: 0 };
+  }
+  if (!sched || !sched.dates || !sched.dates.length || !sched.dates[0].games || !sched.dates[0].games.length) {
+    return { ok: true, note: 'self-test: skipped — no scheduled games on ' + yest + ' (offseason / off-day)', gamePk: 0 };
+  }
+  // Prefer the first game that statsapi marks as Final on the schedule itself
+  // so the test isn't fooled by a postponed game.
+  const games = sched.dates[0].games;
+  let gamePk = 0;
+  for (let i = 0; i < games.length; i++) {
+    const st = games[i].status || {};
+    const abs = String(st.abstractGameState || '').toLowerCase();
+    if (abs === 'final') { gamePk = parseInt(games[i].gamePk, 10); break; }
+  }
+  if (!gamePk) gamePk = parseInt(games[0].gamePk, 10);
+  if (!gamePk) return { ok: false, note: 'self-test: no usable gamePk on ' + yest, gamePk: 0 };
+
+  const box = mlbFetchBoxscoreJson_(gamePk);
+  if (!box) {
+    return {
+      ok: false,
+      note: 'self-test: fetch failed for gamePk=' + gamePk + ' — feed/live unreachable or URL regressed',
+      gamePk: gamePk,
+    };
+  }
+  if (!mlbBoxscoreIsFinal_(box)) {
+    return {
+      ok: false,
+      note:
+        'self-test: isFinal=false on a scheduled-Final game (gamePk=' +
+        gamePk +
+        '). LIKELY /boxscore REGRESSION — check MLBResultsGrader.js URL must contain /feed/live.',
+      gamePk: gamePk,
+    };
+  }
+  if (!mlbBoxscoreTeams_(box)) {
+    return { ok: false, note: 'self-test: liveData.boxscore.teams missing on gamePk=' + gamePk, gamePk: gamePk };
+  }
+  return { ok: true, note: 'self-test: ok (gamePk=' + gamePk + ' isFinal=true, teams present)', gamePk: gamePk };
 }
 
 /**

@@ -38,6 +38,9 @@ function onOpen() {
         .addItem('🧪 Rebuild Batter Hits v2 card', 'refreshBatterHitsV2BetCard')
         .addItem('🧪 Snapshot v2 card → log (MIDDAY tag)', 'mlbSnapshotHitsV2Midday_')
         .addItem('📊 Grade pending v2 hits rows', 'gradeMLBHitsV2PendingResults_')
+        .addItem('🔬 Diagnose v2 Results Log', 'mlbDiagnoseHitsV2Log_')
+        .addItem('🧪 Test grade ONE v2 row', 'mlbTestGradeOneHitsV2Row_')
+        .addItem('🩺 Run grader self-test (feed/live)', 'mlbGraderSelfTestMenu_')
         .addItem('🔬 Refresh Hits Model Compare panel', 'refreshHitsModelCompare')
         .addItem('🔬 Open Compare panel', 'mlbActivateHitsCompareTab_')
         .addItem('🧪 Open v2 Results Log', 'mlbActivateHitsV2LogTab_')
@@ -61,6 +64,20 @@ function onOpen() {
 /** Menu wrapper — snapshot HR promo picks with MIDDAY tag. */
 function mlbSnapshotHrPromoMidday_() {
   if (typeof snapshotHrPromoToLog === 'function') snapshotHrPromoToLog('MIDDAY');
+}
+
+/** Menu wrapper — pop a dialog with the grader self-test result. */
+function mlbGraderSelfTestMenu_() {
+  const ui = SpreadsheetApp.getUi();
+  let r;
+  try {
+    r = mlbGraderSelfTest_();
+  } catch (e) {
+    ui.alert('Grader self-test', 'Threw: ' + (e.message || e), ui.ButtonSet.OK);
+    return;
+  }
+  const head = r.ok ? '✅ Grader OK' : '❌ GRADER BROKEN';
+  ui.alert(head, r.note, ui.ButtonSet.OK);
 }
 
 /**
@@ -109,6 +126,21 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const start = Date.now();
   resetPipelineLog_(windowTag);
+
+  // Grader self-test runs FIRST so a regressed /feed/live URL or broken
+  // boxscore plumbing surfaces as a loud Pipeline_Log warning even when no
+  // past-slate rows happen to be in the log. Result column on Bet Card and
+  // Results Tracker depends on this — never silently skip.
+  try {
+    const selfTest = mlbGraderSelfTest_();
+    if (!selfTest.ok) {
+      addPipelineWarning_('GRADER SELF-TEST FAILED — ' + selfTest.note);
+      ss.toast('⚠️ Grader self-test failed: ' + selfTest.note, 'MLB-BOIZ', 12);
+    }
+  } catch (e) {
+    addPipelineWarning_('Grader self-test threw: ' + (e.message || e));
+  }
+
   try {
     gradeMLBPendingResults_();
   } catch (e) {
