@@ -383,6 +383,25 @@ function refreshBatterHrPromoSheet_() {
     try {
       ss.setNamedRange(MLB_BATTER_HR_PROMO_NAMED_RANGE, sh.getRange(4, 1, grid.length, headers.length));
     } catch (e) {}
+
+    // Highlight the day's top HR matchup. rowsOut is already sorted by
+    // pCalibrated DESC then lambdaRaw DESC, so row index 0 is the pick. Gold
+    // on batter (col 4), p_calibrated (col 9), pitcher_mult (col 16) so the
+    // pair "batter + matchup + pitcher" reads as one unit. Note explains why.
+    const top = rowsOut[0];
+    const noteText =
+      '🔥 Best HR matchup of the slate · ' + top.batter +
+      ' vs SP id ' + (top.opponentSpId || '?') +
+      ' · p_calibrated=' + (Math.round(top.pCalibrated * 1000) / 10) + '%' +
+      ' · pitcher_mult=' + (Math.round(top.pitcherMult * 1000) / 1000) +
+      ' · park_mult=' + (Math.round(top.parkMult * 1000) / 1000);
+    [4, 9, 16].forEach(function (colIdx) {
+      sh.getRange(4, colIdx)
+        .setBackground('#fde047')
+        .setFontColor('#7c2d12')
+        .setFontWeight('bold');
+    });
+    sh.getRange(4, 4).setNote(noteText);
   }
   sh.setFrozenRows(3);
   ss.toast(rowsOut.length + ' promo HR rows', 'Batter HR promo', 8);
