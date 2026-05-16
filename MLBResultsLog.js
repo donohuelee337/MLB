@@ -182,7 +182,7 @@ function mlbBackfillResultsLogClosingK_(ss) {
 
   for (let i = 0; i < data.length; i++) {
     const row = data[i];
-    const slateStr = String(row[1] || '').trim();
+    const slateStr = mlbReadSlateYmd_(row[1]);
     if (slateStr !== slateWant) continue;
     const market = String(row[5] || '').toLowerCase();
     if (market.indexOf('strikeout') === -1) continue;

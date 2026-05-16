@@ -36,6 +36,8 @@ function onOpen() {
         .addItem('🧪 Rebuild Batter Hits v2 card', 'refreshBatterHitsV2BetCard')
         .addItem('🧪 Snapshot v2 card → log (MIDDAY tag)', 'mlbSnapshotHitsV2Midday_')
         .addItem('📊 Grade pending v2 hits rows', 'gradeMLBHitsV2PendingResults_')
+        .addItem('🔬 Diagnose v2 Results Log', 'mlbDiagnoseHitsV2Log_')
+        .addItem('🧪 Test grade ONE v2 row', 'mlbTestGradeOneHitsV2Row_')
         .addItem('🔬 Refresh Hits Model Compare panel', 'refreshHitsModelCompare')
         .addItem('🔬 Open Compare panel', 'mlbActivateHitsCompareTab_')
         .addItem('🧪 Open v2 Results Log', 'mlbActivateHitsV2LogTab_')
