@@ -22,7 +22,14 @@ Every code change ships as a new `MLB-BOIZ vX.Y.Z` version so any change is a si
 ## Branch & merge rules
 
 - Each agent works in its own worktree on a `claude/<slug>` branch.
-- Push only to your branch. Merging to `main` is the user's manual gate (review via PR).
+- Push only to your own branch autonomously. **Never push to `main` on your own initiative.**
+- **Merging is allowed only when the user explicitly says "merge"** (or equivalent: "ship to main," "promote," etc.). Solo-dev project — no PR review gate needed. Use a fast-forward push of the branch tip to `main`:
+  ```
+  git fetch origin
+  git log --oneline HEAD..origin/main   # MUST be empty (clean fast-forward)
+  git push origin <current-branch>:main
+  ```
+  If `HEAD..origin/main` is non-empty, stop — rebase first, then re-check before pushing.
 - Never force-push, hard-reset, or delete branches without explicit user confirmation — those are the only ways to lose another agent's work.
 
 ## Manual mode
