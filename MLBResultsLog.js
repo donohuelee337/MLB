@@ -7,7 +7,7 @@
 // ============================================================
 
 const MLB_RESULTS_LOG_TAB = '📋 MLB_Results_Log';
-const MLB_RESULTS_LOG_NCOL = 24;
+const MLB_RESULTS_LOG_NCOL = 26;
 
 const MLB_RESULTS_HEADERS = [
   'Logged At',
@@ -34,7 +34,23 @@ const MLB_RESULTS_HEADERS = [
   'bet_key',
   'open_line',
   'open_odds',
+  'stake $',
+  'pnl $',
 ];
+
+/** Profit (in $) for a graded row at this American price. Stake is in $. */
+function mlbPnlFromResult_(result, stake, american) {
+  const r = String(result || '').trim().toUpperCase();
+  const s = parseFloat(String(stake));
+  if (!isFinite(s) || s <= 0) return 0;
+  if (r === 'WIN') {
+    const b = mlbAmericanToB_(american);
+    if (!isFinite(b) || b <= 0) return 0;
+    return Math.round(s * b * 100) / 100;
+  }
+  if (r === 'LOSS') return -s;
+  return 0; // PUSH / VOID / PENDING
+}
 
 function mlbBetResultKey_(slate, gamePk, pitcherId, side, line) {
   return [
@@ -239,8 +255,11 @@ function snapshotMLBBetCardToLog(windowTag) {
   const last = bc.getLastRow();
   // Bet card column layout (0-indexed) — keep in sync with MLBBetCard.js headers:
   //  0:date 1:# 2:grade 3:gamePk 4:matchup 5:play 6:player 7:market
-  //  8:side 9:line 10:odds 11:model% 12:book% 13:ev 14:kelly$
+  //  8:side 9:line 10:odds 11:model% 12:book% 13:ev 14:stake$
   //  15:proj 16:proj−line 17:flags 18:player_id 19:time
+  // Note: col 14 was historically labeled "kelly $" but now writes the
+  // tier-snapped stake ($2.50/$5/$7.50). Old comments in other files may
+  // still say "kelly$" — same column, same value.
   const block = bc.getRange(4, 1, last, MLB_BET_CARD_NCOL).getValues();
   const window = windowTag || 'UNKNOWN';
   const now = new Date();
@@ -264,6 +283,15 @@ function snapshotMLBBetCardToLog(windowTag) {
   if (String(logSh.getRange(HEADER_ROW, 22).getValue() || '').trim() !== 'bet_key') {
     logSh.getRange(HEADER_ROW, 22, 1, 3).setValues([['bet_key', 'open_line', 'open_odds']]);
   }
+  if (String(logSh.getRange(HEADER_ROW, 25).getValue() || '').trim() !== 'stake $') {
+    logSh.getRange(HEADER_ROW, 25, 1, 2)
+      .setValues([['stake $', 'pnl $']])
+      .setFontWeight('bold')
+      .setBackground('#1565C0')
+      .setFontColor('#ffffff');
+    logSh.getRange(4, 25, Math.max(logSh.getLastRow() - 3, 1), 1).setNumberFormat('$0.00');
+    logSh.getRange(4, 26, Math.max(logSh.getLastRow() - 3, 1), 1).setNumberFormat('+$0.00;-$0.00');
+  }
 
   let appended = 0;
   let updated = 0;
@@ -283,6 +311,7 @@ function snapshotMLBBetCardToLog(windowTag) {
     const odds = row[10];
     const modelProb = row[11];
     const ev = row[13];
+    const stake = row[14];
     const playerId = row[18];
     const betKey = mlbBetResultKey_(slate, gamePk, playerId, side, line);
     const hitRow = mlbFindResultsLogSheetRowForUpsert_(logSh, slate, betKey, gamePk, playerId, side, line);
@@ -322,6 +351,11 @@ function snapshotMLBBetCardToLog(windowTag) {
       logSh.getRange(hitRow, 14).setValue(gamePk);
       logSh.getRange(hitRow, 15).setValue(playerId);
       logSh.getRange(hitRow, 19, 1, 3).setValues([[line, odds, clv]]);
+      // Only fill stake if currently blank — don't overwrite a manually-edited stake.
+      const prevStake = prev[24];
+      if ((prevStake === '' || prevStake == null) && stake !== '' && stake != null) {
+        logSh.getRange(hitRow, 25).setValue(stake);
+      }
       updated++;
       return;
     }
@@ -355,6 +389,8 @@ function snapshotMLBBetCardToLog(windowTag) {
           betKey,
           line,
           odds,
+          stake !== '' && stake != null ? stake : '',
+          '',
         ],
       ]);
     appended++;
@@ -364,4 +400,80 @@ function snapshotMLBBetCardToLog(windowTag) {
   try {
     ss.toast('Results log +' + appended + ' new · ' + updated + ' updated · ' + window, 'MLB-BOIZ', 6);
   } catch (e) {}
+}
+
+/**
+ * One-shot: fill blank `stake $` cells in the results log with LEGACY_UNIT_USD
+ * (default $2.50) for every historical row, and (re)compute `pnl $` for any
+ * row that already has a graded result. Does NOT overwrite a stake you've
+ * manually edited. Safe to re-run.
+ *
+ * Why this exists: the 1x/2x/3x tier system was introduced after some slates
+ * had already been graded; historical rows have no recorded stake, so ROI
+ * can't be measured. User chose "Backfill at fixed unit" in onboarding —
+ * this assumes a flat $2.50 (one unit) per pre-tier bet.
+ *
+ * @returns {{ stakeFilled: number, pnlFilled: number }}
+ */
+function mlbBackfillHistoricalStakes_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const logSh = ss.getSheetByName(MLB_RESULTS_LOG_TAB);
+  if (!logSh || logSh.getLastRow() < 4) return { stakeFilled: 0, pnlFilled: 0 };
+
+  // Make sure the new columns exist + are formatted.
+  const HEADER_ROW = 3;
+  if (String(logSh.getRange(HEADER_ROW, 25).getValue() || '').trim() !== 'stake $') {
+    logSh.getRange(HEADER_ROW, 25, 1, 2)
+      .setValues([['stake $', 'pnl $']])
+      .setFontWeight('bold')
+      .setBackground('#1565C0')
+      .setFontColor('#ffffff');
+  }
+  const dataRows = logSh.getLastRow() - 3;
+  logSh.getRange(4, 25, dataRows, 1).setNumberFormat('$0.00');
+  logSh.getRange(4, 26, dataRows, 1).setNumberFormat('+$0.00;-$0.00');
+
+  const cfg = getConfig();
+  const legacyUnit = parseFloat(String(cfg['LEGACY_UNIT_USD'] != null ? cfg['LEGACY_UNIT_USD'] : '2.50').trim(), 10) || 2.50;
+
+  const last = logSh.getLastRow();
+  const ncol = Math.max(MLB_RESULTS_LOG_NCOL, logSh.getLastColumn());
+  const data = logSh.getRange(4, 1, last - 3, ncol).getValues();
+
+  const stakeUpdates = [];
+  const pnlUpdates = [];
+
+  for (let i = 0; i < data.length; i++) {
+    const row = data[i];
+    const result = String(row[16] || '').trim().toUpperCase();
+    const odds = row[8];
+    let stake = row[24];
+
+    // Fill stake if blank
+    if (stake === '' || stake == null) {
+      stake = legacyUnit;
+      stakeUpdates.push({ r: 4 + i, v: legacyUnit });
+    }
+
+    // Compute pnl if we have a final result and stake
+    if (result === 'WIN' || result === 'LOSS' || result === 'PUSH' || result === 'VOID') {
+      const pnl = mlbPnlFromResult_(result, stake, odds);
+      const prevPnl = row[25];
+      if (prevPnl === '' || prevPnl == null || parseFloat(prevPnl) !== pnl) {
+        pnlUpdates.push({ r: 4 + i, v: pnl });
+      }
+    }
+  }
+
+  stakeUpdates.forEach(function (u) { logSh.getRange(u.r, 25).setValue(u.v); });
+  pnlUpdates.forEach(function (u) { logSh.getRange(u.r, 26).setValue(u.v); });
+
+  try {
+    ss.toast(
+      'Backfilled stake: ' + stakeUpdates.length + ' · pnl: ' + pnlUpdates.length + ' (unit $' + legacyUnit.toFixed(2) + ')',
+      'MLB-BOIZ',
+      7
+    );
+  } catch (e) {}
+  return { stakeFilled: stakeUpdates.length, pnlFilled: pnlUpdates.length };
 }

@@ -278,7 +278,7 @@ function refreshMLBBetCard() {
   });
 
   const rows = selected.map(function (p, idx) {
-    const kelly = mlbKellyStake_(p.pWin, p.american, bankroll, kellyFrac);
+    const kelly = mlbKellyStake_(p.pWin, p.american, bankroll, kellyFrac, cfg);
     return [
       slateDate,                                                  // 0  date
       idx + 1,                                                    // 1  #
@@ -348,7 +348,7 @@ function refreshMLBBetCard() {
     'model %',
     'book %',
     'ev / $1',
-    'kelly $',
+    'stake $',
     'proj',
     'proj − line',
     'flags',

@@ -250,12 +250,23 @@ function gradeMLBPendingResults_() {
       continue;
     }
 
+    const stake = row[24];
+    const odds = row[8];
+
+    function writePnl(result) {
+      const pnl = mlbPnlFromResult_(result, stake, odds);
+      if (stake !== '' && stake != null && !isNaN(parseFloat(stake))) {
+        logSh.getRange(4 + i, 26).setValue(pnl);
+      }
+    }
+
     if (isK) {
       const kActual = mlbPitcherKsFromBoxscore_(box, pid);
       if (kActual === null) {
         logSh.getRange(4 + i, 16).setValue('');
         logSh.getRange(4 + i, 17).setValue('VOID');
         logSh.getRange(4 + i, 18).setValue('No pitching line (DNP / bullpen-only?)');
+        writePnl('VOID');
         graded++;
         continue;
       }
@@ -266,6 +277,7 @@ function gradeMLBPendingResults_() {
       logSh.getRange(4 + i, 16).setValue(kActual);
       logSh.getRange(4 + i, 17).setValue(g.result);
       logSh.getRange(4 + i, 18).setValue('statsapi boxscore · ' + g.note);
+      writePnl(g.result);
       graded++;
       continue;
     }
@@ -276,6 +288,7 @@ function gradeMLBPendingResults_() {
         logSh.getRange(4 + i, 16).setValue('');
         logSh.getRange(4 + i, 17).setValue('VOID');
         logSh.getRange(4 + i, 18).setValue('No batting line (DNP?)');
+        writePnl('VOID');
         graded++;
         continue;
       }
@@ -286,6 +299,7 @@ function gradeMLBPendingResults_() {
       logSh.getRange(4 + i, 16).setValue(tbActual);
       logSh.getRange(4 + i, 17).setValue(gt.result);
       logSh.getRange(4 + i, 18).setValue('statsapi boxscore TB · ' + gt.note);
+      writePnl(gt.result);
       graded++;
       continue;
     }
@@ -295,6 +309,7 @@ function gradeMLBPendingResults_() {
       logSh.getRange(4 + i, 16).setValue('');
       logSh.getRange(4 + i, 17).setValue('VOID');
       logSh.getRange(4 + i, 18).setValue('No batting line (DNP?)');
+      writePnl('VOID');
       graded++;
       continue;
     }
@@ -305,6 +320,7 @@ function gradeMLBPendingResults_() {
     logSh.getRange(4 + i, 16).setValue(hActual);
     logSh.getRange(4 + i, 17).setValue(gh.result);
     logSh.getRange(4 + i, 18).setValue('statsapi boxscore H · ' + gh.note);
+    writePnl(gh.result);
     graded++;
   }
 

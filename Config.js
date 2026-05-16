@@ -79,8 +79,15 @@ function buildConfigTab() {
     '0..1 blend of last-7 games TB/game vs season TB/game for 🎲 Batter_TB_Card λ (same spirit as K9_BLEND). Tune after slates.'
   );
   row_('MIN_EV_BET_CARD', '0', 'Min EV per $1 on 🃏 card; 0 = any positive EV (any edge). Optional floor: try ~0.02–0.05 vs 0 to drop thin lines; iterate after several slates using Pipeline_Log and 🃏 outcomes. If this key is missing, re-run menu "0. Build Config tab".');
-  row_('BANKROLL', '1000', 'Bankroll in $ for Kelly stake column on 🃏 card. Edit to your actual roll. If missing, re-run "0. Build Config tab".');
-  row_('KELLY_FRACTION', '0.25', 'Fractional-Kelly multiplier (0..1). Default 0.25 = quarter-Kelly. Full-Kelly (1) is aggressive; quarter or half is conservative.');
+  row_('BANKROLL', '500', 'Bankroll in $ for Kelly stake column on 🃏 card. Default $500 = max bet $7.50 ≈ 1.5% of roll. Edit to your actual roll as it grows.');
+  row_('KELLY_FRACTION', '0.25', 'Fractional-Kelly multiplier (0..1). Default 0.25 = quarter-Kelly (conservative, survives model overconfidence). Full-Kelly (1) is aggressive.');
+  row_('STAKE_TIER_1_USD', '2.50', '1u stake size in $. With $7.50 cap and 1:2:3 ladder → 1u/2u/3u = $2.50/$5/$7.50.');
+  row_('STAKE_TIER_2_USD', '5.00', '2u stake size in $. Edit together with TIER_1 / TIER_3 as your cap grows.');
+  row_('STAKE_TIER_3_USD', '7.50', '3u stake size in $ — your effective max bet. Raise as bankroll grows and your model proves +EV.');
+  row_('STAKE_TIER_1_KELLY_PCT', '0.5', 'Kelly% of bankroll → 1u tier. Default 0.5%: if quarter-Kelly says risk ≥0.5% of roll, place 1u. Below this floor → no bet.');
+  row_('STAKE_TIER_2_KELLY_PCT', '1.0', 'Kelly% of bankroll → 2u tier. Default 1.0%.');
+  row_('STAKE_TIER_3_KELLY_PCT', '1.5', 'Kelly% of bankroll → 3u tier. Default 1.5%: any Kelly recommendation ≥1.5% of roll is a max-bet conviction play.');
+  row_('LEGACY_UNIT_USD', '2.50', 'Flat $ assumed for pre-tier historical bets when running "Backfill historical stakes". Set to what you were actually averaging before the Kelly system.');
   row_('HP_UMP_LAMBDA_MULT', '1', 'Multiply 🎰 λ when hp_umpire listed (1=no change; try 1.02–1.05 cautiously)');
   row_('LHP_K_LAMBDA_MULT', '1', 'Extra λ mult when pitcher throws L (1=no change)');
   row_('RHP_K_LAMBDA_MULT', '1', 'Extra λ mult when pitcher throws R (1=no change)');
