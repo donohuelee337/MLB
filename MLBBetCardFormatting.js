@@ -48,23 +48,82 @@ function mlbGradePlay_(ev, american) {
 }
 
 /**
- * Fractional-Kelly stake in dollars at this American price for the model
- * probability. f* = (p*b - q)/b where b = decimal-odds-minus-one.
- * Returns 0 if EV <= 0; '' if inputs invalid.
+ * American odds → profit-per-$1 (decimal odds minus 1). +100 → 1, -110 → 0.909.
  */
-function mlbKellyStake_(p, american, bankroll, fraction) {
+function mlbAmericanToB_(american) {
+  const o = parseFloat(String(american));
+  if (isNaN(o) || o === 0) return NaN;
+  return o > 0 ? o / 100 : 100 / Math.abs(o);
+}
+
+/**
+ * Raw fractional-Kelly fraction of bankroll for (p, american, fraction).
+ * Returns 0 when no edge / inputs bad. Output range [0..1].
+ */
+function mlbKellyFraction_(p, american, fraction) {
   const pn = parseFloat(String(p));
-  const o  = parseFloat(String(american));
-  const bk = parseFloat(String(bankroll));
+  const b  = mlbAmericanToB_(american);
   const fr = parseFloat(String(fraction));
-  if (isNaN(pn) || isNaN(o) || isNaN(bk) || bk <= 0) return '';
+  if (isNaN(pn) || isNaN(b) || b <= 0) return 0;
   const frac = !isNaN(fr) && fr > 0 ? Math.min(1, fr) : 0.25;
-  const b = o > 0 ? o / 100 : 100 / Math.abs(o);
-  if (b <= 0) return '';
   const q = 1 - pn;
   const fStar = (pn * b - q) / b;
   if (!isFinite(fStar) || fStar <= 0) return 0;
-  return Math.round(bk * frac * fStar);
+  return frac * fStar;
+}
+
+/**
+ * Read tier-staking config with sane defaults. Pulled once per card build.
+ * Falls back to a $2.50/$5/$7.50 ladder anchored at 0.5/1.0/1.5% of bankroll.
+ */
+function mlbStakeTiersFromConfig_(cfg) {
+  function num(k, dflt) {
+    const v = parseFloat(String(cfg && cfg[k] != null ? cfg[k] : '').trim(), 10);
+    return isNaN(v) ? dflt : v;
+  }
+  return {
+    bankroll: num('BANKROLL', 500),
+    kellyFraction: num('KELLY_FRACTION', 0.25),
+    tier1Usd: num('STAKE_TIER_1_USD', 2.50),
+    tier2Usd: num('STAKE_TIER_2_USD', 5.00),
+    tier3Usd: num('STAKE_TIER_3_USD', 7.50),
+    tier1Pct: num('STAKE_TIER_1_KELLY_PCT', 0.5) / 100,
+    tier2Pct: num('STAKE_TIER_2_KELLY_PCT', 1.0) / 100,
+    tier3Pct: num('STAKE_TIER_3_KELLY_PCT', 1.5) / 100,
+  };
+}
+
+/**
+ * Tier ladder: map Kelly-fraction-of-bankroll → {tier, stake}.
+ * tier ∈ {0=skip, 1, 2, 3}; stake ∈ {0, TIER_1_USD, TIER_2_USD, TIER_3_USD}.
+ * Kelly is the conviction signal; tier $ is the actual amount placed,
+ * which is capped by your sportsbook max (TIER_3_USD = $7.50 by default).
+ */
+function mlbStakeFromKellyFraction_(kellyFrac, tiers) {
+  if (!isFinite(kellyFrac) || kellyFrac <= 0) return { tier: 0, stake: 0 };
+  if (kellyFrac >= tiers.tier3Pct) return { tier: 3, stake: tiers.tier3Usd };
+  if (kellyFrac >= tiers.tier2Pct) return { tier: 2, stake: tiers.tier2Usd };
+  if (kellyFrac >= tiers.tier1Pct) return { tier: 1, stake: tiers.tier1Usd };
+  return { tier: 0, stake: 0 };
+}
+
+/**
+ * Tier-aware stake in $ at this American price for the model probability.
+ * Kelly conviction → 1u / 2u / 3u ladder ($2.50 / $5 / $7.50 default).
+ * Returns 0 if Kelly says edge is below the 1u floor.
+ * Returns '' if inputs invalid (preserves blank cells on the card).
+ *
+ * Back-compat: 3rd/4th args are accepted for legacy callers but ignored
+ * when a `cfg` is passed via the 5th arg; tiers always come from Config now.
+ */
+function mlbKellyStake_(p, american, bankroll, fraction, cfg) {
+  const pn = parseFloat(String(p));
+  const o  = parseFloat(String(american));
+  if (isNaN(pn) || isNaN(o)) return '';
+  const tiers = mlbStakeTiersFromConfig_(cfg || getConfig());
+  const frac  = mlbKellyFraction_(pn, o, tiers.kellyFraction);
+  const tier  = mlbStakeFromKellyFraction_(frac, tiers);
+  return tier.stake;
 }
 
 /** gamePk → { iso, hhmm } map from the 📅 MLB_Schedule tab (gameDateRaw at col 3). */
@@ -157,7 +216,7 @@ function mlbApplyBetCardFormatting_(sh, rows, headers, slateDate) {
   sh.getRange(4, 12, rows.length, 1).setNumberFormat('0.0%').setHorizontalAlignment('right');      // model %
   sh.getRange(4, 13, rows.length, 1).setNumberFormat('0.0%').setHorizontalAlignment('right');      // book %
   sh.getRange(4, 14, rows.length, 1).setNumberFormat('+0.000;-0.000').setHorizontalAlignment('right'); // ev
-  sh.getRange(4, 15, rows.length, 1).setNumberFormat('$0').setHorizontalAlignment('right');        // kelly
+  sh.getRange(4, 15, rows.length, 1).setNumberFormat('$0.00').setHorizontalAlignment('right');    // stake (1u/2u/3u $)
   sh.getRange(4, 16, rows.length, 1).setNumberFormat('0.00').setHorizontalAlignment('right');      // proj
   sh.getRange(4, 17, rows.length, 1).setNumberFormat('+0.00;-0.00').setHorizontalAlignment('right'); // proj−line
   sh.getRange(4,  9, rows.length, 1).setHorizontalAlignment('center');                              // side
@@ -270,13 +329,13 @@ function mlbAppendBetTrackerSection_(ss, sh, startRow, slateDate) {
   ];
   const windows = ['yesterday', 'last7', 'last30', 'lifetime'];
 
-  // stats[marketKey][window][bucketLabel] = { w, l, p }
+  // stats[marketKey][window][bucketLabel] = { w, l, p, staked, pnl }
   const stats = {};
   markets.forEach(function (m) {
     stats[m.key] = {};
     windows.forEach(function (w) {
       stats[m.key][w] = {};
-      buckets.forEach(function (b) { stats[m.key][w][b.label] = { w: 0, l: 0, p: 0 }; });
+      buckets.forEach(function (b) { stats[m.key][w][b.label] = { w: 0, l: 0, p: 0, staked: 0, pnl: 0 }; });
     });
   });
 
@@ -301,11 +360,16 @@ function mlbAppendBetTrackerSection_(ss, sh, startRow, slateDate) {
     }
     if (!bKey) return;
 
+    const stake = parseFloat(String(row[24]));
+    const pnl   = parseFloat(String(row[25]));
+
     function bump(w) {
       const s = stats[mKey][w][bKey];
       if      (result === 'WIN')  s.w++;
       else if (result === 'LOSS') s.l++;
       else                        s.p++;
+      if (!isNaN(stake) && stake > 0) s.staked += stake;
+      if (!isNaN(pnl))                s.pnl    += pnl;
     }
     if (slate === yest)   bump('yesterday');
     if (slate >= cut7)    bump('last7');
@@ -316,7 +380,14 @@ function mlbAppendBetTrackerSection_(ss, sh, startRow, slateDate) {
   function fmtCell(s) {
     const n = s.w + s.l;
     if (n === 0) return '—';
-    return s.w + '-' + s.l + '  ' + Math.round((s.w / n) * 100) + '%';
+    const hitPct = Math.round((s.w / n) * 100);
+    // Two compact lines so it fits the narrow window cells (36–64px) with wrap.
+    const top = s.w + '-' + s.l + ' ' + hitPct + '%';
+    if (s.staked <= 0) return top;
+    const roi    = (s.pnl / s.staked) * 100;
+    const pnlStr = (s.pnl >= 0 ? '+$' : '-$') + Math.abs(s.pnl).toFixed(0);
+    const roiStr = (roi  >= 0 ? '+' : '') + roi.toFixed(0) + '%';
+    return top + '\n' + pnlStr + ' ' + roiStr;
   }
 
   let r = startRow;
@@ -365,7 +436,12 @@ function mlbAppendBetTrackerSection_(ss, sh, startRow, slateDate) {
     // Bucket rows
     buckets.forEach(function (b) {
       const cells = [b.label];
-      windows.forEach(function (w) { cells.push(fmtCell(stats[m.key][w][b.label])); });
+      let hasPnl = false;
+      windows.forEach(function (w) {
+        const v = fmtCell(stats[m.key][w][b.label]);
+        if (v.indexOf('\n') !== -1) hasPnl = true;
+        cells.push(v);
+      });
       sh.getRange(r, 1, 1, ncol).setBackground(MLB_BC_PAPER);
       sh.getRange(r, 1, 1, 5)
         .setValues([cells])
@@ -380,10 +456,36 @@ function mlbAppendBetTrackerSection_(ss, sh, startRow, slateDate) {
         .setFontStyle('italic')
         .setHorizontalAlignment('right')
         .setFontColor(MLB_BC_INK_SOFT);
-      sh.getRange(r, 2, 1, 4).setFontFamily(MLB_BC_NUM_FONT).setFontSize(9.5);
-      sh.setRowHeight(r, 20);
+      sh.getRange(r, 2, 1, 4).setFontFamily(MLB_BC_NUM_FONT).setFontSize(9).setWrap(true);
+      sh.setRowHeight(r, hasPnl ? 32 : 20);
       r++;
     });
+
+    // Totals row across all buckets ≥50% — the headline $ P/L for this market.
+    const totalsCells = ['TOTAL'];
+    let anyTotalStake = false;
+    windows.forEach(function (w) {
+      let tw = 0, tl = 0, tp = 0, tstake = 0, tpnl = 0;
+      buckets.forEach(function (b) {
+        const s = stats[m.key][w][b.label];
+        tw += s.w; tl += s.l; tp += s.p; tstake += s.staked; tpnl += s.pnl;
+      });
+      if (tstake > 0) anyTotalStake = true;
+      totalsCells.push(fmtCell({ w: tw, l: tl, p: tp, staked: tstake, pnl: tpnl }));
+    });
+    sh.getRange(r, 1, 1, ncol).setBackground(MLB_BC_PAPER_ALT);
+    sh.getRange(r, 1, 1, 5)
+      .setValues([totalsCells])
+      .setFontFamily(MLB_BC_BODY_FONT)
+      .setFontSize(10)
+      .setFontColor(MLB_BC_INK)
+      .setBackground(MLB_BC_PAPER_ALT)
+      .setHorizontalAlignment('center')
+      .setVerticalAlignment('middle');
+    sh.getRange(r, 1).setFontWeight('bold').setHorizontalAlignment('right');
+    sh.getRange(r, 2, 1, 4).setFontFamily(MLB_BC_NUM_FONT).setFontSize(9).setFontWeight('bold').setWrap(true);
+    sh.setRowHeight(r, anyTotalStake ? 32 : 20);
+    r++;
 
     // Spacer between markets
     sh.getRange(r, 1, 1, ncol).setBackground(MLB_BC_PAPER);

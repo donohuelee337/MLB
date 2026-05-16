@@ -27,6 +27,7 @@ function onOpen() {
     .addItem('🃏 MLB Bet Card only (final plays)', 'refreshMLBBetCard')
     .addItem('📊 Grade pending MLB results (boxscore)', 'gradeMLBPendingResults_')
     .addItem('📈 Backfill closing K (Results Log)', 'mlbBackfillClosingMenu_')
+    .addItem('💵 Backfill historical stake + P/L (legacy unit)', 'mlbBackfillStakesMenu_')
     .addItem('📋 Open Pipeline Log', 'mlbActivatePipelineLog_')
     .addSeparator()
     .addSubMenu(
@@ -73,6 +74,11 @@ function mlbBackfillClosingMenu_() {
   try {
     ss.toast('Results log: updated ' + n + ' row(s) from FanDuel K tab', 'MLB-BOIZ', 7);
   } catch (e) {}
+}
+
+/** Menu: fill blank stake $ at LEGACY_UNIT_USD + (re)compute pnl $ for graded rows. */
+function mlbBackfillStakesMenu_() {
+  mlbBackfillHistoricalStakes_();
 }
 
 /**
