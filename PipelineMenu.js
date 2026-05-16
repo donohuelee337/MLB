@@ -28,6 +28,7 @@ function onOpen() {
     .addItem('📊 Grade pending MLB results (boxscore)', 'gradeMLBPendingResults_')
     .addItem('📈 Backfill closing K (Results Log)', 'mlbBackfillClosingMenu_')
     .addItem('📋 Open Pipeline Log', 'mlbActivatePipelineLog_')
+    .addItem('🩺 HR + Grand Slam tab diagnostic', 'runHRSlamDiagnostic')
     .addSeparator()
     .addSubMenu(
       SpreadsheetApp.getUi()
