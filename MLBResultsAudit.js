@@ -598,3 +598,26 @@ function mlbSpotCheckResults_() {
     ss.toast('✓ Spot-check: ' + sample.length + ' rows verified, 0 mismatches', 'MLB-BOIZ', 6);
   }
 }
+
+/** Menu entry: run audit + rebuild dashboard (no re-grading). */
+function mlbRunAuditFromMenu_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var result = mlbRunResultsAudit_(ss);
+  mlbBuildAuditDashboard_(ss, result);
+  if (result.total > 0) {
+    ss.toast('Audit complete: ' + result.total + ' flag(s) found — see 📊 Results_Audit', 'MLB-BOIZ', 7);
+  } else {
+    ss.toast('Audit complete: no flags — all clear ✓', 'MLB-BOIZ', 5);
+  }
+}
+
+/** Menu entry: navigate to audit tab. */
+function mlbActivateAuditTab_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(MLB_AUDIT_TAB);
+  if (!sh) {
+    mlbRunAuditFromMenu_();
+    sh = ss.getSheetByName(MLB_AUDIT_TAB);
+  }
+  if (sh) sh.activate();
+}

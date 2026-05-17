@@ -356,4 +356,12 @@ function gradeMLBPendingResults_() {
       ss.toast('Graded ' + graded + ' MLB result row(s)', 'MLB-BOIZ', 6);
     } catch (e) {}
   }
+
+  // Trigger audit after grading
+  try {
+    var auditResult = mlbRunResultsAudit_(ss);
+    mlbBuildAuditDashboard_(ss, auditResult);
+  } catch (e) {
+    Logger.log('Audit after grading failed: ' + e.message);
+  }
 }

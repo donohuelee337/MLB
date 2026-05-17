@@ -131,6 +131,8 @@ function buildConfigTab() {
     '',
     'Public CSV: columns team_id + abs_k_mult (or abbr + factor). Example row: 121,1.02 — loads per-team λ mult when SAVANT_INGEST_ENABLED is true.'
   );
+  row_('AUDIT_SPOT_CHECK_N', '10', 'Number of random rows to re-grade during spot-check audit');
+  row_('AUDIT_STALE_PENDING_HOURS', '48', 'Hours after slate before a PENDING row is flagged as stale');
   ss.getNamedRanges().forEach(function (nr) {
     if (nr.getName() === 'CONFIG') nr.remove();
   });

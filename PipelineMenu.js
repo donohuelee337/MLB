@@ -55,6 +55,10 @@ function onOpen() {
         .addItem('🔬 Refresh HR promo feature-ablation', 'refreshHrPromoFeatureAblation')
         .addItem('🔬 Open HR promo ablation tab', 'mlbActivateHrPromoAblationTab_')
     )
+    .addSeparator()
+      .addItem('📊 Audit Results', 'mlbRunAuditFromMenu_')
+      .addItem('📊 Verify Random Sample', 'mlbSpotCheckResults_')
+      .addItem('📊 Open Results Audit', 'mlbActivateAuditTab_')
     .addToUi();
 }
 
