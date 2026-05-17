@@ -262,6 +262,15 @@ function gradeMLBPendingResults_() {
 
     if (isK) {
       const kActual = mlbPitcherKsFromBoxscore_(box, pid);
+      if (kActual !== null) {
+        mlbWriteBoxscoreCache_({
+          ss: ss, slate: slateStr, gamePk: gamePk, playerId: pid,
+          playerName: player, market: 'K', actualStat: kActual,
+          gameStatus: mlbBoxscoreIsFinal_(box) ? 'Final' : 'In Progress',
+          ip: '', k: kActual, h: '', ab: '', tb: '', hr: '', bb: '',
+          source: 'grader',
+        });
+      }
       if (kActual === null) {
         logSh.getRange(4 + i, 16).setValue('');
         logSh.getRange(4 + i, 17).setValue('VOID');
@@ -284,6 +293,15 @@ function gradeMLBPendingResults_() {
 
     if (isTb) {
       const tbActual = mlbBatterTbFromBoxscore_(box, pid);
+      if (tbActual !== null) {
+        mlbWriteBoxscoreCache_({
+          ss: ss, slate: slateStr, gamePk: gamePk, playerId: pid,
+          playerName: player, market: 'TB', actualStat: tbActual,
+          gameStatus: mlbBoxscoreIsFinal_(box) ? 'Final' : 'In Progress',
+          ip: '', k: '', h: '', ab: '', tb: tbActual, hr: '', bb: '',
+          source: 'grader',
+        });
+      }
       if (tbActual === null) {
         logSh.getRange(4 + i, 16).setValue('');
         logSh.getRange(4 + i, 17).setValue('VOID');
@@ -305,6 +323,15 @@ function gradeMLBPendingResults_() {
     }
 
     const hActual = mlbBatterHitsFromBoxscore_(box, pid);
+    if (hActual !== null) {
+      mlbWriteBoxscoreCache_({
+        ss: ss, slate: slateStr, gamePk: gamePk, playerId: pid,
+        playerName: player, market: 'Hits', actualStat: hActual,
+        gameStatus: mlbBoxscoreIsFinal_(box) ? 'Final' : 'In Progress',
+        ip: '', k: '', h: hActual, ab: '', tb: '', hr: '', bb: '',
+        source: 'grader',
+      });
+    }
     if (hActual === null) {
       logSh.getRange(4 + i, 16).setValue('');
       logSh.getRange(4 + i, 17).setValue('VOID');
