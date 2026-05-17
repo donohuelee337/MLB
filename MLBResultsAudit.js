@@ -259,3 +259,209 @@ function mlbRunResultsAudit_(ss) {
 
   return { total: totalFlags, byRule: byRule };
 }
+
+/**
+ * Build/rebuild the 📊 Results_Audit dashboard tab.
+ * Panels: A (summary), B (win rate by market × window), C (anomaly log), D (calibration).
+ */
+function mlbBuildAuditDashboard_(ss, auditResult) {
+  ss = ss || SpreadsheetApp.getActiveSpreadsheet();
+  var tz = Session.getScriptTimeZone();
+  var today = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+
+  var sh = ss.getSheetByName(MLB_AUDIT_TAB);
+  if (sh) { sh.clearContents(); sh.clearFormats(); }
+  else { sh = ss.insertSheet(MLB_AUDIT_TAB); sh.setTabColor('#1565C0'); }
+
+  sh.getRange(1, 1, 1, 8).merge()
+    .setValue('📊 MLB-BOIZ Results Audit — ' + today)
+    .setFontWeight('bold').setBackground('#1565C0').setFontColor('#ffffff');
+
+  var logSh = ss.getSheetByName(MLB_RESULTS_LOG_TAB);
+  if (!logSh || logSh.getLastRow() < 4) {
+    sh.getRange(4, 1).setValue('No results log data found.');
+    return;
+  }
+  var ncol = Math.max(MLB_RESULTS_LOG_NCOL, 28);
+  var data = logSh.getRange(4, 1, logSh.getLastRow() - 3, ncol).getValues();
+
+  var todayD = new Date(today + 'T12:00:00');
+  function ymd(offset) { return Utilities.formatDate(new Date(todayD.getTime() + offset * 86400000), tz, 'yyyy-MM-dd'); }
+  var yest = ymd(-1);
+  var cut7 = ymd(-7);
+  var cut14 = ymd(-14);
+  var cut30 = ymd(-30);
+
+  var markets = ['K', 'Hits', 'TB'];
+  function marketOf(m) {
+    m = String(m || '').toLowerCase();
+    if (m.indexOf('strikeout') !== -1) return 'K';
+    if (m.indexOf('batter hit') !== -1) return 'Hits';
+    if (m.indexOf('total base') !== -1) return 'TB';
+    return '';
+  }
+
+  var stats = {};
+  markets.forEach(function (mk) {
+    stats[mk] = { total: 0, graded: 0, pending: 0, flags: 0 };
+    ['yesterday', 'L7', 'L14', 'L30', 'season'].forEach(function (w) {
+      stats[mk][w] = { w: 0, l: 0, p: 0, v: 0, pnl: 0, staked: 0, evSum: 0, modelPSum: 0, n: 0 };
+    });
+  });
+
+  data.forEach(function (row) {
+    var mk = marketOf(row[5]);
+    if (!mk) return;
+    stats[mk].total++;
+    var result = String(row[16] || '').trim().toUpperCase();
+    if (result === 'WIN' || result === 'LOSS' || result === 'PUSH' || result === 'VOID') {
+      stats[mk].graded++;
+    } else {
+      stats[mk].pending++;
+    }
+    var flagCol = String(row[27] || '').trim();
+    if (flagCol) stats[mk].flags++;
+
+    var slate = row[1] instanceof Date
+      ? Utilities.formatDate(row[1], tz, 'yyyy-MM-dd')
+      : String(row[1] || '').trim();
+    if (!slate || slate >= today) return;
+    if (result !== 'WIN' && result !== 'LOSS' && result !== 'PUSH') return;
+
+    var stk = parseFloat(String(row[24]));
+    var pnlVal = parseFloat(String(row[25]));
+    var ev = parseFloat(String(row[10]));
+    var mp = parseFloat(String(row[9]));
+
+    function bump(w) {
+      var s = stats[mk][w];
+      if (result === 'WIN') s.w++;
+      else if (result === 'LOSS') s.l++;
+      else s.p++;
+      if (!isNaN(stk) && stk > 0) s.staked += stk;
+      if (!isNaN(pnlVal)) s.pnl += pnlVal;
+      if (!isNaN(ev)) s.evSum += ev;
+      if (!isNaN(mp)) { s.modelPSum += mp; s.n++; }
+    }
+    if (slate === yest) bump('yesterday');
+    if (slate >= cut7) bump('L7');
+    if (slate >= cut14) bump('L14');
+    if (slate >= cut30) bump('L30');
+    bump('season');
+  });
+
+  // --- Panel A: Summary Stats ---
+  var r = 3;
+  sh.getRange(r, 1, 1, 6).setValues([['Metric', 'K', 'Hits', 'TB', 'All', '']])
+    .setFontWeight('bold').setBackground('#37474f').setFontColor('#ffffff');
+  r++;
+  var allTot = 0, allGr = 0, allPend = 0, allFlags = 0;
+  markets.forEach(function (mk) { allTot += stats[mk].total; allGr += stats[mk].graded; allPend += stats[mk].pending; allFlags += stats[mk].flags; });
+  var panelA = [
+    ['Total logged', stats.K.total, stats.Hits.total, stats.TB.total, allTot],
+    ['Graded (W/L/P/V)', stats.K.graded, stats.Hits.graded, stats.TB.graded, allGr],
+    ['Still PENDING', stats.K.pending, stats.Hits.pending, stats.TB.pending, allPend],
+    ['Resolution rate %',
+      stats.K.total ? Math.round((stats.K.graded / stats.K.total) * 100) + '%' : '—',
+      stats.Hits.total ? Math.round((stats.Hits.graded / stats.Hits.total) * 100) + '%' : '—',
+      stats.TB.total ? Math.round((stats.TB.graded / stats.TB.total) * 100) + '%' : '—',
+      allTot ? Math.round((allGr / allTot) * 100) + '%' : '—'],
+    ['Audit flags', stats.K.flags, stats.Hits.flags, stats.TB.flags, allFlags],
+  ];
+  sh.getRange(r, 1, panelA.length, 5).setValues(panelA);
+  r += panelA.length + 2;
+
+  // --- Panel B: Win Rate by Market × Window ---
+  sh.getRange(r, 1, 1, 7).setValues([['Market', 'Yesterday', 'L7', 'L14', 'L30', 'Season', '']])
+    .setFontWeight('bold').setBackground('#37474f').setFontColor('#ffffff');
+  r++;
+  var winLabels = ['yesterday', 'L7', 'L14', 'L30', 'season'];
+  markets.forEach(function (mk) {
+    function cell(w) {
+      var s = stats[mk][w];
+      var n = s.w + s.l;
+      if (n === 0) return '—';
+      var hitPct = Math.round((s.w / n) * 100);
+      var roi = s.staked > 0 ? Math.round((s.pnl / s.staked) * 100) : 0;
+      var avgEv = s.n > 0 ? (s.evSum / s.n).toFixed(3) : '—';
+      var avgMp = s.n > 0 ? Math.round((s.modelPSum / s.n) * 100) : '—';
+      return s.w + '-' + s.l + ' ' + hitPct + '% | $' + s.pnl.toFixed(0) + ' ' + roi + '% ROI | avgEV ' + avgEv + ' | model ' + avgMp + '% vs actual ' + hitPct + '%';
+    }
+    var cells = [mk];
+    winLabels.forEach(function (w) { cells.push(cell(w)); });
+    cells.push('');
+    sh.getRange(r, 1, 1, 7).setValues([cells]);
+    r++;
+  });
+  r += 2;
+
+  // --- Panel C: Anomaly Log ---
+  sh.getRange(r, 1).setValue('Active Audit Flags').setFontWeight('bold');
+  r++;
+  sh.getRange(r, 1, 1, 5).setValues([['Slate', 'Player', 'Market', 'Flag', 'gamePk']])
+    .setFontWeight('bold').setBackground('#455a64').setFontColor('#ffffff');
+  r++;
+  var anomRows = [];
+  data.forEach(function (row) {
+    var f = String(row[27] || '').trim();
+    if (!f) return;
+    var slate = row[1] instanceof Date ? Utilities.formatDate(row[1], tz, 'yyyy-MM-dd') : String(row[1] || '');
+    anomRows.push([slate, String(row[3] || ''), String(row[5] || ''), f, row[13] || '']);
+  });
+  anomRows.sort(function (a, b) { return a[0] > b[0] ? -1 : a[0] < b[0] ? 1 : 0; });
+  if (anomRows.length > 0) {
+    sh.getRange(r, 1, anomRows.length, 5).setValues(anomRows);
+  } else {
+    sh.getRange(r, 1).setValue('No flags — all clear ✓');
+  }
+  r += Math.max(anomRows.length, 1) + 2;
+
+  // --- Panel D: Calibration Plot Data ---
+  sh.getRange(r, 1).setValue('Calibration: Model P(Win) vs Actual Hit Rate').setFontWeight('bold');
+  r++;
+  sh.getRange(r, 1, 1, 5).setValues([['Model P bucket', 'Predicted %', 'Actual %', 'N', 'Confidence ±']])
+    .setFontWeight('bold').setBackground('#1b5e20').setFontColor('#ffffff');
+  r++;
+
+  var calBuckets = [
+    { lo: 0.60, hi: 0.65 }, { lo: 0.65, hi: 0.70 }, { lo: 0.70, hi: 0.75 },
+    { lo: 0.75, hi: 0.80 }, { lo: 0.80, hi: 0.85 }, { lo: 0.85, hi: 0.90 },
+    { lo: 0.90, hi: 1.01 },
+  ];
+  var calStats = calBuckets.map(function () { return { w: 0, n: 0 }; });
+
+  data.forEach(function (row) {
+    var result = String(row[16] || '').trim().toUpperCase();
+    if (result !== 'WIN' && result !== 'LOSS') return;
+    var mp = parseFloat(String(row[9]));
+    if (isNaN(mp) || mp < 0.60) return;
+    for (var b = 0; b < calBuckets.length; b++) {
+      if (mp >= calBuckets[b].lo && mp < calBuckets[b].hi) {
+        calStats[b].n++;
+        if (result === 'WIN') calStats[b].w++;
+        break;
+      }
+    }
+  });
+
+  calBuckets.forEach(function (b, idx) {
+    var s = calStats[idx];
+    var label = Math.round(b.lo * 100) + '–' + Math.round(Math.min(b.hi, 1.0) * 100) + '%';
+    var predicted = ((b.lo + Math.min(b.hi, 1.0)) / 2 * 100).toFixed(1);
+    if (s.n < 5) {
+      sh.getRange(r, 1, 1, 5).setValues([[label, predicted, 'insufficient data', s.n, '—']]);
+    } else {
+      var pHat = s.w / s.n;
+      var z = 1.96;
+      var denom = 1 + z * z / s.n;
+      var center = (pHat + z * z / (2 * s.n)) / denom;
+      var margin = z * Math.sqrt(pHat * (1 - pHat) / s.n + z * z / (4 * s.n * s.n)) / denom;
+      sh.getRange(r, 1, 1, 5).setValues([
+        [label, predicted, (pHat * 100).toFixed(1), s.n, '±' + (margin * 100).toFixed(1)]
+      ]);
+    }
+    r++;
+  });
+
+  return r;
+}
