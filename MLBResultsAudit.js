@@ -465,3 +465,136 @@ function mlbBuildAuditDashboard_(ss, auditResult) {
 
   return r;
 }
+
+/**
+ * Spot-check: re-grade N random already-graded rows from fresh boxscore data.
+ * Writes results to 📊 Results_Audit tab. Reports mismatches.
+ */
+function mlbSpotCheckResults_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var cfg = getConfig();
+  var n = parseInt(String(cfg['AUDIT_SPOT_CHECK_N'] || '10'), 10) || 10;
+  var tz = Session.getScriptTimeZone();
+  var today = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+
+  var logSh = ss.getSheetByName(MLB_RESULTS_LOG_TAB);
+  if (!logSh || logSh.getLastRow() < 4) {
+    ss.toast('No results log data for spot-check.', 'MLB-BOIZ', 5);
+    return;
+  }
+  var ncol = Math.max(MLB_RESULTS_LOG_NCOL, 28);
+  var data = logSh.getRange(4, 1, logSh.getLastRow() - 3, ncol).getValues();
+
+  var cut7 = Utilities.formatDate(new Date(new Date().getTime() - 7 * 86400000), tz, 'yyyy-MM-dd');
+  var recent = [];
+  var older = [];
+  for (var i = 0; i < data.length; i++) {
+    var result = String(data[i][16] || '').trim().toUpperCase();
+    if (result !== 'WIN' && result !== 'LOSS' && result !== 'PUSH') continue;
+    var gpk = parseInt(data[i][13], 10);
+    var pid = parseInt(data[i][14], 10);
+    if (!gpk || !pid) continue;
+    var slate = data[i][1] instanceof Date
+      ? Utilities.formatDate(data[i][1], tz, 'yyyy-MM-dd')
+      : String(data[i][1] || '').trim();
+    if (slate >= cut7) recent.push(i);
+    else older.push(i);
+  }
+
+  function shuffle(arr) {
+    for (var j = arr.length - 1; j > 0; j--) {
+      var k = Math.floor(Math.random() * (j + 1));
+      var tmp = arr[j]; arr[j] = arr[k]; arr[k] = tmp;
+    }
+    return arr;
+  }
+  shuffle(recent);
+  shuffle(older);
+  var nRecent = Math.min(Math.ceil(n * 0.7), recent.length);
+  var nOlder = Math.min(n - nRecent, older.length);
+  if (nRecent + nOlder < n) nRecent = Math.min(n - nOlder, recent.length);
+  var sample = recent.slice(0, nRecent).concat(older.slice(0, nOlder));
+
+  var results = [];
+  var mismatches = 0;
+
+  sample.forEach(function (idx) {
+    var row = data[idx];
+    var gamePk = parseInt(row[13], 10);
+    var pid = parseInt(row[14], 10);
+    var storedActual = parseFloat(String(row[15]));
+    var storedResult = String(row[16] || '').trim().toUpperCase();
+    var line = row[6];
+    var side = row[7];
+    var market = String(row[5] || '').toLowerCase();
+    var player = String(row[3] || '').trim();
+    var slate = row[1] instanceof Date
+      ? Utilities.formatDate(row[1], tz, 'yyyy-MM-dd')
+      : String(row[1] || '').trim();
+
+    var box = mlbFetchBoxscoreJson_(gamePk);
+    Utilities.sleep(150);
+    if (!box) {
+      results.push([4 + idx, slate, player, market, storedResult, 'FETCH_FAIL', '?', 'boxscore unavailable']);
+      return;
+    }
+
+    var freshStat = null;
+    var isK = market.indexOf('strikeout') !== -1;
+    var isTb = market.indexOf('total base') !== -1;
+    if (isK) freshStat = mlbPitcherKsFromBoxscore_(box, pid);
+    else if (isTb) freshStat = mlbBatterTbFromBoxscore_(box, pid);
+    else freshStat = mlbBatterHitsFromBoxscore_(box, pid);
+
+    if (freshStat === null) {
+      results.push([4 + idx, slate, player, market, storedResult, 'NULL_STAT', '?', 'no stat line in boxscore']);
+      return;
+    }
+
+    var freshGrade = mlbGradePitcherKRow_(line, side, freshStat);
+    var match = (freshStat === storedActual || parseFloat(String(freshStat)) === storedActual) &&
+                freshGrade.result === storedResult;
+
+    mlbWriteBoxscoreCache_({
+      ss: ss, slate: slate, gamePk: gamePk, playerId: pid,
+      playerName: player, market: isK ? 'K' : isTb ? 'TB' : 'Hits',
+      actualStat: freshStat, gameStatus: mlbBoxscoreIsFinal_(box) ? 'Final' : '?',
+      ip: '', k: isK ? freshStat : '', h: (!isK && !isTb) ? freshStat : '',
+      ab: '', tb: isTb ? freshStat : '', hr: '', bb: '',
+      source: 'spot-check',
+    });
+
+    if (!match) {
+      mismatches++;
+      logSh.getRange(4 + idx, 28).setValue(
+        (String(data[idx][27] || '').trim() ? String(data[idx][27]).trim() + ' | ' : '') +
+        'AUDIT: spot-check mismatch (fresh=' + freshStat + '/' + freshGrade.result + ')'
+      );
+    }
+
+    results.push([
+      4 + idx, slate, player, market, storedResult, freshGrade.result,
+      match ? '✓' : '✗ MISMATCH',
+      match ? 'actual=' + freshStat + ' confirmed' : 'stored=' + storedActual + '/' + storedResult + ' fresh=' + freshStat + '/' + freshGrade.result,
+    ]);
+  });
+
+  var sh = ss.getSheetByName(MLB_AUDIT_TAB);
+  if (!sh) { sh = ss.insertSheet(MLB_AUDIT_TAB); sh.setTabColor('#1565C0'); }
+  var startRow = Math.max(sh.getLastRow() + 3, 4);
+  sh.getRange(startRow, 1).setValue('Spot-Check Results — ' + today + ' (N=' + sample.length + ')').setFontWeight('bold');
+  startRow++;
+  sh.getRange(startRow, 1, 1, 8)
+    .setValues([['Row#', 'Slate', 'Player', 'Market', 'Stored', 'Fresh', 'Match?', 'Note']])
+    .setFontWeight('bold').setBackground('#455a64').setFontColor('#ffffff');
+  startRow++;
+  if (results.length > 0) {
+    sh.getRange(startRow, 1, results.length, 8).setValues(results);
+  }
+
+  if (mismatches > 0) {
+    ss.toast('⚠️ Spot-check found ' + mismatches + ' mismatch(es) — see 📊 Results_Audit', 'MLB-BOIZ', 8);
+  } else {
+    ss.toast('✓ Spot-check: ' + sample.length + ' rows verified, 0 mismatches', 'MLB-BOIZ', 6);
+  }
+}
