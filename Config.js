@@ -125,6 +125,31 @@ function buildConfigTab() {
   );
   row_('OPP_K_RATE_LAMBDA_STRENGTH', '0', '0 = off. Try 0.15–0.35: scales 🎰 λ from opponent team season K% vs LEAGUE_HITTING_K_PA (whiff-heavier lineups → higher λ). Tune with Pipeline_Log.');
   row_('ABS_K_LAMBDA_MULT', '1', 'reserved for future Savant/ABS team K environment; 1 = neutral until wired.');
+  row_(
+    'BET_CARD_HOTCOLD_ENABLED',
+    'true',
+    'true|false — paint red border for HOT players (streak above L14 median) and blue border for COLD (streak below) on 🃏 MLB_Bet_Card. See MLBBetCardHotCold.js for the heuristic.'
+  );
+  row_(
+    'BET_CARD_HOTCOLD_WINDOW',
+    '14',
+    'Game-log lookback window for hot/cold median (default 14). Pitcher rows use last N starts; batter rows use last N games.'
+  );
+  row_(
+    'BET_CARD_HOTCOLD_MIN_GAMES',
+    '8',
+    'Min games inside the window required before classifying. Below this → no border tint (avoids spurious flags on call-ups / season-starts).'
+  );
+  row_(
+    'BET_CARD_HOTCOLD_L5_COUNT',
+    '5',
+    'Size of the "recent" sub-window evaluated vs the L14 median. Default 5.'
+  );
+  row_(
+    'BET_CARD_HOTCOLD_L5_THRESHOLD',
+    '4',
+    'Need at least this many of the L5 games strictly above (HOT) or below (COLD) the L14 median to fire. Default 4 of 5 = ~80% one-sided.'
+  );
   row_('SAVANT_INGEST_ENABLED', 'false', 'true | false — when true, pipeline probes SAVANT_ABS_CSV_URL (best-effort; see MLBSavantIngest.js)');
   row_(
     'SAVANT_ABS_CSV_URL',

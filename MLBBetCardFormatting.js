@@ -326,6 +326,17 @@ function mlbApplyBetCardFormatting_(sh, rows, headers, slateDate) {
     .setFontStyle('italic')
     .setFontSize(10)
     .setHorizontalAlignment('right');
+
+  // Hot/Cold L14 streakiness overlay — outer-border tint, MUST run last so
+  // it overwrites the per-row hairline borders set above. Isolated in
+  // MLBBetCardHotCold.js — see that file for the heuristic.
+  if (typeof mlbApplyBetCardHotColdBorders_ === 'function') {
+    try {
+      mlbApplyBetCardHotColdBorders_(sh, rows, (typeof getConfig === 'function' ? getConfig() : {}));
+    } catch (e) {
+      Logger.log('mlbApplyBetCardFormatting_: hot/cold overlay failed: ' + e.message);
+    }
+  }
 }
 
 /**
