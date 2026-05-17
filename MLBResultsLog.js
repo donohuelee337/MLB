@@ -344,22 +344,26 @@ function snapshotMLBBetCardToLog(windowTag) {
         logSh.getRange(hitRow, 22).setValue(betKey);
       }
       const clv = mlbClvNoteFromOpenClose_(openL, openO, line, odds, side);
-      logSh.getRange(hitRow, 1, 1, 12).setValues([
-        [
-          loggedAt,
-          slate,
-          row[1],
-          player,
-          matchup,
-          market,
-          line,
-          side,
-          odds,
-          modelProb,
-          ev,
-          window,
-        ],
-      ]);
+      // Bet Ledger Lock: freeze identity fields after first write.
+      // Only update: Logged At (1), Line (7), Odds (9), Model P (10), EV (11), Window (12)
+      var prevSlate = prev[1] instanceof Date
+        ? Utilities.formatDate(prev[1], tz, 'yyyy-MM-dd')
+        : String(prev[1] || '').trim();
+      var hasFrozenIdentity = prevSlate && String(prev[3] || '').trim();
+      if (hasFrozenIdentity) {
+        // Identity frozen — only update volatile fields
+        logSh.getRange(hitRow, 1).setValue(loggedAt);           // Logged At
+        logSh.getRange(hitRow, 7).setValue(line);               // Line (latest/closing)
+        logSh.getRange(hitRow, 9).setValue(odds);               // Odds (latest)
+        logSh.getRange(hitRow, 10).setValue(modelProb);         // Model P(Win)
+        logSh.getRange(hitRow, 11).setValue(ev);                // EV ($1)
+        logSh.getRange(hitRow, 12).setValue(window);            // Window
+      } else {
+        // First real write — set everything
+        logSh.getRange(hitRow, 1, 1, 12).setValues([
+          [loggedAt, slate, row[1], player, matchup, market, line, side, odds, modelProb, ev, window],
+        ]);
+      }
       logSh.getRange(hitRow, 13).setValue(playText);
       logSh.getRange(hitRow, 14).setValue(gamePk);
       logSh.getRange(hitRow, 15).setValue(playerId);
