@@ -77,6 +77,28 @@ function mlbScheduleMatchupForGamePk_(ss, gamePk) {
   return '';
 }
 
+/** @returns {{ matchup: string, away: string, home: string, hpUmp: string }} */
+function mlbScheduleMetaForGamePk_(ss, gamePk) {
+  const g = parseInt(gamePk, 10);
+  const empty = { matchup: '', away: '', home: '', hpUmp: '' };
+  if (!g) return empty;
+  const sh = ss.getSheetByName(MLB_SCHEDULE_TAB);
+  if (!sh || sh.getLastRow() < 4) return empty;
+  const last = sh.getLastRow();
+  const block = sh.getRange(4, 1, last, 14).getValues();
+  for (let i = 0; i < block.length; i++) {
+    if (parseInt(block[i][0], 10) === g) {
+      return {
+        matchup: String(block[i][5] || '').trim(),
+        away: String(block[i][3] || '').trim(),
+        home: String(block[i][4] || '').trim(),
+        hpUmp: String(block[i][13] || '').trim(),
+      };
+    }
+  }
+  return empty;
+}
+
 function fetchMLBScheduleForSlate() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const cfg = getConfig();
@@ -98,12 +120,14 @@ function fetchMLBScheduleForSlate() {
       const venue = g.venue && g.venue.name ? g.venue.name : '';
       const status = g.status && g.status.detailedState ? g.status.detailedState : '';
       const hp = mlbHomePlateFromScheduleGame_(g);
+      const awayAbbr = away.abbreviation || mlbAbbrFromTeamName_(away.name || '') || '';
+      const homeAbbr = home.abbreviation || mlbAbbrFromTeamName_(home.name || '') || '';
       rows.push([
         g.gamePk,
         Utilities.formatDate(new Date(g.gameDate), Session.getScriptTimeZone(), 'yyyy-MM-dd'),
         g.gameDate,
-        away.abbreviation || '',
-        home.abbreviation || '',
+        awayAbbr,
+        homeAbbr,
         (away.name || '') + ' @ ' + (home.name || ''),
         awayProb.fullName || '',
         homeProb.fullName || '',
@@ -118,6 +142,11 @@ function fetchMLBScheduleForSlate() {
     });
   });
 
+  let sh = ss.getSheetByName(MLB_SCHEDULE_TAB);
+  if (!sh) sh = ss.insertSheet(MLB_SCHEDULE_TAB);
+  sh.clearContents();
+  sh.clearFormats();
+  sh.setTabColor('#37474f');
   const headers = [
     'gamePk',
     'date',
@@ -135,30 +164,14 @@ function fetchMLBScheduleForSlate() {
     'homePlateUmpire',
     'homePlateUmpireId',
   ];
-
-  let sh = ss.getSheetByName(MLB_SCHEDULE_TAB);
-  if (!sh) sh = ss.insertSheet(MLB_SCHEDULE_TAB);
-  // clearContents/clearFormats do NOT remove merges; a stale multi-row merge on the
-  // title/header block makes setValues([headers]) see a 3-row range vs 1 data row.
-  const clearRows = Math.max(sh.getLastRow(), 3);
-  const clearCols = Math.max(sh.getLastColumn(), headers.length);
-  try {
-    sh.getRange(1, 1, clearRows, clearCols).breakApart();
-  } catch (e) {
-    Logger.log('fetchMLBScheduleForSlate breakApart: ' + e.message);
-  }
-  sh.clearContents();
-  sh.clearFormats();
-  sh.setTabColor('#37474f');
-
   sh.getRange(1, 1, 1, headers.length).merge().setValue('📅 MLB schedule — ' + dateStr).setFontWeight('bold');
   sh.getRange(3, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
+  sh.setFrozenRows(3);
   if (rows.length) {
     sh.getRange(4, 1, rows.length, headers.length).setValues(rows);
     try {
       ss.setNamedRange('MLB_SCHEDULE', sh.getRange(4, 1, rows.length, headers.length));
     } catch (e) {}
   }
-  sh.setFrozenRows(3);
   ss.toast(rows.length + ' games loaded', 'MLB Schedule', 5);
 }

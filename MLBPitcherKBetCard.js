@@ -8,6 +8,47 @@
 
 const MLB_PITCHER_K_CARD_TAB = '🎰 Pitcher_K_Card';
 
+function mlbPoissonCdf_(maxK, lambda) {
+  if (maxK < 0) return 0;
+  if (lambda <= 0) return 1;
+  let sum = 0;
+  let pmf = Math.exp(-lambda);
+  sum += pmf;
+  for (let k = 1; k <= maxK; k++) {
+    pmf *= lambda / k;
+    sum += pmf;
+    if (sum >= 0.999999 && k >= lambda) break;
+  }
+  return Math.min(1, sum);
+}
+
+function mlbProbOverUnderK_(line, lambda) {
+  const L = parseFloat(line, 10);
+  if (isNaN(L) || lambda <= 0) return { pOver: '', pUnder: '' };
+  const kMinOver = Math.floor(L) + 1;
+  const kMaxUnder = Math.floor(L + 1e-9);
+  const pOver = 1 - mlbPoissonCdf_(kMinOver - 1, lambda);
+  const pUnder = mlbPoissonCdf_(kMaxUnder, lambda);
+  return { pOver: pOver, pUnder: pUnder };
+}
+
+function mlbAmericanImplied_(odds) {
+  const o = parseFloat(odds, 10);
+  if (isNaN(o)) return '';
+  if (o > 0) return Math.round((100 / (o + 100)) * 1000) / 1000;
+  return Math.round((Math.abs(o) / (Math.abs(o) + 100)) * 1000) / 1000;
+}
+
+/** Expected profit per $1 risked at this American price (decimal odds payout style). */
+function mlbEvPerDollarRisked_(p, american) {
+  const o = parseFloat(american, 10);
+  if (isNaN(o) || isNaN(p)) return '';
+  let winUnits;
+  if (o > 0) winUnits = o / 100;
+  else winUnits = 100 / Math.abs(o);
+  return Math.round((p * winUnits - (1 - p)) * 1000) / 1000;
+}
+
 function mlbProjIpFromQueueRow_(l3ipRaw) {
   const x = parseFloat(l3ipRaw, 10);
   if (!isNaN(x) && x > 0) {
@@ -59,8 +100,8 @@ function refreshPitcherKBetCard() {
   }
 
   const last = q.getLastRow();
-  const raw = q.getRange(4, 1, last, 15).getValues();
-  const out = [];
+  const raw = q.getRange(4, 1, last, 19).getValues();
+  const rows = []; // each: { data: [25 cols], hot: 'HOT'|'COLD'|'' }
 
   raw.forEach(function (r) {
     const gamePk = r[0];
@@ -78,6 +119,10 @@ function refreshPitcherKBetCard() {
     const inj = r[12];
     const hpUmp = String(r[13] || '').trim();
     const throws = String(r[14] || '').trim();
+    const oppAbbr = String(r[15] || '').trim();
+    const oppKpaRaw = r[16];
+    const oppKpaVsRaw = r[17];
+    const hotCold = String(r[18] || '').toUpperCase();
 
     if (!String(pitcher || '').trim()) return;
 
@@ -109,6 +154,70 @@ function refreshPitcherKBetCard() {
       }
       if (Math.abs(handMult - 1) > 1e-9) {
         lamNum = Math.round(lamNum * handMult * 100) / 100;
+      }
+      const baseLeagueK = parseFloat(
+        String(cfg['LEAGUE_HITTING_K_PA'] != null ? cfg['LEAGUE_HITTING_K_PA'] : '0.225').trim(),
+        10
+      );
+      const leagueVsL = parseFloat(
+        String(cfg['LEAGUE_HITTING_K_PA_VS_L'] != null ? cfg['LEAGUE_HITTING_K_PA_VS_L'] : '').trim(),
+        10
+      );
+      const leagueVsR = parseFloat(
+        String(cfg['LEAGUE_HITTING_K_PA_VS_R'] != null ? cfg['LEAGUE_HITTING_K_PA_VS_R'] : '').trim(),
+        10
+      );
+      const oppKpaVs = parseFloat(String(oppKpaVsRaw != null ? oppKpaVsRaw : '').trim(), 10);
+      const oppKpaAll = parseFloat(String(oppKpaRaw != null ? oppKpaRaw : '').trim(), 10);
+      const usingVsHand = !isNaN(oppKpaVs) && oppKpaVs > 0;
+      const oppKpa =
+        usingVsHand ? oppKpaVs : !isNaN(oppKpaAll) && oppKpaAll > 0 ? oppKpaAll : NaN;
+      let leagueK = !isNaN(baseLeagueK) && baseLeagueK > 0 ? baseLeagueK : NaN;
+      if (usingVsHand) {
+        if (tw === 'L' && !isNaN(leagueVsL) && leagueVsL > 0) {
+          leagueK = leagueVsL;
+        } else if (tw === 'R' && !isNaN(leagueVsR) && leagueVsR > 0) {
+          leagueK = leagueVsR;
+        }
+      }
+      const oppStr = parseFloat(
+        String(cfg['OPP_K_RATE_LAMBDA_STRENGTH'] != null ? cfg['OPP_K_RATE_LAMBDA_STRENGTH'] : '0').trim(),
+        10
+      );
+      if (
+        !isNaN(lamNum) &&
+        lamNum > 0 &&
+        !isNaN(oppKpa) &&
+        oppKpa > 0 &&
+        !isNaN(leagueK) &&
+        leagueK > 0 &&
+        !isNaN(oppStr) &&
+        oppStr > 0
+      ) {
+        const ratio = oppKpa / leagueK - 1;
+        const bump = oppStr * ratio;
+        const capped = Math.max(-0.12, Math.min(0.12, bump));
+        lamNum = Math.round(lamNum * (1 + capped) * 100) / 100;
+      }
+      const oppTeamId = mlbTeamIdFromAbbr_(oppAbbr);
+      const savMult = !isNaN(oppTeamId) ? mlbGetAbsTeamLambdaMult_(oppTeamId) : null;
+      let appliedAbs = false;
+      if (!isNaN(lamNum) && lamNum > 0 && savMult != null && !isNaN(savMult) && savMult > 0) {
+        const sm = Math.max(0.92, Math.min(1.08, savMult));
+        lamNum = Math.round(lamNum * sm * 100) / 100;
+        appliedAbs = true;
+      }
+      if (!appliedAbs) {
+        const absRaw = parseFloat(
+          String(cfg['ABS_K_LAMBDA_MULT'] != null ? cfg['ABS_K_LAMBDA_MULT'] : '1').trim(),
+          10
+        );
+        if (!isNaN(lamNum) && lamNum > 0 && !isNaN(absRaw) && absRaw > 0) {
+          const am = Math.max(0.95, Math.min(1.05, absRaw));
+          if (Math.abs(am - 1) > 1e-6) {
+            lamNum = Math.round(lamNum * am * 100) / 100;
+          }
+        }
       }
       const umpMultRaw = parseFloat(
         String(cfg['HP_UMP_LAMBDA_MULT'] != null ? cfg['HP_UMP_LAMBDA_MULT'] : '1').trim(),
@@ -161,64 +270,66 @@ function refreshPitcherKBetCard() {
 
     const flags = mlbFlagsCard_(inj, notes, hasModel);
 
-    out.push([
-      gamePk,
-      matchup,
-      side,
-      pitcher,
-      line,
-      fdOver,
-      fdUnder,
-      projIp,
-      lambdaDisp,
-      edge,
-      pOver,
-      pUnder,
-      imO,
-      imU,
-      evO,
-      evU,
-      bestSide,
-      bestEv,
-      flags,
-      pitcherId,
-      hpUmp,
-      throws,
-    ]);
+    rows.push({
+      data: [
+        gamePk,
+        matchup,
+        side,
+        pitcher,
+        line,
+        fdOver,
+        fdUnder,
+        projIp,
+        lambdaDisp,
+        edge,
+        pOver,
+        pUnder,
+        imO,
+        imU,
+        evO,
+        evU,
+        bestSide,
+        bestEv,
+        flags,
+        pitcherId,
+        hpUmp,
+        throws,
+        oppAbbr,
+        oppKpaRaw === '' || oppKpaRaw == null ? '' : oppKpaRaw,
+        oppKpaVsRaw === '' || oppKpaVsRaw == null ? '' : oppKpaVsRaw,
+        hotCold,
+      ],
+      hot: hotCold,
+    });
   });
 
-  out.sort(function (a, b) {
-    const be = parseFloat(b[17], 10);
-    const ae = parseFloat(a[17], 10);
+  rows.sort(function (a, b) {
+    const be = parseFloat(b.data[17], 10);
+    const ae = parseFloat(a.data[17], 10);
     if (isNaN(be) && isNaN(ae)) return 0;
     if (isNaN(be)) return -1;
     if (isNaN(ae)) return 1;
     return be - ae;
   });
+  const out = rows.map(function (r) { return r.data; });
+  const sortedHot = rows.map(function (r) { return r.hot; });
 
   let sh = ss.getSheetByName(MLB_PITCHER_K_CARD_TAB);
   if (sh) {
-    const cr = Math.max(sh.getLastRow(), 3);
-    const cc = Math.max(sh.getLastColumn(), 22);
-    try {
-      sh.getRange(1, 1, cr, cc).breakApart();
-    } catch (e) {
-      Logger.log('refreshPitcherKBetCard breakApart: ' + e.message);
-    }
     sh.clearContents();
     sh.clearFormats();
   } else {
     sh = ss.insertSheet(MLB_PITCHER_K_CARD_TAB);
   }
   sh.setTabColor('#c62828');
-  [72, 200, 52, 150, 56, 64, 64, 52, 52, 52, 52, 52, 52, 52, 52, 52, 64, 52, 140, 88, 140, 44].forEach(function (w, i) {
+  [72, 200, 52, 150, 56, 64, 64, 52, 52, 52, 52, 52, 52, 52, 52, 52, 64, 52, 140, 88, 140, 44, 56, 72, 72, 56].forEach(function (w, i) {
     sh.setColumnWidth(i + 1, w);
   });
 
-  sh.getRange(1, 1, 1, 22)
+  sh.getRange(1, 1, 1, 26)
     .merge()
     .setValue(
-      '🎰 Pitcher K card — λ: K9 blend × park(home) × L/R (⚙️) × HP ump; EV naive. Sort: best_ev desc.'
+      '🎰 Pitcher K card — λ: K9 blend × park × L/R × opp K% (vs-hand if present) × ABS × HP ump; EV naive. Sort: best_ev desc.'
     )
     .setFontWeight('bold')
     .setBackground('#b71c1c')
@@ -250,20 +361,25 @@ function refreshPitcherKBetCard() {
     'pitcher_id',
     'hp_umpire',
     'throws',
+    'opp_abbr',
+    'opp_k_pa',
+    'opp_k_pa_vs',
+    'hot_cold',
   ];
   sh.getRange(3, 1, 1, headers.length)
     .setValues([headers])
     .setFontWeight('bold')
     .setBackground('#e53935')
     .setFontColor('#ffffff');
+  sh.setFrozenRows(3);
 
   if (out.length) {
     sh.getRange(4, 1, out.length, headers.length).setValues(out);
     try {
       ss.setNamedRange('MLB_PITCHER_K_CARD', sh.getRange(4, 1, out.length, headers.length));
     } catch (e) {}
+    mlbApplyHotColdBorders_(sh, 4, sortedHot, headers.length);
   }
-  sh.setFrozenRows(3);
 
   ss.toast(out.length + ' rows · sorted by best_ev', 'Pitcher K card', 6);
 }

@@ -103,49 +103,9 @@ function mlbParseInningsString_(s) {
 
 /**
  * @returns {Object} keyed by norm(game)||norm(player) → { pt: { Over, Under } }
- * @param {string[]} marketFilters e.g. ['pitcher_strikeouts','pitcher_strikeouts_alternate']
  */
-function mlbBuildPitcherOddsIndexForMarkets_(ss, marketFilters) {
-  const byPitcherGame = {};
-  const sh = ss.getSheetByName(MLB_ODDS_CONFIG.tabName);
-  if (!sh || sh.getLastRow() < 4) return byPitcherGame;
-  const last = sh.getLastRow();
-  const block = sh.getRange(4, 1, last, 6).getValues();
-  const want = {};
-  (marketFilters || []).forEach(function (k) {
-    const t = String(k || '').trim().toLowerCase();
-    if (t) want[t] = true;
-  });
-  for (let i = 0; i < block.length; i++) {
-    const player = block[i][0];
-    const gameLabel = block[i][1];
-    const market = String(block[i][2] || '').trim().toLowerCase();
-    const side = String(block[i][3] || '');
-    const lineRaw = block[i][4];
-    const price = block[i][5];
-    if (!want[market]) continue;
-    const g = mlbNormalizeGameLabel_(gameLabel);
-    const p = mlbNormalizePersonName_(player);
-    if (!g || !p) continue;
-    const pt = parseFloat(lineRaw);
-    if (isNaN(pt)) continue;
-    const key = g + '||' + p;
-    if (!byPitcherGame[key]) byPitcherGame[key] = {};
-    if (!byPitcherGame[key][pt]) byPitcherGame[key][pt] = {};
-    const sl = side.toLowerCase();
-    if (sl.indexOf('over') !== -1) byPitcherGame[key][pt].Over = price;
-    if (sl.indexOf('under') !== -1) byPitcherGame[key][pt].Under = price;
-  }
-  return byPitcherGame;
-}
-
-/** @param {string} marketFilter single key */
-function mlbBuildPitcherOddsIndexForMarket_(ss, marketFilter) {
-  return mlbBuildPitcherOddsIndexForMarkets_(ss, [marketFilter]);
-}
-
 function mlbBuildPitcherKOddsIndex_(ss) {
-  return mlbBuildPitcherOddsIndexForMarkets_(ss, ['pitcher_strikeouts', 'pitcher_strikeouts_alternate']);
+  return mlbBuildPersonPropOddsIndex_(ss, 'pitcher_strikeouts');
 }
 
 function mlbPickMainKPoint_(pointMap) {
@@ -189,7 +149,7 @@ function mlbLoadInjuryLookup_(ss) {
 
 function mlbPitchingLogSummary_(playerId, season) {
   const id = parseInt(playerId, 10);
-  if (!id) return { l3k: '', l3ip: '', k9: '', games: 0 };
+  if (!id) return { l3k: '', l3ip: '', k9: '', games: 0, hotCold: '' };
   const splits = mlbStatsApiGetPitchingGameSplits_(playerId, season);
   let totK = 0;
   let totIp = 0;
@@ -209,15 +169,23 @@ function mlbPitchingLogSummary_(playerId, season) {
       }
     }
     const k9 = totIp > 0 ? Math.round((totK / totIp) * 900) / 100 : '';
+    // Last-3-starts K/9 vs season K/9. Require ≥5 season starts and a full L3 with ≥6 IP
+    // total so a single short outing doesn't flip the flag.
+    let hotCold = '';
+    if (splits.length >= 5 && nL >= 3 && l3ip >= 6) {
+      const k9L3 = (l3k / l3ip) * 9;
+      hotCold = mlbHotColdFlag_(k9L3, k9);
+    }
     return {
       l3k: nL ? l3k : '',
       l3ip: nL ? Math.round(l3ip * 100) / 100 : '',
       k9: k9,
       games: splits.length,
+      hotCold: hotCold,
     };
   } catch (e) {
     Logger.log('mlbPitchingLogSummary_: ' + e.message);
-    return { l3k: '', l3ip: '', k9: '', games: 0 };
+    return { l3k: '', l3ip: '', k9: '', games: 0, hotCold: '' };
   }
 }
 
@@ -233,6 +201,7 @@ function mlbSlateSeasonYear_(cfg) {
 function refreshPitcherKSlateQueue() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   mlbResetPitchHandCache_();
+  mlbResetTeamHittingSeasonCache_();
   const cfg = getConfig();
   const season = mlbSlateSeasonYear_(cfg);
   const sch = ss.getSheetByName(MLB_SCHEDULE_TAB);
@@ -279,6 +248,7 @@ function refreshPitcherKSlateQueue() {
     ];
     sides.forEach(function (sp) {
       if (!sp.name) {
+        const oaMiss = sp.side === 'Away' ? homeAbbr : awayAbbr;
         out.push([
           gamePk,
           matchup,
@@ -294,6 +264,10 @@ function refreshPitcherKSlateQueue() {
           'no_probable_pitcher',
           '',
           hpUmp,
+          '',
+          oaMiss,
+          '',
+          '',
           '',
         ]);
         return;
@@ -311,6 +285,7 @@ function refreshPitcherKSlateQueue() {
       let l3k = '';
       let l3ip = '';
       let k9 = '';
+      let hotCold = '';
       const pidNum = parseInt(sp.pid, 10);
       if (pidNum) {
         if (!seenIds[pidNum]) {
@@ -323,6 +298,7 @@ function refreshPitcherKSlateQueue() {
         l3k = lg.l3k;
         l3ip = lg.l3ip;
         k9 = lg.k9;
+        hotCold = lg.hotCold || '';
       } else {
         note = note ? note + '; no_pitcher_id' : 'no_pitcher_id';
       }
@@ -333,6 +309,23 @@ function refreshPitcherKSlateQueue() {
       }
 
       const injSt = inj[mlbNormalizePersonName_(sp.name)] || '';
+
+      const oppAbbr = sp.side === 'Away' ? homeAbbr : awayAbbr;
+      const oppTeamId = mlbTeamIdFromAbbr_(oppAbbr);
+      let oppKpa = '';
+      let oppKpaVs = '';
+      if (!isNaN(oppTeamId)) {
+        const kpa = mlbTeamSeasonHittingKPerPa_(oppTeamId, season);
+        oppKpa = !isNaN(kpa) ? kpa : '';
+        const tw0 = String(throws || '')
+          .trim()
+          .toUpperCase()
+          .slice(0, 1);
+        if (tw0 === 'L' || tw0 === 'R') {
+          const kv = mlbTeamHittingKPerPaVsPitcherHand_(oppTeamId, season, tw0);
+          oppKpaVs = !isNaN(kv) ? kv : '';
+        }
+      }
 
       out.push([
         gamePk,
@@ -350,32 +343,31 @@ function refreshPitcherKSlateQueue() {
         injSt,
         hpUmp,
         throws,
+        oppAbbr,
+        oppKpa,
+        oppKpaVs,
+        hotCold,
       ]);
     });
   });
 
   let sh = ss.getSheetByName(MLB_PITCHER_K_QUEUE_TAB);
   if (sh) {
-    const cr = Math.max(sh.getLastRow(), 3);
-    const cc = Math.max(sh.getLastColumn(), 15);
-    try {
-      sh.getRange(1, 1, cr, cc).breakApart();
-    } catch (e) {
-      Logger.log('refreshPitcherKSlateQueue breakApart: ' + e.message);
-    }
     sh.clearContents();
     sh.clearFormats();
   } else {
     sh = ss.insertSheet(MLB_PITCHER_K_QUEUE_TAB);
   }
   sh.setTabColor('#6a1b9a');
-  [72, 220, 56, 160, 88, 56, 72, 72, 52, 52, 52, 220, 88, 140, 44].forEach(function (w, i) {
+  [72, 220, 56, 160, 88, 56, 72, 72, 52, 52, 52, 220, 88, 140, 44, 56, 72, 72, 56].forEach(function (w, i) {
     sh.setColumnWidth(i + 1, w);
   });
 
-  sh.getRange(1, 1, 1, 15)
+  sh.getRange(1, 1, 1, 19)
     .merge()
-    .setValue('📋 Pitcher K queue — FanDuel main K line + L3 / season K9 (statsapi) — season ' + season)
+    .setValue(
+      '📋 Pitcher K queue — FD K + L3/season K9 + opp SO/PA + vs-hand SO/PA + hot/cold (statsapi) — season ' + season
+    )
     .setFontWeight('bold')
     .setBackground('#4a148c')
     .setFontColor('#ffffff')
@@ -397,12 +389,17 @@ function refreshPitcherKSlateQueue() {
     'injury_status',
     'hp_umpire',
     'throws',
+    'opp_abbr',
+    'opp_k_pa',
+    'opp_k_pa_vs',
+    'hot_cold',
   ];
   sh.getRange(3, 1, 1, headers.length)
     .setValues([headers])
     .setFontWeight('bold')
     .setBackground('#7b1fa2')
     .setFontColor('#ffffff');
+  sh.setFrozenRows(3);
 
   if (out.length) {
     sh.getRange(4, 1, out.length, headers.length).setValues(out);
@@ -410,7 +407,6 @@ function refreshPitcherKSlateQueue() {
       ss.setNamedRange('MLB_PITCHER_K_QUEUE', sh.getRange(4, 1, out.length, headers.length));
     } catch (e) {}
   }
-  sh.setFrozenRows(3);
 
   ss.toast(out.length + ' starter rows', 'Pitcher K queue', 6);
 }

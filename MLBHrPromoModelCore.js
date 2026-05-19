@@ -52,8 +52,17 @@ function mlbHrPromoClamp_(x, lo, hi) {
 }
 
 /**
- * Pitcher HR environment multiplier: leagueAvg / spHr9, clamped.
- * Missing or non-positive inputs → 1.
+ * Pitcher HR environment multiplier for the BATTER's HR projection:
+ * spHr9 / leagueAvg, clamped. Multiplies into lambdaRaw alongside parkMult
+ * (matching its semantics — higher = HR-friendlier environment for the batter).
+ *
+ * REGRESSION GUARD: until 2026-05-16 this returned lg/sp (inverted). That made
+ * a 2.4 HR9 pitcher (HR-prone, batter-friendly) produce a 0.85 multiplier and
+ * the batter's HR lambda went DOWN — opposite of the multiplicative-env model
+ * the lambda formula expects. The model self-test below now asserts the
+ * correct direction; don't flip it back without flipping the test too.
+ *
+ * Missing or non-positive inputs → 1 (neutral).
  * @param {number} spHr9
  * @param {number} leagueHr9
  * @param {number} lo
@@ -63,7 +72,7 @@ function mlbHrPromoPitcherMultFromHrPer9_(spHr9, leagueHr9, lo, hi) {
   const sp = parseFloat(spHr9, 10);
   const lg = parseFloat(leagueHr9, 10);
   if (isNaN(sp) || sp <= 0 || isNaN(lg) || lg <= 0) return 1;
-  return mlbHrPromoClamp_(lg / sp, lo, hi);
+  return mlbHrPromoClamp_(sp / lg, lo, hi);
 }
 
 /**
@@ -132,7 +141,12 @@ function mlbHrPromoModelSelfTest_() {
   if (Math.abs(mlbHrPromoExpectedPaForOrder_(1, t) - 4.65) > 1e-9) throw new Error('slot1 PA');
   if (Math.abs(mlbHrPromoExpectedPaForOrder_(9, t) - 3.6) > 1e-9) throw new Error('slot9 PA');
   if (Math.abs(mlbHrPromoPitcherMultFromHrPer9_(1.2, 1.2, 0.85, 1.15) - 1) > 1e-9) throw new Error('pitcher neutral');
-  if (Math.abs(mlbHrPromoPitcherMultFromHrPer9_(2.4, 1.2, 0.85, 1.15) - 0.85) > 1e-9) throw new Error('pitcher clamp low');
+  // HR-prone pitcher (sp/lg = 2.0) should clamp to hi (1.15) so the batter's
+  // HR lambda goes UP, not down. The previous test asserted 0.85 — that was
+  // the inversion bug. See the doc on mlbHrPromoPitcherMultFromHrPer9_.
+  if (Math.abs(mlbHrPromoPitcherMultFromHrPer9_(2.4, 1.2, 0.85, 1.15) - 1.15) > 1e-9) throw new Error('pitcher clamp high (HR-prone)');
+  // HR-suppressing pitcher (sp/lg = 0.5) should clamp to lo (0.85).
+  if (Math.abs(mlbHrPromoPitcherMultFromHrPer9_(0.6, 1.2, 0.85, 1.15) - 0.85) > 1e-9) throw new Error('pitcher clamp low (HR-suppressing)');
   if (Math.abs(mlbHrPromoShrinkHrPerPa_(5, 50, 0.03, 100) - 0.1) > 1e-9) throw new Error('shrink no shrink');
   const sh0 = mlbHrPromoShrinkHrPerPa_(0, 10, 0.03, 100);
   if (Math.abs(sh0 - 0.03) > 1e-9) throw new Error('shrink all prior');

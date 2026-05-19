@@ -1,32 +1,27 @@
 // ============================================================
-// 🎰 Batter Hits card — binomial P(≥k hits) × FanDuel batter_hits
+// 🎯 Batter Hits card — binomial(estAB, BA × hits-park) vs FanDuel batter_hits
 // ============================================================
-// Model: P(≥1 hit) = 1 − (1−BA)^estAB using season BA from Stats API.
-// Uses same 22-column output format as 🎰 Pitcher_K_Card so the
-// Bet Card merge (mlbCollectPlaysFromPitcherOddsCard_) works unchanged.
-//
-// Column mapping (shared with K card):
-//  0  gamePk        8  lambda (BA×estAB)   16 best_side
-//  1  matchup       9  edge_vs_line        17 best_ev_$1
-//  2  side          10 p_over              18 flags
-//  3  batter name   11 p_under             19 batter_id
-//  4  fd_hits_line  12 implied_over        20 '' (unused)
-//  5  fd_over       13 implied_under       21 team_abbr
-//  6  fd_under      14 ev_over_$1
-//  7  est_AB        15 ev_under_$1
+// Reads 📋 Batter_Hits_Queue; pulls season BA stats from Stats API to compute
+// P(≥k hits in estAB at-bats) at the home-park hits multiplier. Writes 19
+// columns; MLBBetCard.js reads this tab as the H block.
 // ============================================================
 
-const MLB_BATTER_HITS_BINOMIAL_TAB = '🎰 Batter_Hits_Card';
+const MLB_BATTER_HITS_CARD_TAB = '🎯 Batter_Hits_Card';
 
 var __mlbHitterBatStatsCache = {};
+var __mlbHitterBatStatsByIdCache = {};
 
 function mlbResetHitterBatStatsCache_() {
   __mlbHitterBatStatsCache = {};
+  __mlbHitterBatStatsByIdCache = {};
 }
 
 /**
- * Season hitting stats (BA, AB, hits, PA, games) for all MLB batters.
- * Returns an object keyed by playerId.
+ * Season hitting stats (BA, AB, hits, PA, games) for all MLB batters, keyed by playerId.
+ * NOTE: do NOT sort by a rate stat (battingAverage/slg/etc.) — the MLB stats API silently
+ * filters to qualified hitters only (~3.1 PA × team games), which drops every recent
+ * call-up and anyone with a partial-season IL stint. Sort by atBats desc to grab everyone
+ * who has actually stepped to the plate, up to limit.
  */
 function mlbFetchAllHitterBatStats_(season) {
   const key = 'bat_' + String(season);
@@ -36,7 +31,7 @@ function mlbFetchAllHitterBatStats_(season) {
     mlbStatsApiBaseUrl_() +
     '/stats?stats=season&group=hitting&season=' +
     encodeURIComponent(String(season)) +
-    '&sportId=1&gameType=R&limit=1000&sortStat=battingAverage&order=desc';
+    '&sportId=1&gameType=R&limit=1500&sortStat=atBats&order=desc';
   try {
     const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
     if (res.getResponseCode() !== 200) {
@@ -59,31 +54,26 @@ function mlbFetchAllHitterBatStats_(season) {
       const d  = parseInt(st.doubles, 10)  || 0;
       const tr = parseInt(st.triples, 10)  || 0;
       const hr = parseInt(st.homeRuns, 10) || 0;
-      // Stats API returns avg/slg as strings (".285", ".478"); fall back to computed ratio.
       const avgStr = String(st.avg || '');
       const slgStr = String(st.slg || '');
       const ba = parseFloat(avgStr) || (ab > 0 ? h / ab : 0);
-      // TB = h + d + 2t + 3hr (each AB averaged across all hits incl. HR).
       const tb = h + d + 2 * tr + 3 * hr;
       const slg = parseFloat(slgStr) || (ab > 0 ? tb / ab : 0);
-      // Hitting splits often ship empty tm.abbreviation — fall back to id lookup.
       let teamAbbr = String(tm.abbreviation || '').trim().toUpperCase();
       const teamId = parseInt(tm.id, 10);
-      if (!teamAbbr && teamId && MLB_TEAM_ABBREV[teamId]) {
-        teamAbbr = MLB_TEAM_ABBREV[teamId];
-      }
+      if (!teamAbbr && teamId && MLB_TEAM_ABBREV[teamId]) teamAbbr = MLB_TEAM_ABBREV[teamId];
       out[pl.id] = {
         playerId: pl.id,
-        name:     pl.fullName || '',
+        name: pl.fullName || '',
         teamAbbr: teamAbbr,
-        teamId:   tm.id || '',
-        ba:       ba,
-        slg:      slg,
-        ab:       ab,
-        hits:     h,
-        tb:       tb,
-        pa:       pa,
-        games:    g,
+        teamId: tm.id || '',
+        ba: ba,
+        slg: slg,
+        ab: ab,
+        hits: h,
+        tb: tb,
+        pa: pa,
+        games: g,
       };
     });
     __mlbHitterBatStatsCache[key] = out;
@@ -96,9 +86,63 @@ function mlbFetchAllHitterBatStats_(season) {
 }
 
 /**
- * Secondary name-based lookup: normalizedName → stats.
- * When multiple players share a name, keeps the one with the most ABs.
+ * Per-player season hitting fallback. Used only when the bulk fetch misses a batter
+ * (rare now that we sort by atBats, but keeps us resilient if the limit ever truncates
+ * deep call-ups). Cached per season+id so a slate only pays the cost once.
  */
+function mlbFetchHitterBatStatsById_(playerId, season) {
+  const idNum = parseInt(playerId, 10);
+  if (isNaN(idNum) || !idNum) return null;
+  const ck = String(season) + ':' + idNum;
+  if (Object.prototype.hasOwnProperty.call(__mlbHitterBatStatsByIdCache, ck)) {
+    return __mlbHitterBatStatsByIdCache[ck];
+  }
+  const url =
+    mlbStatsApiBaseUrl_() +
+    '/people/' + idNum +
+    '/stats?stats=season&group=hitting&season=' + encodeURIComponent(String(season)) +
+    '&sportId=1&gameType=R';
+  try {
+    const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+    if (res.getResponseCode() !== 200) {
+      __mlbHitterBatStatsByIdCache[ck] = null;
+      return null;
+    }
+    const payload = JSON.parse(res.getContentText());
+    const splits = (payload.stats && payload.stats[0] && payload.stats[0].splits) || [];
+    if (!splits.length) { __mlbHitterBatStatsByIdCache[ck] = null; return null; }
+    const sp = splits[0];
+    const st = sp.stat || {};
+    const tm = sp.team || {};
+    const ab = parseInt(st.atBats, 10) || 0;
+    const h  = parseInt(st.hits, 10)   || 0;
+    const pa = parseInt(st.plateAppearances, 10) || 0;
+    const g  = parseInt(st.gamesPlayed, 10)      || 0;
+    const d  = parseInt(st.doubles, 10)  || 0;
+    const tr = parseInt(st.triples, 10)  || 0;
+    const hr = parseInt(st.homeRuns, 10) || 0;
+    const avgStr = String(st.avg || '');
+    const slgStr = String(st.slg || '');
+    const ba = parseFloat(avgStr) || (ab > 0 ? h / ab : 0);
+    const tb = h + d + 2 * tr + 3 * hr;
+    const slg = parseFloat(slgStr) || (ab > 0 ? tb / ab : 0);
+    const stats = {
+      playerId: idNum,
+      name: '',
+      teamAbbr: String(tm.abbreviation || '').toUpperCase(),
+      teamId: tm.id || '',
+      ba: ba, slg: slg, ab: ab, hits: h, tb: tb, pa: pa, games: g,
+    };
+    __mlbHitterBatStatsByIdCache[ck] = stats;
+    return stats;
+  } catch (e) {
+    Logger.log('mlbFetchHitterBatStatsById_(' + idNum + '): ' + e.message);
+    __mlbHitterBatStatsByIdCache[ck] = null;
+    return null;
+  }
+}
+
+/** normalizedName → stats. When names collide, keeps the one with the most ABs. */
 function mlbHitterBatStatsByName_(statsById) {
   const byName = {};
   Object.keys(statsById).forEach(function (id) {
@@ -111,220 +155,161 @@ function mlbHitterBatStatsByName_(statsById) {
   return byName;
 }
 
-/** Odds index for batter_hits + batter_hits_alternate from the FD tab. */
-function mlbBuildBatterHitsOddsIndex_(ss) {
-  return mlbBuildPitcherOddsIndexForMarkets_(ss, ['batter_hits', 'batter_hits_alternate']);
-}
-
-// ── Main card builder ─────────────────────────────────────────────────────────
-
-/**
- * Build batter hits card from today's FD batter_hits lines + season BA stats.
- * Writes 🎰 Batter_Hits_Card in the same 22-column format as Pitcher_K_Card.
- */
-function refreshBatterHitsCard() {
-  const ss  = SpreadsheetApp.getActiveSpreadsheet();
+function refreshBatterHitsBetCard() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
   const cfg = getConfig();
+  const q = ss.getSheetByName(MLB_BATTER_HITS_QUEUE_TAB);
+  if (!q || q.getLastRow() < 4) {
+    safeAlert_('Batter Hits card', 'Run Batter Hits queue first (pipeline or menu).');
+    return;
+  }
+
   const season = mlbSlateSeasonYear_(cfg);
-
-  // ── 1. Schedule → gamePk / homeAbbr / awayAbbr lookup ───────
-  const sch = ss.getSheetByName(MLB_SCHEDULE_TAB);
-  if (!sch || sch.getLastRow() < 4) {
-    safeAlert_('Batter Hits card', 'Run MLB schedule first.');
-    return;
-  }
-  const schCols = Math.max(sch.getLastColumn(), 6);
-  const schRows = sch.getRange(4, 1, sch.getLastRow(), schCols).getValues();
-
-  // normGameKey → { gamePk, homeAbbr, awayAbbr, matchup }
-  const schedByKey = {};
-  schRows.forEach(function (r) {
-    const gamePk   = r[0];
-    const awayAbbr = String(r[3] || '').trim().toUpperCase();
-    const homeAbbr = String(r[4] || '').trim().toUpperCase();
-    const matchup  = String(r[5] || '').trim();
-    if (!gamePk || !matchup) return;
-    mlbCandidateGameKeys_(matchup, awayAbbr, homeAbbr).forEach(function (k) {
-      if (!schedByKey[k]) schedByKey[k] = { gamePk: gamePk, homeAbbr: homeAbbr, awayAbbr: awayAbbr, matchup: matchup };
-    });
-  });
-
-  // ── 2. FD batter_hits odds index ─────────────────────────────
-  const oddsIdx = mlbBuildBatterHitsOddsIndex_(ss);
-  if (!Object.keys(oddsIdx).length) {
-    safeAlert_('Batter Hits card', 'No batter_hits lines in FanDuel odds tab — run FanDuel odds first.');
-    return;
-  }
-
-  // ── 3. Season BA stats ────────────────────────────────────────
-  ss.toast('Fetching hitter BA stats from Stats API…', 'Batter Hits', 10);
-  const statsById   = mlbFetchAllHitterBatStats_(season);
+  const statsById = mlbFetchAllHitterBatStats_(season) || {};
   const statsByName = mlbHitterBatStatsByName_(statsById);
-  const inj         = mlbLoadInjuryLookup_(ss);
 
-  // ── 4. Config: estimated ABs per game ────────────────────────
   const estAbCfg = parseFloat(String(cfg['EST_AB_PER_GAME'] != null ? cfg['EST_AB_PER_GAME'] : '3.5').trim());
   const globalEstAb = !isNaN(estAbCfg) && estAbCfg > 0 ? estAbCfg : 3.5;
+  const MIN_AB_FOR_BA = 30;
 
-  const MIN_AB = 30; // minimum season ABs before trusting BA
-  const out = [];
+  const last = q.getLastRow();
+  const raw = q.getRange(4, 1, Math.max(0, last - 3), 16).getValues();
+  const rows = []; // each: { data: [19 cols], hot: 'HOT'|'COLD'|'' }
 
-  // ── 5. Build card rows ────────────────────────────────────────
-  Object.keys(oddsIdx).forEach(function (compositeKey) {
-    // compositeKey = normGameKey + '||' + normPlayerName
-    const sep = compositeKey.lastIndexOf('||');
-    if (sep < 0) return;
-    const normGame   = compositeKey.substring(0, sep);
-    const normPlayer = compositeKey.substring(sep + 2);
+  raw.forEach(function (r) {
+    const gamePk = r[0];
+    const matchup = r[1];
+    const batter = r[2];
+    const batterId = r[3];
+    const line = r[4];
+    const fdOver = r[5];
+    const fdUnder = r[6];
+    const notes = r[10];
+    const inj = r[11];
+    const hpUmp = String(r[12] || '').trim();
+    const hotCold = String(r[15] || '').toUpperCase();
 
-    const schedEntry = schedByKey[normGame];
-    if (!schedEntry) return; // not today's slate
+    if (!String(batter || '').trim()) return;
 
-    const pointMap = oddsIdx[compositeKey];
-    if (!pointMap || !Object.keys(pointMap).length) return;
-
-    const mainPt = mlbPickMainKPoint_(pointMap);
-    if (mainPt == null) return;
-    const px = mlbMainKPrices_(pointMap, mainPt);
-    if (px.over === '' && px.under === '') return;
-
-    // Player stats
-    const stats    = statsByName[normPlayer];
-    const hasStats = !!(stats && stats.ab >= MIN_AB);
-    const ba       = hasStats ? stats.ba : NaN;
-    const batterId = hasStats ? stats.playerId : '';
-    const teamAbbr = hasStats ? stats.teamAbbr : '';
-    const displayName = stats ? stats.name : normPlayer;
-
-    // Per-player est ABs from season AB/G, clamped to [2.5, 4.2]
-    const estAbPerGame = hasStats && stats.games > 0
+    let stats = null;
+    const idNum = parseInt(batterId, 10);
+    if (!isNaN(idNum) && idNum && statsById[idNum]) stats = statsById[idNum];
+    if (!stats) {
+      const norm = mlbNormalizePersonName_(batter);
+      if (norm && statsByName[norm]) stats = statsByName[norm];
+    }
+    // Fallback: if the bulk fetch missed this batter (limit truncation, partial-season,
+    // mid-slate call-up), look the player up directly by ID. Cached per season+id.
+    if (!stats && !isNaN(idNum) && idNum) {
+      stats = mlbFetchHitterBatStatsById_(idNum, season);
+    }
+    const hasStats = !!(stats && stats.ab >= MIN_AB_FOR_BA);
+    const baRaw = hasStats ? stats.ba : NaN;
+    const estAb = hasStats && stats.games > 0
       ? Math.min(4.2, Math.max(2.5, Math.round((stats.ab / stats.games) * 100) / 100))
       : globalEstAb;
 
-    // Flags
-    const flagArr = [];
-    const injSt   = inj[normPlayer] || '';
-    if (injSt) {
-      const il = injSt.toLowerCase();
-      if (il.indexOf('out') !== -1 || il.indexOf('doubtful') !== -1) flagArr.push('injury');
-    }
-    if (!hasStats) flagArr.push('no_stats');
+    const homeAbbr = mlbScheduleHomeAbbrForGamePk_(ss, gamePk);
+    const parkMult = mlbParkHitsLambdaMultForHomeAbbr_(homeAbbr);
+    const ba = !isNaN(baRaw) ? Math.max(0, Math.min(0.5, baRaw * parkMult)) : NaN;
 
-    // Model
-    let lamNum    = NaN;
-    let edge      = '';
-    let pOverDisp = '';
-    let pUndrDisp = '';
-    let evO = '', evU = '', bestSide = '', bestEv = '';
-
-    if (hasStats && !isNaN(ba) && ba > 0) {
-      lamNum = Math.round(ba * estAbPerGame * 1000) / 1000;
-      const lineNum = parseFloat(mainPt);
-      if (!isNaN(lineNum)) {
-        edge      = Math.round((lamNum - lineNum) * 100) / 100;
-        const kO  = Math.floor(lineNum) + 1;           // P(≥kO hits)
-        const kU  = Math.floor(lineNum + 1e-9);        // P(≤kU hits)
-        const pO  = mlbBinomialPGeqK_(kO, estAbPerGame, ba);
-        const pU  = mlbBinomialPLeqK_(kU, estAbPerGame, ba);
-        pOverDisp = Math.round(pO * 1000) / 1000;
-        pUndrDisp = Math.round(pU * 1000) / 1000;
-        if (px.over  !== '') evO = mlbEvPerDollarRisked_(pO, px.over);
-        if (px.under !== '') evU = mlbEvPerDollarRisked_(pU, px.under);
-        if (evO !== '' && evU !== '') {
-          if      (evO >= evU && evO > 0) { bestSide = 'Over';  bestEv = evO; }
-          else if (evU > evO  && evU > 0) { bestSide = 'Under'; bestEv = evU; }
-          else if (evO >= evU)            { bestSide = 'Over';  bestEv = evO; }
-          else                            { bestSide = 'Under'; bestEv = evU; }
-        } else if (evO !== '') { bestSide = 'Over';  bestEv = evO; }
-        else if (evU !== '') { bestSide = 'Under'; bestEv = evU; }
-      } else {
-        flagArr.push('bad_line');
-      }
+    const lineNum = parseFloat(line, 10);
+    const hasModel = hasStats && !isNaN(ba) && ba > 0 && !isNaN(lineNum);
+    let lambdaDisp = '';
+    let edge = '';
+    let pOver = '';
+    let pUnder = '';
+    if (hasModel) {
+      const lam = Math.round(ba * estAb * 1000) / 1000;
+      lambdaDisp = lam;
+      edge = Math.round((lam - lineNum) * 1000) / 1000;
+      const kO = Math.floor(lineNum) + 1;
+      const kU = Math.floor(lineNum + 1e-9);
+      pOver = Math.round(mlbBinomialPGeqK_(kO, estAb, ba) * 1000) / 1000;
+      pUnder = Math.round(mlbBinomialPLeqK_(kU, estAb, ba) * 1000) / 1000;
     }
 
-    // Side (Away/Home) — useful for display, not for model
-    const batSide =
-      teamAbbr && teamAbbr === schedEntry.awayAbbr ? 'Away' :
-      teamAbbr && teamAbbr === schedEntry.homeAbbr ? 'Home' : '';
+    const imO = mlbAmericanImplied_(fdOver);
+    const imU = mlbAmericanImplied_(fdUnder);
+    const evO = pOver !== '' && fdOver !== '' ? mlbEvPerDollarRisked_(pOver, fdOver) : '';
+    const evU = pUnder !== '' && fdUnder !== '' ? mlbEvPerDollarRisked_(pUnder, fdUnder) : '';
 
-    out.push([
-      schedEntry.gamePk,                                          // 0  gamePk
-      schedEntry.matchup,                                         // 1  matchup
-      batSide,                                                    // 2  side
-      displayName,                                                // 3  batter
-      mainPt,                                                     // 4  fd_hits_line
-      px.over,                                                    // 5  fd_over
-      px.under,                                                   // 6  fd_under
-      Math.round(estAbPerGame * 100) / 100,                       // 7  est_AB
-      isNaN(lamNum) ? '' : lamNum,                                // 8  lambda
-      edge,                                                       // 9  edge_vs_line
-      pOverDisp,                                                  // 10 p_over
-      pUndrDisp,                                                  // 11 p_under
-      px.over  !== '' ? mlbAmericanImplied_(px.over)  : '',       // 12 implied_over
-      px.under !== '' ? mlbAmericanImplied_(px.under) : '',       // 13 implied_under
-      evO,                                                        // 14 ev_over_$1
-      evU,                                                        // 15 ev_under_$1
-      bestSide,                                                   // 16 best_side
-      bestEv,                                                     // 17 best_ev_$1
-      flagArr.join('; '),                                         // 18 flags
-      batterId,                                                   // 19 batter_id
-      '',                                                         // 20 (unused — no umpire)
-      teamAbbr,                                                   // 21 team_abbr
-    ]);
+    let bestSide = '';
+    let bestEv = '';
+    if (evO !== '' && evU !== '') {
+      if (evO >= evU && evO > 0) { bestSide = 'Over';  bestEv = evO; }
+      else if (evU > evO && evU > 0) { bestSide = 'Under'; bestEv = evU; }
+      else if (evO >= evU) { bestSide = 'Over';  bestEv = evO; }
+      else { bestSide = 'Under'; bestEv = evU; }
+    } else if (evO !== '') { bestSide = 'Over';  bestEv = evO; }
+    else if (evU !== '') { bestSide = 'Under'; bestEv = evU; }
+
+    const flags = mlbFlagsBatterTbCard_(inj, notes, hasModel);
+
+    rows.push({
+      data: [
+        gamePk, matchup, batter, line, fdOver, fdUnder,
+        lambdaDisp, edge, pOver, pUnder, imO, imU,
+        evO, evU, bestSide, bestEv, flags, batterId, hpUmp, hotCold,
+      ],
+      hot: hotCold,
+    });
   });
 
-  // Sort by best_ev desc
-  out.sort(function (a, b) {
-    const be = parseFloat(b[17]);
-    const ae = parseFloat(a[17]);
+  rows.sort(function (a, b) {
+    const be = parseFloat(b.data[15], 10);
+    const ae = parseFloat(a.data[15], 10);
     if (isNaN(be) && isNaN(ae)) return 0;
     if (isNaN(be)) return -1;
     if (isNaN(ae)) return 1;
     return be - ae;
   });
+  const out = rows.map(function (r) { return r.data; });
+  const sortedHot = rows.map(function (r) { return r.hot; });
 
-  // ── 6. Write tab ──────────────────────────────────────────────
-  let sh = ss.getSheetByName(MLB_BATTER_HITS_BINOMIAL_TAB);
+  let sh = ss.getSheetByName(MLB_BATTER_HITS_CARD_TAB);
   if (sh) {
-    const cr = Math.max(sh.getLastRow(), 3);
-    const cc = Math.max(sh.getLastColumn(), 22);
-    try { sh.getRange(1, 1, cr, cc).breakApart(); } catch (e) {}
     sh.clearContents();
     sh.clearFormats();
   } else {
-    sh = ss.insertSheet(MLB_BATTER_HITS_BINOMIAL_TAB);
+    sh = ss.insertSheet(MLB_BATTER_HITS_CARD_TAB);
   }
-  sh.setTabColor('#1565c0');
+  sh.setTabColor('#00838f');
 
-  [72, 200, 52, 160, 68, 72, 72, 56, 56, 56, 56, 56, 60, 60, 60, 60, 64, 56, 160, 88, 40, 56]
-    .forEach(function (w, i) { sh.setColumnWidth(i + 1, w); });
+  [72, 200, 150, 56, 64, 64, 52, 52, 52, 52, 52, 52, 52, 52, 52, 52, 140, 88, 140, 56].forEach(function (w, i) {
+    sh.setColumnWidth(i + 1, w);
+  });
 
-  sh.getRange(1, 1, 1, 22)
+  sh.getRange(1, 1, 1, 20)
     .merge()
-    .setValue('🎰 Batter Hits card — λ = BA × est_AB (binomial); FD batter_hits / alternate. Sort: best_ev desc.')
+    .setValue('🎯 Batter Hits card — Binomial(estAB, BA×hits-park); vs FD batter_hits line')
     .setFontWeight('bold')
-    .setBackground('#0d47a1')
+    .setBackground('#006064')
     .setFontColor('#ffffff')
     .setHorizontalAlignment('center')
     .setWrap(true);
-  sh.setRowHeight(1, 36);
+  sh.setRowHeight(1, 34);
 
-  sh.getRange(3, 1, 1, 22)
-    .setValues([[
-      'gamePk', 'matchup', 'side', 'batter', 'fd_hits_line',
-      'fd_over', 'fd_under', 'est_AB', 'lambda_H', 'edge_vs_line',
-      'p_over', 'p_under', 'implied_over', 'implied_under',
-      'ev_over_$1', 'ev_under_$1', 'best_side', 'best_ev_$1',
-      'flags', 'batter_id', '(unused)', 'team_abbr',
-    ]])
+  const headers = [
+    'gamePk', 'matchup', 'batter', 'fd_hits_line', 'fd_over', 'fd_under',
+    'lambda_H', 'edge_vs_line', 'p_over', 'p_under', 'implied_over', 'implied_under',
+    'ev_over_$1', 'ev_under_$1', 'best_side', 'best_ev_$1', 'flags', 'batter_id', 'hp_umpire',
+    'hot_cold',
+  ];
+  sh.getRange(3, 1, 1, headers.length)
+    .setValues([headers])
     .setFontWeight('bold')
-    .setBackground('#1565c0')
+    .setBackground('#0097a7')
     .setFontColor('#ffffff');
+  sh.setFrozenRows(3);
 
   if (out.length) {
-    sh.getRange(4, 1, out.length, 22).setValues(out);
-    try { ss.setNamedRange('MLB_BATTER_HITS_CARD', sh.getRange(4, 1, out.length, 22)); } catch (e) {}
+    sh.getRange(4, 1, out.length, headers.length).setValues(out);
+    try {
+      ss.setNamedRange('MLB_BATTER_HITS_CARD', sh.getRange(4, 1, out.length, headers.length));
+    } catch (e) {}
+    mlbApplyHotColdBorders_(sh, 4, sortedHot, headers.length);
   }
-  sh.setFrozenRows(3);
-  ss.toast(out.length + ' batter rows · season ' + season, 'Batter Hits card', 6);
+
+  ss.toast(out.length + ' rows · sorted by best_ev', 'Batter Hits card', 6);
 }
