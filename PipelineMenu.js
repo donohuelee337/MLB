@@ -36,6 +36,14 @@ function onOpen() {
     .addSeparator()
     .addSubMenu(
       SpreadsheetApp.getUi()
+        .createMenu('🧪 TB shadow (tb.v2-full)')
+        .addItem('🧪 Rebuild Batter TB v2 card', 'refreshBatterTBV2BetCard')
+        .addItem('🧪 Snapshot TB v2 card → log (MIDDAY tag)', 'mlbSnapshotTBV2Midday_')
+        .addItem('📊 Grade pending TB v2 rows', 'gradeMLBTBV2PendingResults_')
+        .addItem('🧪 Open TB v2 Results Log', 'mlbActivateTBV2LogTab_')
+    )
+    .addSubMenu(
+      SpreadsheetApp.getUi()
         .createMenu('🧪 Hits shadow (h.v1)')
         .addItem('🎯 Rebuild Batter Hits v2 LIVE card', 'refreshBatterHitsV2BetCard')
         .addItem('🧪 Snapshot shadow card → log (MIDDAY tag)', 'mlbSnapshotHitsV2Midday_')
@@ -162,6 +170,11 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
     Logger.log('gradeMLBHitsV2PendingResults_: ' + e);
   }
   try {
+    if (typeof gradeMLBTBV2PendingResults_ === 'function') gradeMLBTBV2PendingResults_();
+  } catch (e) {
+    Logger.log('gradeMLBTBV2PendingResults_: ' + e);
+  }
+  try {
     if (typeof gradeHrPromoPendingResults_ === 'function') gradeHrPromoPendingResults_();
   } catch (e) {
     Logger.log('gradeHrPromoPendingResults_: ' + e);
@@ -210,6 +223,7 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   step('Pitcher K card', refreshPitcherKBetCard);
   step('Batter TB queue', refreshBatterTbSlateQueue);
   step('Batter TB card', refreshBatterTbBetCard);
+  step('Batter TB v2 card (shadow tb.v2-full)', refreshBatterTBV2BetCard);
   step('Batter Hits queue', refreshBatterHitsSlateQueue);
   step('Batter Hits card (shadow h.v1)', refreshBatterHitsBetCard);
   step('Batter Hits v2 card (LIVE h.v2-full)', refreshBatterHitsV2BetCard);
@@ -231,10 +245,11 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   const oCard = outcomes[8] || { ok: true };
   const oTbQ = outcomes[9] || { ok: true };
   const oTbCard = outcomes[10] || { ok: true };
-  const oHitsQ = outcomes[11] || { ok: true };
-  const oHitsCard = outcomes[12] || { ok: true };
-  const oHitsV2 = outcomes[13] || { ok: true };
-  const oBet = outcomes[14] || { ok: true };
+  const oTbV2 = outcomes[11] || { ok: true };
+  const oHitsQ = outcomes[12] || { ok: true };
+  const oHitsCard = outcomes[13] || { ok: true };
+  const oHitsV2 = outcomes[14] || { ok: true };
+  const oBet = outcomes[15] || { ok: true };
 
   logStep_('Config', 1, oCfg.ok ? 1 : 0, oCfg.ok ? '' : oCfg.err || 'failed');
   logStep_(
@@ -304,6 +319,14 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
     oTbCard.ok ? '' : oTbCard.err || 'failed'
   );
   logStep_(
+    'Batter TB v2 card (shadow tb.v2-full)',
+    0,
+    oTbV2.ok && typeof MLB_BATTER_TB_V2_CARD_TAB !== 'undefined'
+      ? mlbTabDataRowsBelowHeader3_(ss, MLB_BATTER_TB_V2_CARD_TAB)
+      : 0,
+    oTbV2.ok ? '' : oTbV2.err || 'failed'
+  );
+  logStep_(
     'Batter Hits queue',
     0,
     oHitsQ.ok ? mlbTabDataRowsBelowHeader3_(ss, MLB_BATTER_HITS_QUEUE_TAB) : 0,
@@ -345,6 +368,15 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
       snapshotMLBHitsV2BetCardToLog(windowTag);
     } catch (e) {
       addPipelineWarning_('Hits shadow snapshot: ' + (e.message || e));
+    }
+  }
+
+  // TB shadow snapshot — reads the tb.v2-full card, writes 🧪 MLB_Results_Log_TB_v2.
+  if (oTbV2.ok && typeof snapshotMLBTBV2BetCardToLog === 'function') {
+    try {
+      snapshotMLBTBV2BetCardToLog(windowTag);
+    } catch (e) {
+      addPipelineWarning_('TB v2 shadow snapshot: ' + (e.message || e));
     }
   }
 

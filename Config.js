@@ -99,6 +99,8 @@ function buildConfigTab() {
     '0.35',
     '0..1 blend of last-7 games TB/game vs season TB/game for 🎲 Batter_TB_Card λ (same spirit as K9_BLEND). Tune after slates.'
   );
+  row_('TB_V2_LEAGUE_TB_PER_9',  '2.65', 'League SP TB-allowed per 9 IP — denominator for opp_SP_TB_mult in 🧪 tb.v2-full shadow. Update at season start.');
+  row_('TB_V2_LEAGUE_TB_PER_PA', '0.40', 'League batter TB per PA — fallback prior when vs-hand split sample is thin in 🧪 tb.v2-full shadow.');
   row_('MIN_EV_BET_CARD', '0', 'Min EV per $1 on 🃏 card; 0 = any positive EV (any edge). Optional floor: try ~0.02–0.05 vs 0 to drop thin lines; iterate after several slates using Pipeline_Log and 🃏 outcomes. If this key is missing, re-run menu "0. Build Config tab".');
   row_('MIN_MODEL_PCT_BET_CARD', '0.60', 'Global default model P(Win) floor on 🃏 card. Per-market overrides below take precedence. Blank or 0 falls back to 0.60.');
   row_('MIN_MODEL_PCT_K',  '', 'Per-market model% floor for STRIKEOUTS plays. Blank = use MIN_MODEL_PCT_BET_CARD. Tune from 🎯 Bet_Card_Calibration (recommended_min_model_pct column).');
@@ -197,6 +199,8 @@ function validateMlbPipelineConfig_(cfg) {
   }
   warnRange('K9_BLEND_L7_WEIGHT', c['K9_BLEND_L7_WEIGHT'], 0, 1);
   warnRange('TB_BLEND_RECENT_WEIGHT', c['TB_BLEND_RECENT_WEIGHT'], 0, 1);
+  warnRange('TB_V2_LEAGUE_TB_PER_9',  c['TB_V2_LEAGUE_TB_PER_9'],  1.5, 4.0);
+  warnRange('TB_V2_LEAGUE_TB_PER_PA', c['TB_V2_LEAGUE_TB_PER_PA'], 0.30, 0.55);
   warnRange('MIN_EV_BET_CARD', c['MIN_EV_BET_CARD'], 0, 0.5);
   warnRange('OPP_K_RATE_LAMBDA_STRENGTH', c['OPP_K_RATE_LAMBDA_STRENGTH'], 0, 1);
   warnRange('HP_UMP_LAMBDA_MULT', c['HP_UMP_LAMBDA_MULT'], 0.85, 1.15);

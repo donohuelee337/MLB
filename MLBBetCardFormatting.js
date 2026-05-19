@@ -406,6 +406,23 @@ function mlbAppendBetTrackerSectionV2_(ss, sh, startRow, slateDate) {
 }
 
 /**
+ * TB v2 shadow tracker — reads 🧪 MLB_Results_Log_TB_v2. Hit-rate panel for
+ * the tb.v2-full advanced-features model running in parallel to live TB.
+ * Renders even when log is missing so user sees the panel scaffolding.
+ */
+function mlbAppendBetTrackerSectionTBV2_(ss, sh, startRow, slateDate) {
+  if (typeof MLB_RESULTS_LOG_TB_V2_TAB === 'undefined') return startRow;
+  return _mlbRenderBetTrackerPanel_(ss, sh, startRow, slateDate, {
+    logTab: MLB_RESULTS_LOG_TB_V2_TAB,
+    logNcol: typeof MLB_RESULTS_LOG_TB_V2_NCOL !== 'undefined' ? MLB_RESULTS_LOG_TB_V2_NCOL : 30,
+    title: 'Bet Tracker (TB shadow)  ·  tb.v2-full advanced-features model  ·  total bases only',
+    markets: [
+      { key: 'TB', label: 'TOTAL BASES shadow', test: function (m) { return m.indexOf('total base') !== -1; } },
+    ],
+  });
+}
+
+/**
  * Edge-based tracker — buckets graded bets by |proj − line|.
  * Three buckets: < 0.5 (weak edge), 0.5–1.0 (middle), > 1.0 (strong edge).
  * Needs `proj` column (col 25) in 📋 MLB_Results_Log; older rows w/o proj are skipped.

@@ -439,8 +439,12 @@ function refreshMLBBetCard() {
     if (typeof mlbAppendBetTrackerSectionV2_ === 'function') {
       afterV2 = mlbAppendBetTrackerSectionV2_(ss, sh, afterV1 + 1, slateDate);
     }
+    let afterTbV2 = afterV2;
+    if (typeof mlbAppendBetTrackerSectionTBV2_ === 'function') {
+      afterTbV2 = mlbAppendBetTrackerSectionTBV2_(ss, sh, afterV2 + 1, slateDate);
+    }
     if (typeof mlbAppendBetTrackerByEdgeSection_ === 'function') {
-      mlbAppendBetTrackerByEdgeSection_(ss, sh, afterV2 + 1, slateDate);
+      mlbAppendBetTrackerByEdgeSection_(ss, sh, afterTbV2 + 1, slateDate);
     }
   }
 
