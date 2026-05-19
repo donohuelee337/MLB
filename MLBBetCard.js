@@ -12,13 +12,35 @@ const MLB_BET_CARD_TAB = '🃏 MLB_Bet_Card';
 const MLB_BET_CARD_NCOL = 19;
 /**
  * Bet card filters (a play must clear ALL of these to make 🃏):
- *   1. model P(Win) ≥ MLB_BET_CARD_MIN_MODEL_PCT
- *   2. EV per $1 > 0
- *   3. mlbGradePlay_(ev, odds) ∈ MLB_BET_CARD_ALLOWED_GRADES
+ *   1. model P(Win) ≥ per-market floor (Config: MIN_MODEL_PCT_<K|TB|H>,
+ *      else MIN_MODEL_PCT_BET_CARD, else 0.60)
+ *   2. |projection − line| ≥ per-market edge floor (Config: MIN_EDGE_<K|TB|H>; 0 = off)
+ *   3. EV per $1 > 0
+ *   4. mlbGradePlay_(ev, odds) ∈ MLB_BET_CARD_ALLOWED_GRADES
  * Plus data prereqs: side ∈ {Over,Under}, valid line + FD price, no injury.
+ *
+ * Per-market floors are tuned from 🎯 Bet_Card_Calibration. Leave them blank
+ * to fall through to the global default.
  */
 const MLB_BET_CARD_MIN_MODEL_PCT = 0.60;
 const MLB_BET_CARD_ALLOWED_GRADES = { 'A+': true, 'A': true };
+
+/**
+ * Per-market threshold lookup. Returns {minP, minEdge} where minP defaults to
+ * the global floor and minEdge defaults to 0 (off) if not set.
+ */
+function mlbBetCardThresholds_(cfg, marketKey) {
+  const globalRaw = String(cfg['MIN_MODEL_PCT_BET_CARD'] != null ? cfg['MIN_MODEL_PCT_BET_CARD'] : '').trim();
+  const globalNum = parseFloat(globalRaw, 10);
+  const globalP = !isNaN(globalNum) && globalNum > 0 ? globalNum : MLB_BET_CARD_MIN_MODEL_PCT;
+  const pRaw = String(cfg['MIN_MODEL_PCT_' + marketKey] != null ? cfg['MIN_MODEL_PCT_' + marketKey] : '').trim();
+  const pNum = parseFloat(pRaw, 10);
+  const minP = !isNaN(pNum) && pNum > 0 ? pNum : globalP;
+  const eRaw = String(cfg['MIN_EDGE_' + marketKey] != null ? cfg['MIN_EDGE_' + marketKey] : '0').trim();
+  const eNum = parseFloat(eRaw, 10);
+  const minEdge = !isNaN(eNum) && eNum > 0 ? eNum : 0;
+  return { minP: minP, minEdge: minEdge };
+}
 
 function refreshMLBBetCard() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -75,7 +97,10 @@ function refreshMLBBetCard() {
 
       const pWin = bestSide === 'Over' ? r[10] : r[11];
       const pwNum = parseFloat(String(pWin));
-      if (isNaN(pwNum) || pwNum < MLB_BET_CARD_MIN_MODEL_PCT) return;
+      const kThr = mlbBetCardThresholds_(cfg, 'K');
+      if (isNaN(pwNum) || pwNum < kThr.minP) return;
+      const kEdge = parseFloat(String(r[9]));
+      if (kThr.minEdge > 0 && (isNaN(kEdge) || Math.abs(kEdge) < kThr.minEdge)) return;
 
       const evRaw = r[17];
       const ev = parseFloat(String(evRaw));
@@ -148,7 +173,10 @@ function refreshMLBBetCard() {
 
       const pWin = bestSide === 'Over' ? r[8] : r[9];
       const pwNum = parseFloat(String(pWin));
-      if (isNaN(pwNum) || pwNum < MLB_BET_CARD_MIN_MODEL_PCT) return;
+      const tbThr = mlbBetCardThresholds_(cfg, 'TB');
+      if (isNaN(pwNum) || pwNum < tbThr.minP) return;
+      const tbEdge = parseFloat(String(r[7]));
+      if (tbThr.minEdge > 0 && (isNaN(tbEdge) || Math.abs(tbEdge) < tbThr.minEdge)) return;
 
       const evRaw = r[15];
       const ev = parseFloat(String(evRaw));
@@ -215,7 +243,10 @@ function refreshMLBBetCard() {
 
       const pWin = bestSide === 'Over' ? r[8] : r[9];
       const pwNum = parseFloat(String(pWin));
-      if (isNaN(pwNum) || pwNum < MLB_BET_CARD_MIN_MODEL_PCT) return;
+      const hThr = mlbBetCardThresholds_(cfg, 'H');
+      if (isNaN(pwNum) || pwNum < hThr.minP) return;
+      const hEdge = parseFloat(String(r[7]));
+      if (hThr.minEdge > 0 && (isNaN(hEdge) || Math.abs(hEdge) < hThr.minEdge)) return;
 
       const evRaw = r[15];
       const ev = parseFloat(String(evRaw));
@@ -264,7 +295,8 @@ function refreshMLBBetCard() {
     return be - ae;
   });
 
-  // Filters: pWin ≥ MLB_BET_CARD_MIN_MODEL_PCT AND ev > 0 AND grade ∈ MLB_BET_CARD_ALLOWED_GRADES.
+  // Filters applied above per market: pWin ≥ per-market floor, optional |edge| ≥ MIN_EDGE_*,
+  // EV > 0, grade ∈ MLB_BET_CARD_ALLOWED_GRADES. See mlbBetCardThresholds_().
   const selected = plays;
 
   // Display order: game start time asc, then by gamePk (keep same-time games
@@ -329,8 +361,8 @@ function refreshMLBBetCard() {
     blank[0] = slateDate;
     const allowed = Object.keys(MLB_BET_CARD_ALLOWED_GRADES).join('/');
     blank[4] =
-      'No qualifying plays — build 🎰 Pitcher_K_Card / 🎲 Batter_TB_Card / 🎯 Batter_Hits_Card with ' +
-      'model % ≥ ' + Math.round(MLB_BET_CARD_MIN_MODEL_PCT * 100) + '%, ev > 0, grade ∈ {' + allowed + '}, valid FD price, no injury flag.';
+      'No qualifying plays — build 🎰 Pitcher_K_Card / 🎲 Batter_TB_Card / 🧪 Batter_Hits_Card_v2-full with ' +
+      'per-market model % floors (see Config: MIN_MODEL_PCT_*), ev > 0, grade ∈ {' + allowed + '}, valid FD price, no injury flag.';
     rows.push(blank);
   }
 
@@ -426,13 +458,15 @@ function refreshMLBBetCard() {
 // ============================================================
 function diagnoseHitsBetCardInclusion() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const cfg = getConfig();
+  const hThr = mlbBetCardThresholds_(cfg, 'H');
   // Diag follows the live H source — h.v2-full now.
   const src = ss.getSheetByName(MLB_BATTER_HITS_V2_CARD_TAB);
   const diagTab = '🔍 BetCard_Diag_Hits';
   const log = [];
   log.push('Source tab: ' + MLB_BATTER_HITS_V2_CARD_TAB);
   const allowedGradesStr = Object.keys(MLB_BET_CARD_ALLOWED_GRADES).join('/');
-  log.push('Gates (besides data prereqs): pWin ≥ ' + MLB_BET_CARD_MIN_MODEL_PCT + ' AND ev > 0 AND grade ∈ {' + allowedGradesStr + '}');
+  log.push('Gates (besides data prereqs): pWin ≥ ' + hThr.minP + (hThr.minEdge > 0 ? ' AND |edge| ≥ ' + hThr.minEdge : '') + ' AND ev > 0 AND grade ∈ {' + allowedGradesStr + '}');
 
   if (!src) {
     log.push('FAIL: tab not found');
@@ -504,8 +538,8 @@ function diagnoseHitsBetCardInclusion() {
     if (isNaN(pwNum)) {
       rej('blank_or_nan_pwin', 'side=' + bestSide + ' pWin="' + pWin + '"'); return;
     }
-    if (pwNum < MLB_BET_CARD_MIN_MODEL_PCT) {
-      rej('pwin_below_floor', 'side=' + bestSide + ' pWin=' + pwNum); return;
+    if (pwNum < hThr.minP) {
+      rej('pwin_below_floor', 'side=' + bestSide + ' pWin=' + pwNum + ' floor=' + hThr.minP); return;
     }
 
     const evNum = parseFloat(String(r[15]));
@@ -533,7 +567,7 @@ function diagnoseHitsBetCardInclusion() {
   sh.setTabColor('#b71c1c');
 
   sh.getRange(1, 1).setValue('🔍 Hits → BetCard inclusion diagnostic — ' + new Date()).setFontWeight('bold');
-  sh.getRange(2, 1).setValue('Gates: pWin ≥ ' + MLB_BET_CARD_MIN_MODEL_PCT + ' AND ev > 0 AND grade ∈ {' + allowedGradesStr + '}. Plus data prereqs: non-blank batter, no injury flag, bestSide ∈ {Over,Under}, line set, valid FD price for that side, parseable pWin.');
+  sh.getRange(2, 1).setValue('Gates: pWin ≥ ' + hThr.minP + (hThr.minEdge > 0 ? ' AND |edge| ≥ ' + hThr.minEdge : '') + ' AND ev > 0 AND grade ∈ {' + allowedGradesStr + '}. Plus data prereqs: non-blank batter, no injury flag, bestSide ∈ {Over,Under}, line set, valid FD price for that side, parseable pWin.');
   sh.getRange(2, 1).setWrap(true);
 
   const tallyRows = Object.keys(tally).map(function (k) { return [k, tally[k]]; });

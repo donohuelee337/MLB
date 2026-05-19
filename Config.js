@@ -100,6 +100,13 @@ function buildConfigTab() {
     '0..1 blend of last-7 games TB/game vs season TB/game for 🎲 Batter_TB_Card λ (same spirit as K9_BLEND). Tune after slates.'
   );
   row_('MIN_EV_BET_CARD', '0', 'Min EV per $1 on 🃏 card; 0 = any positive EV (any edge). Optional floor: try ~0.02–0.05 vs 0 to drop thin lines; iterate after several slates using Pipeline_Log and 🃏 outcomes. If this key is missing, re-run menu "0. Build Config tab".');
+  row_('MIN_MODEL_PCT_BET_CARD', '0.60', 'Global default model P(Win) floor on 🃏 card. Per-market overrides below take precedence. Blank or 0 falls back to 0.60.');
+  row_('MIN_MODEL_PCT_K',  '', 'Per-market model% floor for STRIKEOUTS plays. Blank = use MIN_MODEL_PCT_BET_CARD. Tune from 🎯 Bet_Card_Calibration (recommended_min_model_pct column).');
+  row_('MIN_MODEL_PCT_TB', '', 'Per-market model% floor for TOTAL BASES plays. Blank = use MIN_MODEL_PCT_BET_CARD.');
+  row_('MIN_MODEL_PCT_H',  '', 'Per-market model% floor for BATTER HITS plays. Blank = use MIN_MODEL_PCT_BET_CARD.');
+  row_('MIN_EDGE_K',  '0', 'Min |projection − line| for STRIKEOUTS plays on 🃏 card. 0 = off. Tune from 🎯 Bet_Card_Calibration.');
+  row_('MIN_EDGE_TB', '0', 'Min |projection − line| for TOTAL BASES plays on 🃏 card. 0 = off.');
+  row_('MIN_EDGE_H',  '0', 'Min |projection − line| for BATTER HITS plays on 🃏 card. 0 = off.');
   row_('BANKROLL', '500', 'Bankroll in $ for Kelly stake column on 🃏 card. Default $500 = max bet $7.50 ≈ 1.5% of roll. Edit to your actual roll as it grows.');
   row_('KELLY_FRACTION', '0.25', 'Fractional-Kelly multiplier (0..1). Default 0.25 = quarter-Kelly (conservative, survives model overconfidence). Full-Kelly (1) is aggressive.');
   row_('STAKE_TIER_1_USD', '2.50', '1u stake size in $. With $7.50 cap and 1:2:3 ladder → 1u/2u/3u = $2.50/$5/$7.50.');

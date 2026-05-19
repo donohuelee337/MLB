@@ -25,6 +25,8 @@ function onOpen() {
     .addItem('📋 Batter Hits queue only (FD hits + hitting logs)', 'refreshBatterHitsSlateQueue')
     .addItem('🎯 Batter Hits card only (Poisson + EV)', 'refreshBatterHitsBetCard')
     .addItem('🃏 MLB Bet Card only (final plays)', 'refreshMLBBetCard')
+    .addItem('🎯 Refresh Bet Card Calibration panel', 'refreshBetCardCalibration')
+    .addItem('🎯 Open Calibration panel', 'mlbActivateCalibrationTab_')
     .addItem('🔍 Diagnose Hits → BetCard inclusion', 'diagnoseHitsBetCardInclusion')
     .addItem('📊 Grade pending MLB results (boxscore)', 'gradeMLBPendingResults_')
     .addItem('📈 Backfill closing K (Results Log)', 'mlbBackfillClosingMenu_')
@@ -360,6 +362,12 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
     refreshHitsModelCompare();
   } catch (e) {
     addPipelineWarning_('Hits compare panel: ' + (e.message || e));
+  }
+
+  try {
+    refreshBetCardCalibration();
+  } catch (e) {
+    addPipelineWarning_('Bet card calibration: ' + (e.message || e));
   }
 
   if (windowTag === 'FINAL' && oOdds.ok) {
