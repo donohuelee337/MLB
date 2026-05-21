@@ -12,14 +12,12 @@ const MLB_ODDS_CONFIG = {
   bookmaker: 'fanduel',
   tabName: '✅ FanDuel_MLB_Odds',
   tabColor: '#0d47a1',
-  // Only markets consumed downstream (H, TB, K). FanDuel posts batter props on main and/or
-  // _alternate keys; the queues merge both, so we fetch both.
+  // Only markets consumed downstream (H, K). TB retired 2026-05-21 — skip batter_total_bases
+  // to save Odds API quota. FanDuel posts batter props on main and/or _alternate keys.
   marketBatches: [
     [
       'batter_hits',
       'batter_hits_alternate',
-      'batter_total_bases',
-      'batter_total_bases_alternate',
       'pitcher_strikeouts',
     ],
   ],
@@ -75,9 +73,8 @@ function fetchMLBFanDuelOdds() {
   });
   Logger.log('MLB odds market counts: ' + JSON.stringify(counts));
   const requiredFamilies = [
-    { label: 'batter_hits',          keys: ['batter_hits', 'batter_hits_alternate'] },
-    { label: 'batter_total_bases',   keys: ['batter_total_bases', 'batter_total_bases_alternate'] },
-    { label: 'pitcher_strikeouts',   keys: ['pitcher_strikeouts'] },
+    { label: 'batter_hits',        keys: ['batter_hits', 'batter_hits_alternate'] },
+    { label: 'pitcher_strikeouts', keys: ['pitcher_strikeouts'] },
   ];
   const missing = requiredFamilies.filter(function (m) {
     return m.keys.every(function (k) { return !counts[k]; });

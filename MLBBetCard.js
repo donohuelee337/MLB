@@ -1,8 +1,9 @@
 // ============================================================
-// 🃏 MLB Bet Card — pitcher K + batter TB + batter hits (ranked by EV)
+// 🃏 MLB Bet Card — pitcher K + batter hits (ranked by EV)
 // ============================================================
-// Pulls 🎰 Pitcher_K_Card + 🎲 Batter_TB_Card + 🎯 Batter_Hits_Card;
-// merges, ranks, caps per game + total plays. A+ grades bypass caps.
+// Pulls 🎰 Pitcher_K_Card + 🧪 Batter_Hits_Card_v2-full; merges, ranks,
+// caps per game + total plays. A+ grades bypass caps.
+// TB retired 2026-05-21 — removed from pipeline, odds fetch, and bet card panels.
 // VISUAL FORMATTING is in MLBBetCardFormatting.js — DO NOT mix
 // rendering code into this file or it will get rolled back with model
 // changes (see v0.1.1 commit notes).
@@ -51,19 +52,17 @@ function refreshMLBBetCard() {
   const gameTimeIdx = mlbScheduleGameTimeIndex_(ss);
 
   const srcK = ss.getSheetByName(MLB_PITCHER_K_CARD_TAB);
-  const srcTb = ss.getSheetByName(MLB_BATTER_TB_CARD_TAB);
-  // Hits H block is now sourced from the v2 card (h.v2-full is the active hits
+  // Hits H block is sourced from the v2 card (h.v2-full is the active hits
   // model). v1 still runs and feeds the shadow log below the bet card.
   const srcHits = ss.getSheetByName(MLB_BATTER_HITS_V2_CARD_TAB);
 
   if (
     (!srcK || srcK.getLastRow() < 4) &&
-    (!srcTb || srcTb.getLastRow() < 4) &&
     (!srcHits || srcHits.getLastRow() < 4)
   ) {
     safeAlert_(
       'MLB Bet Card',
-      'Run at least one model card first (🎰 Pitcher_K_Card / 🎲 Batter_TB_Card / 🧪 Batter_Hits_Card_v2-full). Morning pipeline builds all.'
+      'Run at least one model card first (🎰 Pitcher_K_Card / 🧪 Batter_Hits_Card_v2-full). Morning pipeline builds all.'
     );
     return;
   }
@@ -140,74 +139,6 @@ function refreshMLBBetCard() {
         edge: r[9],
         flags: flags,
         market: 'Pitcher strikeouts',
-        gameTimeIso: gt.iso || '',
-        gameTimeHHmm: gt.hhmm || '',
-        hotCold: hotCold,
-      });
-    });
-  }
-
-  if (srcTb && srcTb.getLastRow() >= 4) {
-    const lastT = srcTb.getLastRow();
-    const vals = srcTb.getRange(4, 1, lastT, 20).getValues();
-    vals.forEach(function (r) {
-      const flags = String(r[16] || '');
-      const batterId = r[17];
-      const hpUmp = String(r[18] || '').trim();
-      const hotCold = String(r[19] || '').toUpperCase();
-      if (flags.indexOf('injury') !== -1) return;
-
-      const bestSide = String(r[14] || '').trim();
-      if (bestSide !== 'Over' && bestSide !== 'Under') return;
-
-      const line = r[3];
-      if (line === '' || line == null) return;
-
-      const fdOver = r[4];
-      const fdUnder = r[5];
-      const american = bestSide === 'Over' ? fdOver : fdUnder;
-      if (american === '' || american == null || isNaN(parseFloat(String(american)))) return;
-
-      const batter = String(r[2] || '').trim();
-      if (!batter) return;
-
-      const pWin = bestSide === 'Over' ? r[8] : r[9];
-      const pwNum = parseFloat(String(pWin));
-      const tbThr = mlbBetCardThresholds_(cfg, 'TB');
-      if (isNaN(pwNum) || pwNum < tbThr.minP) return;
-      const tbEdge = parseFloat(String(r[7]));
-      if (tbThr.minEdge > 0 && (isNaN(tbEdge) || Math.abs(tbEdge) < tbThr.minEdge)) return;
-
-      const evRaw = r[15];
-      const ev = parseFloat(String(evRaw));
-      if (isNaN(ev) || ev <= 0) return;
-      const grade = mlbGradePlay_(ev, american);
-      if (!MLB_BET_CARD_ALLOWED_GRADES[grade]) return;
-      const implied = bestSide === 'Over' ? r[10] : r[11];
-      const matchup = r[1];
-      const gamePk = r[0];
-      const pickLabel =
-        batter + ' — TB ' + bestSide + ' ' + String(line) + (hpUmp ? ' · HP ' + hpUmp : '');
-      const gt = gameTimeIdx[parseInt(gamePk, 10)] || {};
-
-      plays.push({
-        kind: 'TB',
-        gamePk: gamePk,
-        matchup: matchup,
-        pickLabel: pickLabel,
-        player: batter,
-        playerId: batterId,
-        side: bestSide,
-        line: line,
-        american: american,
-        pWin: pWin,
-        implied: implied,
-        ev: isNaN(ev) ? '' : ev,
-        grade: grade,
-        lambda: r[6],
-        edge: r[7],
-        flags: flags,
-        market: 'Batter total bases',
         gameTimeIso: gt.iso || '',
         gameTimeHHmm: gt.hhmm || '',
         hotCold: hotCold,
@@ -361,7 +292,7 @@ function refreshMLBBetCard() {
     blank[0] = slateDate;
     const allowed = Object.keys(MLB_BET_CARD_ALLOWED_GRADES).join('/');
     blank[4] =
-      'No qualifying plays — build 🎰 Pitcher_K_Card / 🎲 Batter_TB_Card / 🧪 Batter_Hits_Card_v2-full with ' +
+      'No qualifying plays — build 🎰 Pitcher_K_Card / 🧪 Batter_Hits_Card_v2-full with ' +
       'per-market model % floors (see Config: MIN_MODEL_PCT_*), ev > 0, grade ∈ {' + allowed + '}, valid FD price, no injury flag.';
     rows.push(blank);
   }
@@ -439,12 +370,12 @@ function refreshMLBBetCard() {
     if (typeof mlbAppendBetTrackerSectionV2_ === 'function') {
       afterV2 = mlbAppendBetTrackerSectionV2_(ss, sh, afterV1 + 1, slateDate);
     }
-    let afterTbV2 = afterV2;
-    if (typeof mlbAppendBetTrackerSectionTBV2_ === 'function') {
-      afterTbV2 = mlbAppendBetTrackerSectionTBV2_(ss, sh, afterV2 + 1, slateDate);
+    let afterHitsV3 = afterV2;
+    if (typeof mlbAppendBetTrackerSectionHitsV3_ === 'function') {
+      afterHitsV3 = mlbAppendBetTrackerSectionHitsV3_(ss, sh, afterV2 + 1, slateDate);
     }
     if (typeof mlbAppendBetTrackerByEdgeSection_ === 'function') {
-      mlbAppendBetTrackerByEdgeSection_(ss, sh, afterTbV2 + 1, slateDate);
+      mlbAppendBetTrackerByEdgeSection_(ss, sh, afterHitsV3 + 1, slateDate);
     }
   }
 

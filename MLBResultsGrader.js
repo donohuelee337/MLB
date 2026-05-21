@@ -53,19 +53,43 @@ const MLB_GRADER_FEED_URL_TEMPLATE = 'https://statsapi.mlb.com/api/v1.1/game/{pk
  * Fetch game payload for grading. Uses /feed/live (v1.1). Carries both
  * liveData.boxscore.teams (player stats) and the status blocks isFinal needs.
  * Function name kept as ...BoxscoreJson_ so callers don't need to change.
+ *
+ * Cached by gamePk for the duration of the execution. Six graders run
+ * back-to-back (K live, H v2, TB v2, TB v3, H v3, HR promo) and many
+ * games have multiple pending rows; without the cache we were re-fetching
+ * the same JSON 10-50x per slate. Module state resets between Apps Script
+ * executions, so each Morning/Midday/Final run starts with a cold cache.
+ *
+ * The 120ms throttle now lives INSIDE this function and only fires on
+ * cache miss — callers no longer need to sleep after calling.
  */
+var __mlbBoxscoreJsonCache = {};
+
+function mlbResetBoxscoreJsonCache_() {
+  __mlbBoxscoreJsonCache = {};
+}
+
 function mlbFetchBoxscoreJson_(gamePk) {
   const g = parseInt(gamePk, 10);
   if (!g) return null;
+  if (Object.prototype.hasOwnProperty.call(__mlbBoxscoreJsonCache, g)) {
+    return __mlbBoxscoreJsonCache[g];
+  }
+  // Throttle the upstream API on cache miss — was previously the caller's job.
+  Utilities.sleep(120);
   const url = MLB_GRADER_FEED_URL_TEMPLATE.replace('{pk}', String(g));
+  let out = null;
   try {
     const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
-    if (res.getResponseCode() !== 200) return null;
-    return JSON.parse(res.getContentText());
+    if (res.getResponseCode() === 200) {
+      out = JSON.parse(res.getContentText());
+    }
   } catch (e) {
     Logger.log('mlbFetchBoxscoreJson_: ' + e.message);
-    return null;
   }
+  // Cache null too — a missing game shouldn't be retried 5 more times.
+  __mlbBoxscoreJsonCache[g] = out;
+  return out;
 }
 
 /**
@@ -333,8 +357,9 @@ function gradeMLBPendingResults_() {
       continue;
     }
 
+    // mlbFetchBoxscoreJson_ caches by gamePk and self-throttles on miss
+    // (was 120ms here per call — removed; cache hits now return instantly).
     let box = mlbFetchBoxscoreJson_(gamePk);
-    Utilities.sleep(120);
     if (!box) {
       logSh.getRange(4 + i, 18).setValue('Feed/live fetch failed');
       continue;
@@ -346,7 +371,6 @@ function gradeMLBPendingResults_() {
       const altPk = mlbResolveGamePkFromSchedule_(slateStr, matchup, player);
       if (altPk && altPk !== gamePk) {
         const box2 = mlbFetchBoxscoreJson_(altPk);
-        Utilities.sleep(120);
         if (box2 && mlbBoxscoreIsFinal_(box2)) {
           gamePk = altPk;
           box = box2;

@@ -42,31 +42,19 @@ function mlbHrPromoBattingOrderFromPlayers_(players) {
   return line;
 }
 
-function mlbHrPromoFetchPitcherSeasonHr9_(pitcherId, season) {
-  const id = parseInt(pitcherId, 10);
-  if (!id) return null;
-  const url =
-    mlbStatsApiBaseUrl_() +
-    '/people/' +
-    id +
-    '/stats?stats=season&group=pitching&season=' +
-    encodeURIComponent(String(season));
-  try {
-    const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
-    if (res.getResponseCode() !== 200) return null;
-    const payload = JSON.parse(res.getContentText());
-    const splits = payload.stats && payload.stats[0] && payload.stats[0].splits;
-    const st = splits && splits[0] && splits[0].stat;
-    if (!st) return null;
-    const hr = parseInt(st.homeRuns, 10) || 0;
-    const ipStr = String(st.inningsPitched || '').trim();
-    const ip = ipStr ? mlbParseInningsString_(ipStr) : NaN;
-    if (isNaN(ip) || ip <= 0) return null;
-    return (9 * hr) / ip;
-  } catch (e) {
-    Logger.log('mlbHrPromoFetchPitcherSeasonHr9_: ' + e.message);
-    return null;
-  }
+// Now reads from the shared pitcher cache used by Hits v2 (H/9), TB v2
+// (TB/9), and v3 models (K/9 + HR/9). One statsapi call per pitcher per
+// slate serves all four.
+function mlbResetHrPromoPitcherHr9Cache_() {
+  // No-op kept for back-compat: shared cache reset happens at slate start
+  // in runMLBBallWindow_.
+}
+
+function mlbHrPromoFetchPitcherSeasonHr9_(pitcherId, season, minIp) {
+  const stat = mlbSharedFetchPitcherSeasonPitching_(pitcherId, season);
+  const ipFloor = minIp > 0 ? minIp : 10;
+  if (isNaN(stat.hr) || stat.ip < ipFloor) return null;
+  return (9 * stat.hr) / stat.ip;
 }
 
 function mlbHrPromoL14HrFromSplits_(playerId, season) {
@@ -130,7 +118,7 @@ function mlbHrPromoRowForBatter_(ctx) {
     conf = 'low';
     reason = reason ? reason + ';sp_missing' : 'sp_missing';
   } else {
-    const hr9 = mlbHrPromoFetchPitcherSeasonHr9_(spId, season);
+    const hr9 = mlbHrPromoFetchPitcherSeasonHr9_(spId, season, mlbOppSpMinIp_(cfg));
     if (hr9 == null) {
       addPipelineWarning_('HR promo: missing SP HR/9 for pitcher ' + spId);
     } else {
@@ -185,6 +173,7 @@ function refreshBatterHrPromoSheet_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const cfg = getConfig();
   const season = mlbSlateSeasonYear_(cfg);
+  mlbResetHrPromoPitcherHr9Cache_();
   const fb = String(cfg['HR_PROMO_LINEUP_FALLBACK'] || 'roster')
     .trim()
     .toLowerCase();

@@ -20,8 +20,6 @@ function onOpen() {
     .addItem('📒 Pitcher game logs only (statsapi, warms cache)', 'refreshMLBPitcherGameLogs')
     .addItem('📋 Pitcher K queue only (schedule + FD K + game logs)', 'refreshPitcherKSlateQueue')
     .addItem('🎰 Pitcher K card only (Poisson + EV)', 'refreshPitcherKBetCard')
-    .addItem('📋 Batter TB queue only (FD TB + hitting logs)', 'refreshBatterTbSlateQueue')
-    .addItem('🎲 Batter TB card only (Poisson + EV)', 'refreshBatterTbBetCard')
     .addItem('📋 Batter Hits queue only (FD hits + hitting logs)', 'refreshBatterHitsSlateQueue')
     .addItem('🎯 Batter Hits card only (Poisson + EV)', 'refreshBatterHitsBetCard')
     .addItem('🃏 MLB Bet Card only (final plays)', 'refreshMLBBetCard')
@@ -32,16 +30,14 @@ function onOpen() {
     .addItem('📈 Backfill closing K (Results Log)', 'mlbBackfillClosingMenu_')
     .addItem('💵 Backfill historical stake + P/L (legacy unit)', 'mlbBackfillStakesMenu_')
     .addItem('📋 Open Pipeline Log', 'mlbActivatePipelineLog_')
+    .addItem('📊 Open Pipeline Timings (live)', 'mlbActivatePipelineTimingsTab_')
+    .addItem('📊 Refresh Project Status dashboard', 'refreshProjectStatus')
+    .addItem('📊 Open Project Status dashboard', 'mlbActivateProjectStatusTab_')
     .addItem('🩺 HR + Grand Slam tab diagnostic', 'runHRSlamDiagnostic')
+    .addItem('🩺 Pitcher data diagnostic (schedule → models)', 'runPitcherDataDiagnostic')
+    .addItem('💰 Refresh profitability report', 'refreshMLBProfitabilityReport')
+    .addItem('💰 Open profitability report', 'mlbActivateProfitabilityTab_')
     .addSeparator()
-    .addSubMenu(
-      SpreadsheetApp.getUi()
-        .createMenu('🧪 TB shadow (tb.v2-full)')
-        .addItem('🧪 Rebuild Batter TB v2 card', 'refreshBatterTBV2BetCard')
-        .addItem('🧪 Snapshot TB v2 card → log (MIDDAY tag)', 'mlbSnapshotTBV2Midday_')
-        .addItem('📊 Grade pending TB v2 rows', 'gradeMLBTBV2PendingResults_')
-        .addItem('🧪 Open TB v2 Results Log', 'mlbActivateTBV2LogTab_')
-    )
     .addSubMenu(
       SpreadsheetApp.getUi()
         .createMenu('🧪 Hits shadow (h.v1)')
@@ -60,6 +56,14 @@ function onOpen() {
     )
     .addSubMenu(
       SpreadsheetApp.getUi()
+        .createMenu('🧪 Hits shadow (h.v3-contact)')
+        .addItem('🧪 Rebuild Batter Hits v3 card', 'refreshBatterHitsV3BetCard')
+        .addItem('🧪 Snapshot Hits v3 card → log (MIDDAY tag)', 'mlbSnapshotHitsV3Midday_')
+        .addItem('📊 Grade pending Hits v3 rows', 'gradeMLBHitsV3PendingResults_')
+        .addItem('🧪 Open Hits v3 Results Log', 'mlbActivateHitsV3LogTab_')
+    )
+    .addSubMenu(
+      SpreadsheetApp.getUi()
         .createMenu('📣 HR Promo')
         .addItem('📣 Refresh HR Promo tab (rebuild picks)', 'refreshBatterHrPromoSheet_')
         .addItem('📋 Snapshot HR picks → log', 'mlbSnapshotHrPromoMidday_')
@@ -75,6 +79,12 @@ function onOpen() {
         .createMenu('💎 GS Promo')
         .addItem('💎 Refresh GS Promo tab (rebuild picks)', 'refreshBatterGsPromoSheet_')
         .addItem('📋 Open GS Promo tab', 'mlbActivateGsPromoTab_')
+    )
+    .addSubMenu(
+      SpreadsheetApp.getUi()
+        .createMenu('🔥 Streak Picks')
+        .addItem('🔥 Rebuild Streak picks (re-rank v2 + SP K/9)', 'refreshStreakPicks')
+        .addItem('📋 Open Streak Picks tab', 'mlbActivateStreakPicksTab_')
     )
     .addToUi();
 }
@@ -144,6 +154,9 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const start = Date.now();
   resetPipelineLog_(windowTag);
+  // Per-step timings flush to 📊 Pipeline_Timings as the pipeline runs,
+  // so a timeout still leaves a trail showing exactly which step died.
+  if (typeof mlbBeginPipelineTimings_ === 'function') mlbBeginPipelineTimings_(windowTag);
 
   // Grader self-test runs FIRST so a regressed /feed/live URL or broken
   // boxscore plumbing surfaces as a loud Pipeline_Log warning even when no
@@ -159,43 +172,61 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
     addPipelineWarning_('Grader self-test threw: ' + (e.message || e));
   }
 
-  try {
-    gradeMLBPendingResults_();
-  } catch (e) {
-    Logger.log('gradeMLBPendingResults_: ' + e);
+  // Time each grader so the 📊 Pipeline_Timings tab tells us if grading
+  // (boxscore fetches per pending row) is what's blowing the budget.
+  function timedGrader(name, fn) {
+    const tg = Date.now();
+    let okFlag = true;
+    let errMsg = '';
+    try {
+      if (typeof fn === 'function') fn();
+    } catch (e) {
+      okFlag = false;
+      errMsg = String(e.message);
+      Logger.log(name + ': ' + e);
+    }
+    const s = (Date.now() - tg) / 1000;
+    if (typeof mlbFlushPipelineStepTiming_ === 'function') {
+      mlbFlushPipelineStepTiming_('grader: ' + name, s, okFlag, errMsg);
+    }
   }
-  try {
-    gradeMLBHitsV2PendingResults_();
-  } catch (e) {
-    Logger.log('gradeMLBHitsV2PendingResults_: ' + e);
-  }
-  try {
-    if (typeof gradeMLBTBV2PendingResults_ === 'function') gradeMLBTBV2PendingResults_();
-  } catch (e) {
-    Logger.log('gradeMLBTBV2PendingResults_: ' + e);
-  }
-  try {
-    if (typeof gradeHrPromoPendingResults_ === 'function') gradeHrPromoPendingResults_();
-  } catch (e) {
-    Logger.log('gradeHrPromoPendingResults_: ' + e);
-  }
+  timedGrader('K (live)',       typeof gradeMLBPendingResults_       === 'function' ? gradeMLBPendingResults_       : null);
+  timedGrader('H v2 (shadow)',  typeof gradeMLBHitsV2PendingResults_ === 'function' ? gradeMLBHitsV2PendingResults_ : null);
+  timedGrader('H v3 (shadow)',  typeof gradeMLBHitsV3PendingResults_ === 'function' ? gradeMLBHitsV3PendingResults_ : null);
+  timedGrader('HR promo',       typeof gradeHrPromoPendingResults_   === 'function' ? gradeHrPromoPendingResults_   : null);
   mlbResetPitchGameLogFetchCache_();
   mlbResetPitchHandCache_();
   mlbResetTeamHittingSeasonCache_();
   mlbResetSavantAbsCache_();
-  mlbResetBatterTbCaches_();
+  // Shared batter/pitcher fetch cache reset ONCE per slate. Individual
+  // model resets must NOT wipe this (Hits v2 → Hits v3 share the cache).
+  if (typeof mlbResetV3SharedFetchesCaches_ === 'function') mlbResetV3SharedFetchesCaches_();
+  if (typeof mlbResetBoxscoreJsonCache_ === 'function') mlbResetBoxscoreJsonCache_();
+  // Schedule block cache — read once after fetchMLBScheduleForSlate writes
+  // the tab. All per-batter card lookups (home abbr, matchup, opp SP) hit
+  // this in-memory array instead of re-reading the sheet hundreds of times.
+  if (typeof mlbResetScheduleBlockCache_ === 'function') mlbResetScheduleBlockCache_();
   let savantTeamCount = -1;
   const outcomes = [];
 
   function step(name, fn) {
     const t0 = Date.now();
     ss.toast('Running: ' + name, 'MLB-BOIZ', 8);
+    let okFlag = true;
+    let errMsg = '';
     try {
       fn();
-      outcomes.push({ name: name, ok: true, sec: (Date.now() - t0) / 1000 });
     } catch (e) {
-      outcomes.push({ name: name, ok: false, sec: (Date.now() - t0) / 1000, err: String(e.message) });
+      okFlag = false;
+      errMsg = String(e.message);
       Logger.log(e.stack);
+    }
+    const sec = (Date.now() - t0) / 1000;
+    outcomes.push(okFlag
+      ? { name: name, ok: true, sec: sec }
+      : { name: name, ok: false, sec: sec, err: errMsg });
+    if (typeof mlbFlushPipelineStepTiming_ === 'function') {
+      mlbFlushPipelineStepTiming_(name, sec, okFlag, errMsg);
     }
   }
 
@@ -221,19 +252,23 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   step('Slate board (join)', refreshMLBSlateBoard);
   step('Pitcher K queue', refreshPitcherKSlateQueue);
   step('Pitcher K card', refreshPitcherKBetCard);
-  step('Batter TB queue', refreshBatterTbSlateQueue);
-  step('Batter TB card', refreshBatterTbBetCard);
-  step('Batter TB v2 card (shadow tb.v2-full)', refreshBatterTBV2BetCard);
-  step('Batter Hits queue', refreshBatterHitsSlateQueue);
-  step('Batter Hits card (shadow h.v1)', refreshBatterHitsBetCard);
+  // TB v1/v2/v3 retired from pipeline 2026-05-21 (losing market + API budget).
+  // Source files remain for manual rebuild via Apps Script editor if needed.
   step('Batter Hits v2 card (LIVE h.v2-full)', refreshBatterHitsV2BetCard);
+  // Streak picks must run BEFORE the Bet Card so the formatter can read 🔥
+  // Streak_Picks to drive the yellow Streak highlight.
+  step('Streak picks (streak.v1)', refreshStreakPicks);
   step('MLB Bet Card', refreshMLBBetCard);
   // HR Promo built last so the snapshot block (after this) can read it.
   // Appended (not inserted) so the existing outcomes[] indices stay stable.
   step('Batter HR Promo refresh', refreshBatterHrPromoSheet_);
+  // Hits v3 must run AFTER Streak (already built above) for its streak overlap mult.
+  step('Batter Hits v3 card (shadow h.v3-contact)', refreshBatterHitsV3BetCard);
   // GS Promo reuses the HR-promo row builder, so it must run AFTER the HR refresh.
   step('Batter GS Promo refresh', refreshBatterGsPromoSheet_);
 
+  // Fixed indices for logStep_ rows below — if you add/remove steps, update these
+  // or switch to name-based lookup (see oHitsV3 below).
   const oCfg = outcomes[0] || { ok: true };
   const oInj = outcomes[1] || { ok: true };
   const oSch = outcomes[2] || { ok: true };
@@ -243,13 +278,9 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   const oSlate = outcomes[6] || { ok: true };
   const oPk = outcomes[7] || { ok: true };
   const oCard = outcomes[8] || { ok: true };
-  const oTbQ = outcomes[9] || { ok: true };
-  const oTbCard = outcomes[10] || { ok: true };
-  const oTbV2 = outcomes[11] || { ok: true };
-  const oHitsQ = outcomes[12] || { ok: true };
-  const oHitsCard = outcomes[13] || { ok: true };
-  const oHitsV2 = outcomes[14] || { ok: true };
-  const oBet = outcomes[15] || { ok: true };
+  const oHitsV2 = outcomes[9] || { ok: true };
+  const oStreak = outcomes[10] || { ok: true };
+  const oBet = outcomes[11] || { ok: true };
 
   logStep_('Config', 1, oCfg.ok ? 1 : 0, oCfg.ok ? '' : oCfg.err || 'failed');
   logStep_(
@@ -307,42 +338,16 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
     oCard.ok ? '' : oCard.err || 'failed'
   );
   logStep_(
-    'Batter TB queue',
-    0,
-    oTbQ.ok ? mlbTabDataRowsBelowHeader3_(ss, MLB_BATTER_TB_QUEUE_TAB) : 0,
-    oTbQ.ok ? '' : oTbQ.err || 'failed'
-  );
-  logStep_(
-    'Batter TB card',
-    0,
-    oTbCard.ok ? mlbTabDataRowsBelowHeader3_(ss, MLB_BATTER_TB_CARD_TAB) : 0,
-    oTbCard.ok ? '' : oTbCard.err || 'failed'
-  );
-  logStep_(
-    'Batter TB v2 card (shadow tb.v2-full)',
-    0,
-    oTbV2.ok && typeof MLB_BATTER_TB_V2_CARD_TAB !== 'undefined'
-      ? mlbTabDataRowsBelowHeader3_(ss, MLB_BATTER_TB_V2_CARD_TAB)
-      : 0,
-    oTbV2.ok ? '' : oTbV2.err || 'failed'
-  );
-  logStep_(
-    'Batter Hits queue',
-    0,
-    oHitsQ.ok ? mlbTabDataRowsBelowHeader3_(ss, MLB_BATTER_HITS_QUEUE_TAB) : 0,
-    oHitsQ.ok ? '' : oHitsQ.err || 'failed'
-  );
-  logStep_(
-    'Batter Hits card (shadow h.v1)',
-    0,
-    oHitsCard.ok ? mlbTabDataRowsBelowHeader3_(ss, MLB_BATTER_HITS_CARD_TAB) : 0,
-    oHitsCard.ok ? '' : oHitsCard.err || 'failed'
-  );
-  logStep_(
     'Batter Hits v2 card (LIVE h.v2-full)',
     0,
     oHitsV2.ok ? mlbTabDataRowsBelowHeader3_(ss, MLB_BATTER_HITS_V2_CARD_TAB) : 0,
     oHitsV2.ok ? '' : oHitsV2.err || 'failed'
+  );
+  logStep_(
+    'Streak picks (streak.v1)',
+    0,
+    oStreak.ok ? mlbTabDataRowsBelowHeader3_(ss, MLB_STREAK_PICKS_TAB) : 0,
+    oStreak.ok ? '' : oStreak.err || 'failed'
   );
   logStep_(
     'MLB Bet Card',
@@ -361,22 +366,17 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
     }
   }
 
-  // Shadow snapshot: reads the h.v1 card and writes to 🧪 MLB_Results_Log_v2.
-  // Function name kept for back-compat; see MLBHitsResultsLogV2.js.
-  if (oHitsCard.ok) {
-    try {
-      snapshotMLBHitsV2BetCardToLog(windowTag);
-    } catch (e) {
-      addPipelineWarning_('Hits shadow snapshot: ' + (e.message || e));
-    }
-  }
+  // h.v1 shadow snapshot retired 2026-05-20 along with the v1 hits card.
+  // The historical 🧪 MLB_Results_Log_v2 rows remain readable; no new
+  // rows will be appended. Compare panels for h.v1 will freeze accordingly.
 
-  // TB shadow snapshot — reads the tb.v2-full card, writes 🧪 MLB_Results_Log_TB_v2.
-  if (oTbV2.ok && typeof snapshotMLBTBV2BetCardToLog === 'function') {
+  // Hits v3 shadow snapshot — reads the h.v3-contact card, writes 🧪 MLB_Results_Log_Hits_v3.
+  const oHitsV3 = outcomes.filter(function (o) { return o.name.indexOf('Hits v3') !== -1; })[0] || { ok: false };
+  if (oHitsV3.ok && typeof snapshotMLBHitsV3BetCardToLog === 'function') {
     try {
-      snapshotMLBTBV2BetCardToLog(windowTag);
+      snapshotMLBHitsV3BetCardToLog(windowTag);
     } catch (e) {
-      addPipelineWarning_('TB v2 shadow snapshot: ' + (e.message || e));
+      addPipelineWarning_('Hits v3 shadow snapshot: ' + (e.message || e));
     }
   }
 
@@ -411,6 +411,22 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   }
 
   mlbAppendBetCardPipelineCoverage_(ss);
+
+  // Auto-refresh the 📊 Project_Status dashboard so it always reflects
+  // the latest snapshot / grading state without a manual click.
+  try {
+    if (typeof refreshProjectStatus === 'function') refreshProjectStatus();
+  } catch (e) {
+    addPipelineWarning_('Project Status refresh: ' + (e.message || e));
+  }
+
+  if (windowTag === 'FINAL' && typeof runPitcherDataDiagnostic === 'function') {
+    try {
+      runPitcherDataDiagnostic();
+    } catch (e) {
+      addPipelineWarning_('Pitcher diagnostic: ' + (e.message || e));
+    }
+  }
 
   outcomes.forEach(function (o) {
     if (!o.ok) addPipelineWarning_(o.name + ': ' + (o.err || 'failed'));

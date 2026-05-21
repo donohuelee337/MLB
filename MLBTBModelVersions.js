@@ -8,7 +8,7 @@
 
 const MLB_TB_MODEL_VERSIONS = {
   active: 'tb.v1',
-  shadow: ['tb.v2-full'],
+  shadow: ['tb.v2-full', 'tb.v3-power'],
 };
 
 function mlbTbActiveModelVersion_() {

@@ -269,6 +269,7 @@ function refreshPitcherKSlateQueue() {
           '',
           '',
           '',
+          '',
         ]);
         return;
       }
@@ -286,6 +287,7 @@ function refreshPitcherKSlateQueue() {
       let l3ip = '';
       let k9 = '';
       let hotCold = '';
+      let games = '';
       const pidNum = parseInt(sp.pid, 10);
       if (pidNum) {
         if (!seenIds[pidNum]) {
@@ -299,6 +301,7 @@ function refreshPitcherKSlateQueue() {
         l3ip = lg.l3ip;
         k9 = lg.k9;
         hotCold = lg.hotCold || '';
+        games = lg.games != null && lg.games !== '' ? lg.games : '';
       } else {
         note = note ? note + '; no_pitcher_id' : 'no_pitcher_id';
       }
@@ -347,6 +350,7 @@ function refreshPitcherKSlateQueue() {
         oppKpa,
         oppKpaVs,
         hotCold,
+        games,
       ]);
     });
   });
@@ -359,14 +363,14 @@ function refreshPitcherKSlateQueue() {
     sh = ss.insertSheet(MLB_PITCHER_K_QUEUE_TAB);
   }
   sh.setTabColor('#6a1b9a');
-  [72, 220, 56, 160, 88, 56, 72, 72, 52, 52, 52, 220, 88, 140, 44, 56, 72, 72, 56].forEach(function (w, i) {
+  [72, 220, 56, 160, 88, 56, 72, 72, 52, 52, 52, 220, 88, 140, 44, 56, 72, 72, 56, 48].forEach(function (w, i) {
     sh.setColumnWidth(i + 1, w);
   });
 
-  sh.getRange(1, 1, 1, 19)
+  sh.getRange(1, 1, 1, 20)
     .merge()
     .setValue(
-      '📋 Pitcher K queue — FD K + L3/season K9 + opp SO/PA + vs-hand SO/PA + hot/cold (statsapi) — season ' + season
+      '📋 Pitcher K queue — FD K + L3/season K9 + opp SO/PA + vs-hand SO/PA + hot/cold + games (statsapi) — season ' + season
     )
     .setFontWeight('bold')
     .setBackground('#4a148c')
@@ -393,6 +397,7 @@ function refreshPitcherKSlateQueue() {
     'opp_k_pa',
     'opp_k_pa_vs',
     'hot_cold',
+    'games',
   ];
   sh.getRange(3, 1, 1, headers.length)
     .setValues([headers])

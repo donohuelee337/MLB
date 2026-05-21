@@ -327,40 +327,67 @@ function mlbApplyBetCardFormatting_(sh, rows, headers, slateDate) {
     .setFontSize(10)
     .setHorizontalAlignment('right');
 
-  // MLB The Streak picks — highlight the two players with the highest projected
-  // H total. Streak is a daily pick-one promo (player needs ≥1 H to keep streak),
-  // so the two strongest projections are the natural picks to surface.
-  // Filters out 'Batter hits (shadow)' to avoid double-highlighting v2 rows.
-  const streakCandidates = [];
-  for (let i = 0; i < rows.length; i++) {
-    const market = String(rows[i][6] || '').toLowerCase();
-    if (market !== 'batter hits') continue;
-    const proj = parseFloat(String(rows[i][14]));
-    if (isNaN(proj)) continue;
-    streakCandidates.push({ rowIdx: i, proj: proj, player: String(rows[i][5] || '').trim() });
+  // MLB The Streak picks — yellow highlight is now driven by 🔥 Streak_Picks
+  // (built by refreshStreakPicks BEFORE this formatter runs). That sheet
+  // re-ranks v2 by P(≥1 hit) × SP K/9 penalty — see MLBStreakPicks.js.
+  // If the sheet is missing (e.g. formatter ran standalone), fall back to
+  // the legacy "top-2 by projected H" so the card still highlights something.
+  const ss = sh.getParent();
+  let streakByPlayer = {};
+  try {
+    streakByPlayer = mlbStreakPicksByPlayer_(ss) || {};
+  } catch (e) {
+    streakByPlayer = {};
   }
-  // Dedupe by player (keep highest proj per player), then take top 2.
-  const bestPerPlayer = {};
-  streakCandidates.forEach(function (c) {
-    if (!c.player) return;
-    if (!bestPerPlayer[c.player] || c.proj > bestPerPlayer[c.player].proj) {
-      bestPerPlayer[c.player] = c;
-    }
-  });
-  const streakPicks = Object.keys(bestPerPlayer)
-    .map(function (k) { return bestPerPlayer[k]; })
-    .sort(function (a, b) { return b.proj - a.proj; })
-    .slice(0, 2);
+  const haveStreakSheet = Object.keys(streakByPlayer).length > 0;
 
-  streakPicks.forEach(function (pick, idx) {
-    const rank = idx + 1;
-    // Bold gold on player cell (col 6) + the same on proj cell (col 15) so the
-    // pair reads as "this player at this projection".
+  const picksToHighlight = []; // [{ rowIdx, rank, label }]
+  if (haveStreakSheet) {
+    for (let i = 0; i < rows.length; i++) {
+      const market = String(rows[i][6] || '').toLowerCase();
+      if (market !== 'batter hits') continue;
+      const playerKey = String(rows[i][5] || '').trim().toLowerCase();
+      if (!playerKey) continue;
+      const hit = streakByPlayer[playerKey];
+      if (!hit) continue;
+      const label = hit.pStreak != null
+        ? 'P(≥1 hit) ' + (hit.pStreak * 100).toFixed(1) + '%'
+        : 'streak.v1';
+      picksToHighlight.push({ rowIdx: i, rank: hit.rank || 0, label: label });
+    }
+  } else {
+    // Legacy fallback — top-2 by projected H.
+    const streakCandidates = [];
+    for (let i = 0; i < rows.length; i++) {
+      const market = String(rows[i][6] || '').toLowerCase();
+      if (market !== 'batter hits') continue;
+      const proj = parseFloat(String(rows[i][14]));
+      if (isNaN(proj)) continue;
+      streakCandidates.push({ rowIdx: i, proj: proj, player: String(rows[i][5] || '').trim() });
+    }
+    const bestPerPlayer = {};
+    streakCandidates.forEach(function (c) {
+      if (!c.player) return;
+      if (!bestPerPlayer[c.player] || c.proj > bestPerPlayer[c.player].proj) {
+        bestPerPlayer[c.player] = c;
+      }
+    });
+    Object.keys(bestPerPlayer)
+      .map(function (k) { return bestPerPlayer[k]; })
+      .sort(function (a, b) { return b.proj - a.proj; })
+      .slice(0, 2)
+      .forEach(function (c, idx) {
+        picksToHighlight.push({ rowIdx: c.rowIdx, rank: idx + 1, label: 'projected ' + c.proj.toFixed(2) + ' H (legacy fallback)' });
+      });
+  }
+
+  picksToHighlight.forEach(function (pick) {
+    const rankTxt = pick.rank ? ' Pick #' + pick.rank : '';
     sh.getRange(4 + pick.rowIdx, 6)
-      .setBackground('#fde047')      // tailwind yellow-300
-      .setFontColor('#7c2d12')       // tailwind orange-900 for high contrast
+      .setBackground('#fde047')
+      .setFontColor('#7c2d12')
       .setFontWeight('bold')
-      .setNote('🔥 MLB The Streak — Pick #' + rank + ' · projected ' + pick.proj.toFixed(2) + ' H');
+      .setNote('🔥 MLB The Streak —' + rankTxt + ' · ' + pick.label);
     sh.getRange(4 + pick.rowIdx, 15)
       .setBackground('#fde047')
       .setFontColor('#7c2d12')
@@ -418,6 +445,38 @@ function mlbAppendBetTrackerSectionTBV2_(ss, sh, startRow, slateDate) {
     title: 'Bet Tracker (TB shadow)  ·  tb.v2-full advanced-features model  ·  total bases only',
     markets: [
       { key: 'TB', label: 'TOTAL BASES shadow', test: function (m) { return m.indexOf('total base') !== -1; } },
+    ],
+  });
+}
+
+/**
+ * TB v3 shadow tracker — reads 🧪 MLB_Results_Log_TB_v3. Hit-rate panel for
+ * the tb.v3-power model (v2 + ISO + opp HR/9 + HR-promo overlap).
+ */
+function mlbAppendBetTrackerSectionTBV3_(ss, sh, startRow, slateDate) {
+  if (typeof MLB_RESULTS_LOG_TB_V3_TAB === 'undefined') return startRow;
+  return _mlbRenderBetTrackerPanel_(ss, sh, startRow, slateDate, {
+    logTab: MLB_RESULTS_LOG_TB_V3_TAB,
+    logNcol: typeof MLB_RESULTS_LOG_TB_V3_NCOL !== 'undefined' ? MLB_RESULTS_LOG_TB_V3_NCOL : 33,
+    title: 'Bet Tracker (TB shadow v3)  ·  tb.v3-power: v2 + ISO + opp HR/9 + HR-promo overlap',
+    markets: [
+      { key: 'TB', label: 'TOTAL BASES v3', test: function (m) { return m.indexOf('total base') !== -1; } },
+    ],
+  });
+}
+
+/**
+ * Hits v3 shadow tracker — reads 🧪 MLB_Results_Log_Hits_v3. Hit-rate panel
+ * for h.v3-contact (v2 + batter K-rate inv + opp SP K/9 inv + Streak overlap).
+ */
+function mlbAppendBetTrackerSectionHitsV3_(ss, sh, startRow, slateDate) {
+  if (typeof MLB_RESULTS_LOG_HITS_V3_TAB === 'undefined') return startRow;
+  return _mlbRenderBetTrackerPanel_(ss, sh, startRow, slateDate, {
+    logTab: MLB_RESULTS_LOG_HITS_V3_TAB,
+    logNcol: typeof MLB_RESULTS_LOG_HITS_V3_NCOL !== 'undefined' ? MLB_RESULTS_LOG_HITS_V3_NCOL : 33,
+    title: 'Bet Tracker (Hits shadow v3)  ·  h.v3-contact: v2 + batter K-rate + opp SP K/9 + Streak overlap',
+    markets: [
+      { key: 'H', label: 'HITS v3', test: function (m) { return m.indexOf('batter hit') !== -1; } },
     ],
   });
 }

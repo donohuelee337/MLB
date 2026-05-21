@@ -12,7 +12,7 @@
 
 const MLB_HITS_MODEL_VERSIONS = {
   active: 'h.v2-full',
-  shadow: ['h.v1'],
+  shadow: ['h.v1', 'h.v3-contact'],
 };
 
 function mlbHitsActiveModelVersion_() {

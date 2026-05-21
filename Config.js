@@ -48,9 +48,29 @@ function mlbAbbrFromTeamName_(name) {
   return MLB_TEAM_NAME_TO_ABBR[n] || '';
 }
 
+/** Map statsapi / schedule abbreviation variants → Config canonical abbr. */
+const MLB_ABBR_ALIASES = {
+  AZ: 'ARI',
+  WSH: 'WSN',
+  WAS: 'WSN',
+  ATH: 'OAK',
+  LV: 'OAK',
+  LAA: 'LAA',
+  LA: 'LAA',
+};
+
+function mlbCanonicalTeamAbbr_(abbr) {
+  const a = String(abbr || '').trim().toUpperCase();
+  if (!a) return '';
+  if (Object.prototype.hasOwnProperty.call(MLB_ABBR_ALIASES, a)) {
+    return MLB_ABBR_ALIASES[a];
+  }
+  return a;
+}
+
 /** @returns {number} MLB team id or NaN if abbreviation is unknown. */
 function mlbTeamIdFromAbbr_(abbr) {
-  const a = String(abbr || '').trim().toUpperCase();
+  const a = mlbCanonicalTeamAbbr_(abbr);
   if (!a) return NaN;
   for (const tid in MLB_TEAM_ABBREV) {
     if (!Object.prototype.hasOwnProperty.call(MLB_TEAM_ABBREV, tid)) continue;
@@ -121,6 +141,7 @@ function buildConfigTab() {
   row_('HP_UMP_LAMBDA_MULT', '1', 'Multiply 🎰 λ when hp_umpire listed (1=no change; try 1.02–1.05 cautiously)');
   row_('LHP_K_LAMBDA_MULT', '1', 'Extra λ mult when pitcher throws L (1=no change)');
   row_('RHP_K_LAMBDA_MULT', '1', 'Extra λ mult when pitcher throws R (1=no change)');
+  row_('LEAGUE_PITCHING_K9', '8.2', 'Prior league SP K/9 for 🧪 k.v2 shadow regression — pitcher K9 ramps from this toward own K9 across 0→8 starts. Tune yearly.');
   row_('LEAGUE_HITTING_K_PA', '0.225', 'League prior SO/PA (all PA); fallback when vs-hand priors blank or when using season opp_k_pa only.');
   row_(
     'LEAGUE_HITTING_K_PA_VS_L',
@@ -145,10 +166,22 @@ function buildConfigTab() {
   row_('HR_PROMO_LINEUP_FALLBACK', 'roster', 'When boxscore lineup is missing: "roster" = score every batter w/ ≥30 PA & ≥1 HR; "skip" = drop the game and warn.');
   row_('HR_PROMO_BLEND_L14_WEIGHT', '0.25', '0..1 blend of last-14-day HR/PA vs season HR/PA. Higher = more reactive to hot/cold streaks; lower = more season-anchored.');
   row_('HR_PROMO_SHRINK_MIN_PA', '50', 'Bayesian shrink min-PA toward season prior. Lower (~25) trusts small samples; higher (~100) needs full season before deviating.');
+  row_(
+    'OPP_SP_MIN_IP',
+    '10',
+    'Min season IP on opposing SP before opp_SP mult / HR9 / K9 adjustments apply (Hits/TB v2/v3, HR promo). Below this → neutral mult 1.0 — avoids April call-up traps.'
+  );
   row_('HR_PROMO_PITCHER_MULT_MIN', '0.85', 'Floor for SP HR9/league_HR9 multiplier (caps the boost vs HR-prone pitchers).');
   row_('HR_PROMO_PITCHER_MULT_MAX', '1.15', 'Ceiling for SP HR9 multiplier.');
   row_('HR_PROMO_CALIB_MIN_ROWS', '500', 'Min graded rows before Platt calibration fits — until then p_calibrated == p_poisson.');
   row_('HR_PROMO_EXPECTED_PA_JSON', '', 'Optional: JSON array of 9 positive numbers — expected PA per lineup slot 1..9. Empty = built-in default [4.65, 4.55, ..., 3.6].');
+  // 🔥 Streak picks (FanDuel MLB The Streak) — Streak-only adjustments on top of h.v2-full P(≥1 hit).
+  row_('STREAK_K9_LEAGUE', '8.5', 'League SP K/9 baseline for 🔥 Streak_Picks K-rate penalty. Update yearly. Pitchers above this are penalized; below get a small bonus.');
+  row_('STREAK_K9_PENALTY_ALPHA', '0.15', 'Sensitivity of Streak K-rate penalty (0 = off). penalty_mult = 1 − α × (sp_k9 − league)/league, clamped 0.80–1.05. Higher α = trust K/9 more.');
+  row_('STREAK_PICK_COUNT', '2', 'Number of daily 🔥 Streak picks marked is_pick=TRUE (FanDuel allows 2 active streaks).');
+  row_('STREAK_PEN_LEAGUE_H9', '8.5', 'League bullpen H/9 baseline for 🔥 Streak_Picks bullpen leverage. Update yearly.');
+  row_('STREAK_PEN_BETA', '0.20', 'Sensitivity of bullpen leverage (0 = off). pen_mult = 1 + pen_share × β × (pen_h9 − league)/league, clamped 0.95–1.05. pen_share = max(0, 1 − exp_sp_ip/9).');
+  row_('STREAK_SP_IP_DEFAULT', '5.5', 'Fallback expected SP IP/start when the probable starter has no logged starts this season (early season / spot starter). Used only for bullpen leverage.');
   ss.getNamedRanges().forEach(function (nr) {
     if (nr.getName() === 'CONFIG') nr.remove();
   });

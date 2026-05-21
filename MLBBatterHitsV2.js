@@ -46,30 +46,9 @@ function mlbResetHitsV2Caches_() {
 // --- batter team affiliation -----------------------------------------------
 
 function mlbHitsV2BatterTeamAbbr_(playerId) {
-  const id = parseInt(playerId, 10);
-  if (!id) return '';
-  if (Object.prototype.hasOwnProperty.call(__mlbHitsV2BatterTeamAbbrCache, id)) {
-    return __mlbHitsV2BatterTeamAbbrCache[id];
-  }
-  const url = mlbStatsApiBaseUrl_() + '/people/' + id + '?hydrate=currentTeam';
-  try {
-    Utilities.sleep(40);
-    const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
-    if (res.getResponseCode() !== 200) {
-      __mlbHitsV2BatterTeamAbbrCache[id] = '';
-      return '';
-    }
-    const payload = JSON.parse(res.getContentText());
-    const person = (payload.people && payload.people[0]) || {};
-    const team = person.currentTeam || {};
-    const abbr = String(team.abbreviation || '').trim().toUpperCase();
-    __mlbHitsV2BatterTeamAbbrCache[id] = abbr;
-    return abbr;
-  } catch (e) {
-    Logger.log('mlbHitsV2BatterTeamAbbr_: ' + e.message);
-    __mlbHitsV2BatterTeamAbbrCache[id] = '';
-    return '';
-  }
+  // Delegates to shared cache — TB v2 + HR Promo + anyone else needing
+  // the same batter's team abbr now reuses this single fetch.
+  return mlbSharedFetchBatterTeamAbbr_(playerId);
 }
 
 // --- opposing probable starter --------------------------------------------
@@ -77,116 +56,34 @@ function mlbHitsV2BatterTeamAbbr_(playerId) {
 /**
  * Reads 📅 MLB_Schedule for the gamePk and returns the probable SP on the
  * OPPOSITE side from the batter's team. {id, name, throws} or null.
+ * Delegates to the shared cached implementation in MLBSchedule.js.
  */
 function mlbHitsV2OpposingProbableSp_(ss, gamePk, batterTeamAbbr) {
-  const g = parseInt(gamePk, 10);
-  if (!g) return null;
-  const sh = ss.getSheetByName(MLB_SCHEDULE_TAB);
-  if (!sh || sh.getLastRow() < 4) return null;
-  const last = sh.getLastRow();
-  const block = sh.getRange(4, 1, last, 13).getValues();
-  const wantBat = String(batterTeamAbbr || '').trim().toUpperCase();
-  for (let i = 0; i < block.length; i++) {
-    if (parseInt(block[i][0], 10) !== g) continue;
-    const away = String(block[i][3] || '').trim().toUpperCase();
-    const home = String(block[i][4] || '').trim().toUpperCase();
-    const awayProb = String(block[i][6] || '').trim();
-    const homeProb = String(block[i][7] || '').trim();
-    const awayProbId = parseInt(block[i][11], 10);
-    const homeProbId = parseInt(block[i][12], 10);
-    if (wantBat && wantBat === away) {
-      return homeProbId ? { id: homeProbId, name: homeProb, throws: '' } : null;
-    }
-    if (wantBat && wantBat === home) {
-      return awayProbId ? { id: awayProbId, name: awayProb, throws: '' } : null;
-    }
-    return null;
-  }
-  return null;
+  return mlbGetOpposingProbableSp_(ss, gamePk, batterTeamAbbr);
 }
 
 function mlbHitsV2PitcherThrows_(pitcherId) {
-  const id = parseInt(pitcherId, 10);
-  if (!id) return '';
-  if (Object.prototype.hasOwnProperty.call(__mlbHitsV2PitcherThrowsCache, id)) {
-    return __mlbHitsV2PitcherThrowsCache[id];
-  }
-  const url = mlbStatsApiBaseUrl_() + '/people/' + id;
-  try {
-    Utilities.sleep(40);
-    const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
-    if (res.getResponseCode() !== 200) {
-      __mlbHitsV2PitcherThrowsCache[id] = '';
-      return '';
-    }
-    const payload = JSON.parse(res.getContentText());
-    const person = (payload.people && payload.people[0]) || {};
-    const code = String((person.pitchHand && person.pitchHand.code) || '').trim().toUpperCase();
-    const out = code === 'L' || code === 'R' ? code : '';
-    __mlbHitsV2PitcherThrowsCache[id] = out;
-    return out;
-  } catch (e) {
-    Logger.log('mlbHitsV2PitcherThrows_: ' + e.message);
-    __mlbHitsV2PitcherThrowsCache[id] = '';
-    return '';
-  }
+  return mlbSharedFetchPitcherThrows_(pitcherId);
 }
 
 // --- opposing SP H/9 multiplier (shrunk) ----------------------------------
 
-function mlbHitsV2OpposingHitRateMult_(pitcherId, season) {
-  const id = parseInt(pitcherId, 10);
-  if (!id) return { mult: 1, h9: '', ip: '' };
-  const key = id + ':' + String(season);
-  if (Object.prototype.hasOwnProperty.call(__mlbHitsV2PitcherHitRateCache, key)) {
-    return __mlbHitsV2PitcherHitRateCache[key];
-  }
-  const url =
-    mlbStatsApiBaseUrl_() +
-    '/people/' +
-    id +
-    '/stats?stats=season&group=pitching&season=' +
-    encodeURIComponent(String(season));
-  let mult = 1;
-  let h9 = '';
-  let ip = '';
-  try {
-    Utilities.sleep(40);
-    const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
-    if (res.getResponseCode() === 200) {
-      const payload = JSON.parse(res.getContentText());
-      const splits = (payload.stats && payload.stats[0] && payload.stats[0].splits) || [];
-      if (splits.length) {
-        const stat = splits[0].stat || {};
-        const hits = parseInt(stat.hits, 10);
-        const ipStr = String(stat.inningsPitched || '0').trim();
-        // inningsPitched is "X.Y" where Y is outs (0/1/2). Convert to decimal IP.
-        let ipDec = 0;
-        if (ipStr) {
-          const parts = ipStr.split('.');
-          const whole = parseInt(parts[0], 10) || 0;
-          const outs = parts.length > 1 ? parseInt(parts[1], 10) || 0 : 0;
-          ipDec = whole + outs / 3;
-        }
-        if (!isNaN(hits) && ipDec > 0) {
-          const rawH9 = (hits * 9) / ipDec;
-          const k = MLB_HITS_V2_OPP_SP_SHRINK_IP;
-          // Shrink toward league H/9 using IP-weighted prior.
-          const shrunkH9 = (hits + MLB_HITS_V2_LEAGUE_H_PER_9 * (k / 9)) / ((ipDec + k) / 9);
-          h9 = Math.round(rawH9 * 100) / 100;
-          ip = Math.round(ipDec * 10) / 10;
-          mult = shrunkH9 / MLB_HITS_V2_LEAGUE_H_PER_9;
-          mult = Math.max(MLB_HITS_V2_OPP_MULT_MIN, Math.min(MLB_HITS_V2_OPP_MULT_MAX, mult));
-          mult = Math.round(mult * 1000) / 1000;
-        }
-      }
-    }
-  } catch (e) {
-    Logger.log('mlbHitsV2OpposingHitRateMult_: ' + e.message);
-  }
-  const out = { mult: mult, h9: h9, ip: ip };
-  __mlbHitsV2PitcherHitRateCache[key] = out;
-  return out;
+function mlbHitsV2OpposingHitRateMult_(pitcherId, season, minIp) {
+  // Read from the shared pitcher season cache — TB v2, v3 models, and HR
+  // Promo all pull the same fetch. We derive H/9 + shrink locally.
+  const stat = mlbSharedFetchPitcherSeasonPitching_(pitcherId, season);
+  const ipFloor = minIp > 0 ? minIp : 10;
+  if (isNaN(stat.h) || stat.ip < ipFloor) return { mult: 1, h9: '', ip: '' };
+  const rawH9 = (stat.h * 9) / stat.ip;
+  const k = MLB_HITS_V2_OPP_SP_SHRINK_IP;
+  const shrunkH9 = (stat.h + MLB_HITS_V2_LEAGUE_H_PER_9 * (k / 9)) / ((stat.ip + k) / 9);
+  let mult = shrunkH9 / MLB_HITS_V2_LEAGUE_H_PER_9;
+  mult = Math.max(MLB_HITS_V2_OPP_MULT_MIN, Math.min(MLB_HITS_V2_OPP_MULT_MAX, mult));
+  return {
+    mult: Math.round(mult * 1000) / 1000,
+    h9: Math.round(rawH9 * 100) / 100,
+    ip: Math.round(stat.ip * 10) / 10,
+  };
 }
 
 // --- batter vs-hand H/PA (shrunk to season) -------------------------------
@@ -197,57 +94,20 @@ function mlbHitsV2BatterVsHandHPerPa_(playerId, season, throwsHand) {
     return { hpPaVsHand: NaN, hpPaSzn: NaN, samplePa: 0, hand: '' };
   }
   const hand = String(throwsHand || '').trim().toUpperCase();
-  const key = id + ':' + String(season);
-  let cached = __mlbHitsV2BatterVsHandCache[key];
-  if (!cached) {
-    const url =
-      mlbStatsApiBaseUrl_() +
-      '/people/' +
-      id +
-      '/stats?stats=statSplits,season&group=hitting&sitCodes=vl,vr&season=' +
-      encodeURIComponent(String(season));
-    let vl = { h: 0, pa: 0 };
-    let vr = { h: 0, pa: 0 };
-    let szn = { h: 0, pa: 0 };
-    try {
-      Utilities.sleep(40);
-      const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
-      if (res.getResponseCode() === 200) {
-        const payload = JSON.parse(res.getContentText());
-        const groups = payload.stats || [];
-        groups.forEach(function (grp) {
-          const ty = String((grp && grp.type && grp.type.displayName) || '').toLowerCase();
-          const splits = (grp && grp.splits) || [];
-          if (ty.indexOf('statsplits') !== -1) {
-            splits.forEach(function (sp) {
-              const code = String((sp.split && sp.split.code) || '').toLowerCase();
-              const st = sp.stat || {};
-              const h = parseInt(st.hits, 10) || 0;
-              const pa = parseInt(st.plateAppearances, 10) || 0;
-              if (code === 'vl') vl = { h: h, pa: pa };
-              else if (code === 'vr') vr = { h: h, pa: pa };
-            });
-          } else if (ty.indexOf('season') !== -1 && splits.length) {
-            const st = splits[0].stat || {};
-            szn = {
-              h: parseInt(st.hits, 10) || 0,
-              pa: parseInt(st.plateAppearances, 10) || 0,
-            };
-          }
-        });
-      }
-    } catch (e) {
-      Logger.log('mlbHitsV2BatterVsHandHPerPa_: ' + e.message);
-    }
-    cached = { vl: vl, vr: vr, szn: szn };
-    __mlbHitsV2BatterVsHandCache[key] = cached;
-  }
-  const sznPa = cached.szn.pa;
-  const sznH = cached.szn.h;
+  // Shared cache: same URL as TB v2's vs-hand fetch (different parsed
+  // fields). Extract H + PA from the raw stat objects.
+  const data = mlbSharedFetchBatterHittingSplitsAndSeason_(id, season);
+  const vlH  = parseInt(data.vl.hits, 10) || 0;
+  const vlPa = parseInt(data.vl.plateAppearances, 10) || 0;
+  const vrH  = parseInt(data.vr.hits, 10) || 0;
+  const vrPa = parseInt(data.vr.plateAppearances, 10) || 0;
+  const sznH  = parseInt(data.szn.hits, 10) || 0;
+  const sznPa = parseInt(data.szn.plateAppearances, 10) || 0;
+
   const hpPaSzn = sznPa > 0 ? sznH / sznPa : NaN;
   let split = null;
-  if (hand === 'L') split = cached.vl;
-  else if (hand === 'R') split = cached.vr;
+  if (hand === 'L')      split = { h: vlH, pa: vlPa };
+  else if (hand === 'R') split = { h: vrH, pa: vrPa };
   if (!split || split.pa <= 0) {
     return { hpPaVsHand: hpPaSzn, hpPaSzn: hpPaSzn, samplePa: 0, hand: hand };
   }
@@ -316,6 +176,12 @@ function mlbHitsV2ComputeRow_(ss, gamePk, batterId, season, cfg) {
   const homeAbbr = mlbScheduleHomeAbbrForGamePk_(ss, gamePk);
   out.parkMult = mlbParkHitsLambdaMultForHomeAbbr_(homeAbbr);
 
+  // Pre-warm hitting splits — the response carries the player's team
+  // abbreviation as a side-effect in mlbSharedFetchBatterHittingSplitsAndSeason_,
+  // so the team-abbr lookup below reads from cache instead of making a
+  // separate /people?hydrate=currentTeam call that may not return abbreviation.
+  mlbSharedFetchBatterHittingSplitsAndSeason_(batterId, season);
+
   // Opposing SP via batter team affiliation.
   const batterAbbr = mlbHitsV2BatterTeamAbbr_(batterId);
   const oppSp = batterAbbr ? mlbHitsV2OpposingProbableSp_(ss, gamePk, batterAbbr) : null;
@@ -323,7 +189,7 @@ function mlbHitsV2ComputeRow_(ss, gamePk, batterId, season, cfg) {
     out.oppSpId = oppSp.id || '';
     out.oppSpName = oppSp.name || '';
     out.oppSpThrows = mlbHitsV2PitcherThrows_(oppSp.id);
-    const opp = mlbHitsV2OpposingHitRateMult_(oppSp.id, season);
+    const opp = mlbHitsV2OpposingHitRateMult_(oppSp.id, season, mlbOppSpMinIp_(cfg));
     out.oppMult = opp.mult;
     out.oppH9 = opp.h9;
     out.oppIp = opp.ip;

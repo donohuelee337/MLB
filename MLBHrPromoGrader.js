@@ -53,7 +53,6 @@ function gradeHrPromoPendingResults_() {
     }
 
     const box = mlbFetchBoxscoreJson_(gamePk);
-    Utilities.sleep(120);
     if (!box) {
       logSh.getRange(4 + i, 21).setValue('boxscore fetch failed');
       continue;
