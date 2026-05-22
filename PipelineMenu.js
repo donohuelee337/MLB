@@ -211,6 +211,7 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   if (typeof mlbResetLineupsCache_ === 'function') mlbResetLineupsCache_();
   let savantTeamCount = -1;
   const outcomes = [];
+  const cfg = getConfig();
 
   function step(name, fn) {
     const t0 = Date.now();
@@ -278,15 +279,15 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   const oCfg = outcomes[0] || { ok: true };
   const oInj = outcomes[1] || { ok: true };
   const oSch = outcomes[2] || { ok: true };
-  const oGameLogs = outcomes[3] || { ok: true };
-  const oOdds = outcomes[4] || { ok: true };
-  const oSavant = outcomes[5] || { ok: true };
-  const oSlate = outcomes[6] || { ok: true };
-  const oPk = outcomes[7] || { ok: true };
-  const oCard = outcomes[8] || { ok: true };
-  const oHitsV2 = outcomes[9] || { ok: true };
-  const oStreak = outcomes[10] || { ok: true };
-  const oBet = outcomes[11] || { ok: true };
+  const oGameLogs = outcomes[4] || { ok: true };
+  const oOdds = outcomes[5] || { ok: true };
+  const oSavant = outcomes[6] || { ok: true };
+  const oSlate = outcomes[7] || { ok: true };
+  const oPk = outcomes[8] || { ok: true };
+  const oCard = outcomes[9] || { ok: true };
+  const oHitsV2 = outcomes[10] || { ok: true };
+  const oStreak = outcomes[11] || { ok: true };
+  const oBet = outcomes[12] || { ok: true };
 
   logStep_('Config', 1, oCfg.ok ? 1 : 0, oCfg.ok ? '' : oCfg.err || 'failed');
   logStep_(
