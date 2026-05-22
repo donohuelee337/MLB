@@ -179,7 +179,7 @@ function mlbBuildPitcherDataDiagnosticReport_(ss, cfg, season) {
   if (!streak || streak.getLastRow() < 4) {
     addSection('🔥 Streak_Picks', [], ['tab missing or empty']);
   } else {
-    const data = streak.getRange(4, 1, streak.getLastRow() - 3, 18).getValues();
+    const data = streak.getRange(4, 1, streak.getLastRow() - 3, 22).getValues();
     let n = 0;
     let noSp = 0;
     let noK9 = 0;
@@ -189,8 +189,8 @@ function mlbBuildPitcherDataDiagnosticReport_(ss, cfg, season) {
       const batter = String(r[2] || '').trim();
       if (!batter) return;
       n++;
-      if (r[15] === true) picks++;
-      const notes = String(r[17] || '');
+      if (r[19] === true) picks++;
+      const notes = String(r[21] || '');
       if (notes.indexOf('no_opp_sp') !== -1) noSp++;
       if (notes.indexOf('no_sp_k9') !== -1) noK9++;
       if (notes.indexOf('no_pen_h9') !== -1) noPen++;

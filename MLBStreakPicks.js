@@ -38,6 +38,22 @@ const MLB_STREAK_PEN_MULT_MIN = 0.95;
 const MLB_STREAK_PEN_MULT_MAX = 1.05;
 const MLB_STREAK_SP_IP_DEFAULT = 5.5; // league avg SP IP/start fallback
 
+// --- dead-PA penalty tuning -----------------------------------------------
+// BB and HBP end the PA without a hit-eligible event. SPs that walk or hit
+// way more batters than league effectively shrink the hit-eligible PA pool,
+// which v2's H/9 mult doesn't fully capture (H/9 normalizes to innings, not
+// to PAs faced). dead_pa_rate = (BB + HBP) / BF. League ~ 0.085.
+const MLB_STREAK_LEAGUE_DEAD_PA_RATE_DEFAULT = 0.085;
+const MLB_STREAK_DEAD_PA_ALPHA_DEFAULT = 0.30;
+const MLB_STREAK_DEAD_PA_MULT_MIN = 0.94;
+const MLB_STREAK_DEAD_PA_MULT_MAX = 1.04;
+
+// --- BABIP regression flag (notes only — not in pStreak math) -------------
+// Surfaces hot/cold luck candidates so we can eyeball before locking a pick.
+const MLB_STREAK_BABIP_LOW_THRESHOLD = 0.240;
+const MLB_STREAK_BABIP_HIGH_THRESHOLD = 0.380;
+const MLB_STREAK_BABIP_MIN_PA = 80;
+
 // Local team caches (per refresh — cleared by mlbStreakResetCaches_).
 var __mlbStreakExpSpIpCache = {};
 var __mlbStreakPenH9Cache = {};
@@ -202,14 +218,21 @@ function mlbStreakPitcherContextForBatter_(gamePk, batterId, season, gameMap) {
 }
 
 function mlbStreakFillPitcherStats_(spId, season) {
-  const out = { spK9: '', expSpIp: '' };
+  const out = { spK9: '', expSpIp: '', deadPaRate: '', oppAvg: '' };
   const pid = parseInt(spId, 10);
   if (!pid) return out;
-  // Season K/9 from shared pitcher cache (same fetch as Hits v3 / HR promo).
+  // Season K/9 + dead-PA rate from shared pitcher cache (same fetch as Hits v3 / HR promo).
   if (typeof mlbSharedFetchPitcherSeasonPitching_ === 'function') {
     const stat = mlbSharedFetchPitcherSeasonPitching_(pid, season);
     if (!isNaN(stat.k) && stat.ip > 0) {
       out.spK9 = Math.round((stat.k * 9) / stat.ip * 100) / 100;
+    }
+    if (!isNaN(stat.bb) && !isNaN(stat.bf) && stat.bf > 0) {
+      const hbp = isNaN(stat.hbp) ? 0 : stat.hbp;
+      out.deadPaRate = Math.round(((stat.bb + hbp) / stat.bf) * 1000) / 1000;
+    }
+    if (!isNaN(stat.oppAvg)) {
+      out.oppAvg = Math.round(stat.oppAvg * 1000) / 1000;
     }
   }
   const ipNum = mlbStreakExpectedSpIp_(pid, season);
@@ -222,6 +245,50 @@ function mlbStreakFillPitcherStats_(spId, season) {
     }
   }
   return out;
+}
+
+/**
+ * Dead-PA penalty: SPs that walk + HBP more batters than league shrink the
+ * hit-eligible PA pool. Symmetric small bonus for strike-throwers.
+ * @param {number|string} deadPaRate — observed (BB+HBP)/BF
+ * @param {number} leagueRate
+ * @param {number} alpha
+ * @returns {number} multiplier in [STREAK_DEAD_PA_MULT_MIN, STREAK_DEAD_PA_MULT_MAX]
+ */
+function mlbStreakDeadPaPenaltyMult_(deadPaRate, leagueRate, alpha) {
+  const r = parseFloat(deadPaRate, 10);
+  if (isNaN(r) || r < 0) return 1;
+  const league = leagueRate > 0 ? leagueRate : MLB_STREAK_LEAGUE_DEAD_PA_RATE_DEFAULT;
+  const a = alpha >= 0 ? alpha : MLB_STREAK_DEAD_PA_ALPHA_DEFAULT;
+  const excess = (r - league) / league;
+  let m = 1 - a * excess;
+  m = Math.max(MLB_STREAK_DEAD_PA_MULT_MIN, Math.min(MLB_STREAK_DEAD_PA_MULT_MAX, m));
+  return Math.round(m * 1000) / 1000;
+}
+
+/**
+ * Batter season BABIP for regression flagging. Reads from the shared batter
+ * splits+season cache (no extra fetch). Returns NaN below MIN_PA threshold.
+ */
+function mlbStreakBatterBabip_(batterId, season) {
+  const id = parseInt(batterId, 10);
+  if (!id || typeof mlbSharedFetchBatterHittingSplitsAndSeason_ !== 'function') return NaN;
+  const data = mlbSharedFetchBatterHittingSplitsAndSeason_(id, season);
+  const szn = (data && data.szn) || {};
+  const pa = parseInt(szn.plateAppearances, 10) || 0;
+  if (pa < MLB_STREAK_BABIP_MIN_PA) return NaN;
+  // Prefer statsapi's `babip` field; fall back to (H - HR) / (AB - K - HR + SF).
+  const raw = szn.babip != null ? parseFloat(szn.babip) : NaN;
+  if (!isNaN(raw) && raw >= 0 && raw <= 1) return raw;
+  const h = parseInt(szn.hits, 10);
+  const hr = parseInt(szn.homeRuns, 10) || 0;
+  const ab = parseInt(szn.atBats, 10);
+  const k = parseInt(szn.strikeOuts, 10) || 0;
+  const sf = parseInt(szn.sacFlies, 10) || 0;
+  if (isNaN(h) || isNaN(ab)) return NaN;
+  const denom = ab - k - hr + sf;
+  if (denom <= 0) return NaN;
+  return (h - hr) / denom;
 }
 
 /**
@@ -362,6 +429,8 @@ function refreshStreakPicks() {
   const leagueH9 = cfgNum_('STREAK_PEN_LEAGUE_H9', MLB_STREAK_LEAGUE_H9_DEFAULT, 0.1);
   const penBeta = cfgNum_('STREAK_PEN_BETA', MLB_STREAK_PEN_BETA_DEFAULT, 0);
   const spIpDefault = cfgNum_('STREAK_SP_IP_DEFAULT', MLB_STREAK_SP_IP_DEFAULT, 1);
+  const leagueDeadPa = cfgNum_('STREAK_LEAGUE_DEAD_PA_RATE', MLB_STREAK_LEAGUE_DEAD_PA_RATE_DEFAULT, 0.001);
+  const deadPaAlpha = cfgNum_('STREAK_DEAD_PA_ALPHA', MLB_STREAK_DEAD_PA_ALPHA_DEFAULT, 0);
   const pickCountRaw = String(cfg['STREAK_PICK_COUNT'] != null ? cfg['STREAK_PICK_COUNT'] : '').trim();
   const pickCount = (function () {
     const n = parseInt(pickCountRaw, 10);
@@ -384,25 +453,32 @@ function refreshStreakPicks() {
     let spK9 = '';
     let expSpIp = '';
     let oppAbbr = '';
+    let deadPaRate = '';
+    let oppAvg = '';
     if (c.gamePk && c.batterId) {
       let ctx = mlbStreakPitcherContextForBatter_(c.gamePk, c.batterId, season, gameMap);
       let spId = ctx ? ctx.spId : 0;
-      if (!ctx && c.oppSpName && typeof mlbScheduleSpContextByName_ === 'function') {
-        const fb = mlbScheduleSpContextByName_(ss, c.gamePk, c.oppSpName);
-        if (fb) {
-          spId = fb.spId;
-          oppSpName = fb.spName || c.oppSpName;
-          oppAbbr = fb.oppAbbr || '';
-        }
-      } else if (ctx) {
+      if (ctx) {
         oppSpName = ctx.oppSpName || '';
         oppAbbr = ctx.oppAbbr || '';
-        spId = ctx.spId;
+      }
+      // Fallback also fires when ctx resolved but the schedule's probable SP
+      // id was empty (early-morning runs before MLB publishes probables).
+      // Match v2 card's opp_sp_name back to the schedule by SP name to recover.
+      if ((!ctx || !spId) && c.oppSpName && typeof mlbScheduleSpContextByName_ === 'function') {
+        const fb = mlbScheduleSpContextByName_(ss, c.gamePk, c.oppSpName);
+        if (fb && fb.spId) {
+          spId = fb.spId;
+          oppSpName = fb.spName || c.oppSpName || oppSpName;
+          oppAbbr = fb.oppAbbr || oppAbbr;
+        }
       }
       if (spId) {
         const stats = mlbStreakFillPitcherStats_(spId, season);
         spK9 = stats.spK9;
         expSpIp = stats.expSpIp;
+        deadPaRate = stats.deadPaRate;
+        oppAvg = stats.oppAvg;
       }
     }
 
@@ -417,13 +493,18 @@ function refreshStreakPicks() {
     const k9Mult = mlbStreakK9PenaltyMult_(spK9, leagueK9, alpha);
     const ipForLeverage = expSpIp !== '' ? expSpIp : spIpDefault;
     const penMult = mlbStreakBullpenLeverageMult_(ipForLeverage, penH9, leagueH9, penBeta);
+    const deadPaMult = mlbStreakDeadPaPenaltyMult_(deadPaRate, leagueDeadPa, deadPaAlpha);
 
     let pStreak = '';
     if (!isNaN(pHitV2)) {
-      pStreak = pHitV2 * k9Mult * penMult;
+      pStreak = pHitV2 * k9Mult * penMult * deadPaMult;
       pStreak = Math.max(0, Math.min(0.999, pStreak));
       pStreak = Math.round(pStreak * 10000) / 10000;
     }
+
+    // BABIP regression flag — surface only, not in pStreak math.
+    const babip = c.batterId ? mlbStreakBatterBabip_(c.batterId, season) : NaN;
+    const babipDisplay = isNaN(babip) ? '' : Math.round(babip * 1000) / 1000;
 
     const notes = [];
     if (c.flagsV2) notes.push('v2:' + c.flagsV2);
@@ -431,7 +512,10 @@ function refreshStreakPicks() {
     if (spK9 === '') notes.push('no_sp_k9');
     if (expSpIp === '') notes.push('no_sp_ip');
     if (penH9 === '') notes.push('no_pen_h9');
+    if (deadPaRate === '') notes.push('no_dead_pa');
     if (isNaN(pHitV2)) notes.push('no_v2_lambda');
+    if (!isNaN(babip) && babip < MLB_STREAK_BABIP_LOW_THRESHOLD) notes.push('babip_low');
+    if (!isNaN(babip) && babip > MLB_STREAK_BABIP_HIGH_THRESHOLD) notes.push('babip_high');
 
     out.push({
       gamePk: c.gamePk || '',
@@ -439,14 +523,18 @@ function refreshStreakPicks() {
       batter: c.batter || '',
       batterId: c.batterId || '',
       pHitV2: isNaN(pHitV2) ? '' : Math.round(pHitV2 * 10000) / 10000,
+      babip: babipDisplay,
       oppSpName: oppSpName,
       spK9: spK9 === '' ? '' : Math.round(spK9 * 100) / 100,
       expSpIp: expSpIp === '' ? '' : expSpIp,
+      oppAvg: oppAvg === '' ? '' : oppAvg,
+      deadPaRate: deadPaRate === '' ? '' : deadPaRate,
       oppAbbr: oppAbbr || '',
       penH9: penH9 === '' ? '' : penH9,
       penIp: penIp === '' ? '' : penIp,
       k9Mult: k9Mult,
       penMult: penMult,
+      deadPaMult: deadPaMult,
       pStreak: pStreak,
       notes: notes.join('; '),
     });
@@ -491,18 +579,22 @@ function refreshStreakPicks() {
       row.batter,
       row.batterId,
       row.pHitV2,
+      row.babip,
       row.oppSpName,
       row.spK9,
       row.expSpIp,
+      row.oppAvg,
+      row.deadPaRate,
       row.oppAbbr,
       row.penH9,
       row.penIp,
       row.k9Mult,
       row.penMult,
+      row.deadPaMult,
       row.pStreak,
       rank,
       isPick,
-      'streak.v1',
+      'streak.v2',
       row.notes,
     ];
   });
@@ -520,14 +612,17 @@ function mlbStreakWriteSheet_(ss, rows) {
   }
   sh.setTabColor('#f59e0b');
 
-  const NEED_COLS = 18;
+  const NEED_COLS = 22;
+  // insertColumnsAfter BEFORE setColumnWidth — writing past the existing
+  // column count clears the sheet then silently throws (see auto-memory:
+  // apps_script_column_expansion).
   if (sh.getMaxColumns() < NEED_COLS) {
     sh.insertColumnsAfter(sh.getMaxColumns(), NEED_COLS - sh.getMaxColumns());
   }
 
   sh.getRange(1, 1, 1, NEED_COLS)
     .merge()
-    .setValue('🔥 Streak_Picks — daily FD MLB The Streak ranker · p_streak = p_hit_v2 × SP K/9 penalty × bullpen leverage')
+    .setValue('🔥 Streak_Picks — daily FD MLB The Streak ranker · p_streak = p_hit_v2 × K/9 penalty × bullpen leverage × dead-PA penalty')
     .setFontWeight('bold')
     .setBackground('#b45309')
     .setFontColor('#ffffff')
@@ -541,14 +636,18 @@ function mlbStreakWriteSheet_(ss, rows) {
     'batter',
     'batter_id',
     'p_hit_v2',
+    'season_babip',
     'opp_sp_name',
     'opp_sp_k9',
     'exp_sp_ip',
+    'opp_sp_avg_against',
+    'opp_sp_dead_pa_rate',
     'opp_team',
     'opp_pen_h9',
     'opp_pen_ip',
     'k9_penalty_mult',
     'pen_leverage_mult',
+    'dead_pa_mult',
     'p_streak',
     'pick_rank',
     'is_pick',
@@ -562,7 +661,7 @@ function mlbStreakWriteSheet_(ss, rows) {
     .setFontColor('#ffffff');
   sh.setFrozenRows(3);
 
-  const widths = [72, 200, 150, 72, 64, 130, 64, 64, 60, 72, 64, 72, 80, 64, 56, 56, 80, 200];
+  const widths = [72, 200, 150, 72, 64, 72, 130, 64, 64, 72, 80, 60, 72, 64, 72, 80, 72, 64, 56, 56, 80, 220];
   widths.forEach(function (w, i) { sh.setColumnWidth(i + 1, w); });
 
   if (rows.length) {
@@ -571,9 +670,9 @@ function mlbStreakWriteSheet_(ss, rows) {
       ss.setNamedRange('MLB_STREAK_PICKS', sh.getRange(4, 1, rows.length, headers.length));
     } catch (e) {}
     // Highlight pick rows in yellow to match the Bet Card visual treatment.
-    // is_pick is column 16 (0-indexed: rows[i][15]).
+    // is_pick is column 20 (0-indexed: rows[i][19]).
     for (let i = 0; i < rows.length; i++) {
-      if (rows[i][15] === true) {
+      if (rows[i][19] === true) {
         sh.getRange(4 + i, 1, 1, headers.length)
           .setBackground('#fef3c7')
           .setFontWeight('bold');
@@ -612,15 +711,15 @@ function mlbStreakPicksByPlayer_(ss) {
   const sh = ss.getSheetByName(MLB_STREAK_PICKS_TAB);
   if (!sh || sh.getLastRow() < 4) return out;
   const last = sh.getLastRow();
-  // Schema (1-indexed): col 3 = batter, col 14 = p_streak, col 15 = pick_rank,
-  // col 16 = is_pick. Read first 16 columns.
-  const vals = sh.getRange(4, 1, last - 3, 16).getValues();
+  // Schema (1-indexed): col 3 = batter, col 18 = p_streak, col 19 = pick_rank,
+  // col 20 = is_pick. Read first 20 columns.
+  const vals = sh.getRange(4, 1, last - 3, 20).getValues();
   for (let i = 0; i < vals.length; i++) {
-    if (vals[i][15] !== true) continue;
+    if (vals[i][19] !== true) continue;
     const name = String(vals[i][2] || '').trim().toLowerCase();
     if (!name) continue;
-    const rank = parseInt(vals[i][14], 10) || 0;
-    const pStreak = parseFloat(vals[i][13]);
+    const rank = parseInt(vals[i][18], 10) || 0;
+    const pStreak = parseFloat(vals[i][17]);
     out[name] = { rank: rank, pStreak: isNaN(pStreak) ? null : pStreak };
   }
   return out;
