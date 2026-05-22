@@ -117,6 +117,8 @@ function refreshMLBBetCard() {
       const evRaw = r[17];
       const ev = parseFloat(String(evRaw));
       if (isNaN(ev) || ev <= 0) return;
+      const minEvK = parseFloat(String(cfg['MIN_EV_BET_CARD'] != null ? cfg['MIN_EV_BET_CARD'] : '0')) || 0;
+      if (minEvK > 0 && ev < minEvK) return;
       const grade = mlbGradePlay_(ev, american);
       if (!MLB_BET_CARD_ALLOWED_GRADES[grade]) return;
       const implied = bestSide === 'Over' ? r[12] : r[13];
@@ -181,6 +183,8 @@ function refreshMLBBetCard() {
       const fdUnder = r[5];
       const american = bestSide === 'Over' ? fdOver : fdUnder;
       if (american === '' || american == null || isNaN(parseFloat(String(american)))) return;
+      const maxOddsH = parseFloat(String(cfg['MAX_ODDS_H'] != null ? cfg['MAX_ODDS_H'] : '0')) || 0;
+      if (maxOddsH < 0 && parseFloat(String(american)) < maxOddsH) return;
 
       const batter = String(r[2] || '').trim();
       if (!batter) return;
@@ -195,6 +199,8 @@ function refreshMLBBetCard() {
       const evRaw = r[15];
       const ev = parseFloat(String(evRaw));
       if (isNaN(ev) || ev <= 0) return;
+      const minEvH = parseFloat(String(cfg['MIN_EV_BET_CARD'] != null ? cfg['MIN_EV_BET_CARD'] : '0')) || 0;
+      if (minEvH > 0 && ev < minEvH) return;
       const grade = mlbGradePlay_(ev, american);
       if (!MLB_BET_CARD_ALLOWED_GRADES[grade]) return;
       const implied = bestSide === 'Over' ? r[10] : r[11];
