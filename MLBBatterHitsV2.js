@@ -349,8 +349,17 @@ function refreshBatterHitsV2BetCard() {
     const lineNum = parseFloat(mainPt, 10);
     const hasModel = lambdaDisp !== '' && lambdaDisp > 0 && !isNaN(lineNum);
     const pu = hasModel ? mlbProbOverUnderK_(mainPt, lambdaDisp) : { pOver: '', pUnder: '' };
-    const pOver = pu.pOver === '' ? '' : Math.round(pu.pOver * 1000) / 1000;
-    const pUnder = pu.pUnder === '' ? '' : Math.round(pu.pUnder * 1000) / 1000;
+    // H_MODEL_P_SHRINK: empirical calibration factor. Model overestimates P(≥1 hit)
+    // by ~6pp vs observed; shrinking toward reality prevents false-positive EV signals.
+    // Apply here (not in mlbHitsV2ComputeRow_) so lambda and raw P audit cols stay honest.
+    const hShrink = (function () {
+      const raw = parseFloat(String(cfg['H_MODEL_P_SHRINK'] != null ? cfg['H_MODEL_P_SHRINK'] : '1'));
+      return (!isNaN(raw) && raw > 0 && raw <= 1) ? raw : 1;
+    })();
+    const pOver = pu.pOver === '' ? ''
+      : Math.round(Math.min(pu.pOver * hShrink, 0.9999) * 1000) / 1000;
+    const pUnder = pu.pUnder === '' ? ''
+      : Math.round(Math.min(pu.pUnder * hShrink, 0.9999) * 1000) / 1000;
 
     const imO = mlbAmericanImplied_(px.over);
     const imU = mlbAmericanImplied_(px.under);
