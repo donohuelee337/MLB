@@ -387,3 +387,103 @@ function mlbActivateCalibrationTab_() {
     if (sh2) sh2.activate();
   }
 }
+
+/**
+ * Reads the recommended_min_model_pct column from the calibration summary
+ * and appends a "Proposed Config Updates" section at the bottom of the tab.
+ * Called automatically on FINAL. Does NOT write to Config — use
+ * mlbApplyCalibrationProposals_ for that (menu action, requires human review).
+ */
+function mlbWriteCalibrationProposals_(ss, cfg) {
+  const sh = ss.getSheetByName(MLB_CALIBRATION_TAB);
+  if (!sh || sh.getLastRow() < 4) return;
+
+  // Read summary rows (rows 4–7): market name in col 1, recommended floor in col 11.
+  const summaryData = sh.getRange(4, 1, 4, 11).getValues();
+  const proposals = [];
+  const MARKET_TO_CONFIG_KEY = {
+    'STRIKEOUTS': 'MIN_MODEL_PCT_K',
+    'HITS': 'MIN_MODEL_PCT_H',
+  };
+
+  summaryData.forEach(function (row) {
+    const market = String(row[0] || '').trim().toUpperCase();
+    const configKey = MARKET_TO_CONFIG_KEY[market];
+    if (!configKey) return;
+    const rec = row[10];
+    if (rec === '' || rec === null || String(rec).indexOf('no qualifying') !== -1) return;
+    const recNum = parseFloat(String(rec));
+    if (isNaN(recNum)) return;
+    const current = parseFloat(String(cfg[configKey] || '0')) || 0;
+    proposals.push({
+      key: configKey,
+      current: current || 0.60,
+      recommended: recNum,
+      direction: recNum > (current || 0.60) ? '↑ tighten' : recNum < (current || 0.60) ? '↓ loosen' : '= no change',
+    });
+  });
+
+  const lastRow = sh.getLastRow();
+  const startRow = lastRow + 2;
+  sh.getRange(startRow, 1, 1, 4)
+    .merge()
+    .setValue('📝 Proposed Config Updates (review then run "✅ Apply calibration → Config" from menu)')
+    .setFontWeight('bold')
+    .setBackground('#e65100')
+    .setFontColor('#ffffff');
+
+  const hdr = [['Config Key', 'Current', 'Recommended', 'Direction']];
+  sh.getRange(startRow + 1, 1, 1, 4)
+    .setValues(hdr)
+    .setFontWeight('bold')
+    .setBackground('#bf360c')
+    .setFontColor('#ffffff');
+
+  if (proposals.length === 0) {
+    sh.getRange(startRow + 2, 1).setValue('No qualifying buckets — need n≥10 with positive edge to recommend a floor.');
+    return;
+  }
+
+  const rows = proposals.map(function (p) {
+    return [p.key, p.current, p.recommended, p.direction];
+  });
+  sh.getRange(startRow + 2, 1, rows.length, 4).setValues(rows);
+}
+
+/**
+ * Reads the proposals written by mlbWriteCalibrationProposals_ and applies them
+ * to the Config tab. Called from menu (human-triggered). Idempotent.
+ */
+function mlbApplyCalibrationProposals_(ss) {
+  if (!ss) ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sh = ss.getSheetByName(MLB_CALIBRATION_TAB);
+  if (!sh) {
+    ss.toast('Run calibration first', 'Apply Calibration', 5);
+    return;
+  }
+
+  const allData = sh.getRange(1, 1, sh.getLastRow(), 4).getValues();
+  let proposalStartRow = -1;
+  for (let i = allData.length - 1; i >= 0; i--) {
+    if (String(allData[i][0]).indexOf('Proposed Config') !== -1) {
+      proposalStartRow = i + 3;
+      break;
+    }
+  }
+
+  if (proposalStartRow < 0) {
+    ss.toast('No proposals found — run FINAL pipeline first', 'Apply Calibration', 5);
+    return;
+  }
+
+  let applied = 0;
+  for (let i = proposalStartRow; i < allData.length; i++) {
+    const key = String(allData[i][0] || '').trim();
+    const rec = parseFloat(String(allData[i][2] || ''));
+    if (!key || isNaN(rec)) break;
+    setConfigValue_(key, rec);
+    applied++;
+  }
+
+  ss.toast(applied + ' Config key(s) updated from calibration proposals', 'Apply Calibration', 6);
+}

@@ -37,6 +37,7 @@ function onOpen() {
     .addItem('🩺 Pitcher data diagnostic (schedule → models)', 'runPitcherDataDiagnostic')
     .addItem('💰 Refresh profitability report', 'refreshMLBProfitabilityReport')
     .addItem('🔬 Run gate backtest', 'runGateBacktest')
+    .addItem('✅ Apply calibration → Config', 'mlbApplyCalibrationProposals_')
     .addItem('💰 Open profitability report', 'mlbActivateProfitabilityTab_')
     .addSeparator()
     .addSubMenu(
@@ -438,6 +439,14 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
       refreshMLBProfitabilityReport();
     } catch (e) {
       addPipelineWarning_('Profitability report: ' + (e.message || e));
+    }
+  }
+
+  if (windowTag === 'FINAL' && typeof mlbWriteCalibrationProposals_ === 'function') {
+    try {
+      mlbWriteCalibrationProposals_(ss, getConfig());
+    } catch (e) {
+      addPipelineWarning_('Calibration proposals: ' + (e.message || e));
     }
   }
 
