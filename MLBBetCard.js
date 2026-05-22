@@ -18,6 +18,8 @@ const MLB_BET_CARD_NCOL = 19;
  *   2. |projection − line| ≥ per-market edge floor (Config: MIN_EDGE_<K|TB|H>; 0 = off)
  *   3. EV per $1 > 0
  *   4. mlbGradePlay_(ev, odds) ∈ MLB_BET_CARD_ALLOWED_GRADES
+ *   5. American odds ≤ MAX_ODDS_H (H plays only; 0 or blank = off)
+ *   6. EV per $1 ≥ MIN_EV_BET_CARD (K + H; 0 or blank = off)
  * Plus data prereqs: side ∈ {Over,Under}, valid line + FD price, no injury.
  *
  * Per-market floors are tuned from 🎯 Bet_Card_Calibration. Leave them blank
