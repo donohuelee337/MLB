@@ -428,6 +428,14 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
     }
   }
 
+  if (windowTag === 'FINAL' && typeof refreshMLBProfitabilityReport === 'function') {
+    try {
+      refreshMLBProfitabilityReport();
+    } catch (e) {
+      addPipelineWarning_('Profitability report: ' + (e.message || e));
+    }
+  }
+
   outcomes.forEach(function (o) {
     if (!o.ok) addPipelineWarning_(o.name + ': ' + (o.err || 'failed'));
   });
