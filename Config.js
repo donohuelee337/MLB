@@ -121,7 +121,7 @@ function buildConfigTab() {
   );
   row_('TB_V2_LEAGUE_TB_PER_9',  '2.65', 'League SP TB-allowed per 9 IP — denominator for opp_SP_TB_mult in 🧪 tb.v2-full shadow. Update at season start.');
   row_('TB_V2_LEAGUE_TB_PER_PA', '0.40', 'League batter TB per PA — fallback prior when vs-hand split sample is thin in 🧪 tb.v2-full shadow.');
-  row_('MIN_EV_BET_CARD', '0', 'Min EV per $1 on 🃏 card; 0 = any positive EV (any edge). Optional floor: try ~0.02–0.05 vs 0 to drop thin lines; iterate after several slates using Pipeline_Log and 🃏 outcomes. If this key is missing, re-run menu "0. Build Config tab".');
+  row_('MIN_EV_BET_CARD', '0.03', 'Min EV per $1 on 🃏 card; 0 = any positive EV (any edge). 0.03 gates thin-positive noise while keeping real edge plays. Tune from 💰 Profitability_Report. If this key is missing, re-run menu "0. Build Config tab".');
   row_('MIN_MODEL_PCT_BET_CARD', '0.60', 'Global default model P(Win) floor on 🃏 card. Per-market overrides below take precedence. Blank or 0 falls back to 0.60.');
   row_('MIN_MODEL_PCT_K',  '', 'Per-market model% floor for STRIKEOUTS plays. Blank = use MIN_MODEL_PCT_BET_CARD. Tune from 🎯 Bet_Card_Calibration (recommended_min_model_pct column).');
   row_('MIN_MODEL_PCT_TB', '', 'Per-market model% floor for TOTAL BASES plays. Blank = use MIN_MODEL_PCT_BET_CARD.');
@@ -129,6 +129,9 @@ function buildConfigTab() {
   row_('MIN_EDGE_K',  '0', 'Min |projection − line| for STRIKEOUTS plays on 🃏 card. 0 = off. Tune from 🎯 Bet_Card_Calibration.');
   row_('MIN_EDGE_TB', '0', 'Min |projection − line| for TOTAL BASES plays on 🃏 card. 0 = off.');
   row_('MIN_EDGE_H',  '0', 'Min |projection − line| for BATTER HITS plays on 🃏 card. 0 = off.');
+  row_('MIN_MODEL_PCT_K_OVER',  '0.60', 'Model P(Win) floor for K OVER plays on 🃏 card. Blank = use MIN_MODEL_PCT_K → MIN_MODEL_PCT_BET_CARD → 0.60. Data: K Over ≥0.60 shows +3.5pp edge (n=309 graded).');
+  row_('MIN_MODEL_PCT_K_UNDER', '0.75', 'Model P(Win) floor for K UNDER plays on 🃏 card. Higher than Over floor — K Unders below 0.75 show -14% ROI (n≈378). Blank falls back to MIN_MODEL_PCT_K.');
+  row_('MAX_ODDS_H', '-130', 'Max juice (American) for BATTER HITS plays on 🃏 card. H at -155 to -130 shows -34.4% ROI (n=178). 0 or blank = no cap. Example: -130 gates out -140, -155, -200 etc.');
   row_('BANKROLL', '500', 'Bankroll in $ for Kelly stake column on 🃏 card. Default $500 = max bet $7.50 ≈ 1.5% of roll. Edit to your actual roll as it grows.');
   row_('KELLY_FRACTION', '0.25', 'Fractional-Kelly multiplier (0..1). Default 0.25 = quarter-Kelly (conservative, survives model overconfidence). Full-Kelly (1) is aggressive.');
   row_('STAKE_TIER_1_USD', '2.50', '1u stake size in $. With $7.50 cap and 1:2:3 ladder → 1u/2u/3u = $2.50/$5/$7.50.');
@@ -235,6 +238,9 @@ function validateMlbPipelineConfig_(cfg) {
   warnRange('TB_V2_LEAGUE_TB_PER_9',  c['TB_V2_LEAGUE_TB_PER_9'],  1.5, 4.0);
   warnRange('TB_V2_LEAGUE_TB_PER_PA', c['TB_V2_LEAGUE_TB_PER_PA'], 0.30, 0.55);
   warnRange('MIN_EV_BET_CARD', c['MIN_EV_BET_CARD'], 0, 0.5);
+  warnRange('MIN_MODEL_PCT_K_OVER',  c['MIN_MODEL_PCT_K_OVER'],  0.50, 0.90);
+  warnRange('MIN_MODEL_PCT_K_UNDER', c['MIN_MODEL_PCT_K_UNDER'], 0.50, 0.95);
+  warnRange('MAX_ODDS_H', c['MAX_ODDS_H'], -300, 0);
   warnRange('OPP_K_RATE_LAMBDA_STRENGTH', c['OPP_K_RATE_LAMBDA_STRENGTH'], 0, 1);
   warnRange('HP_UMP_LAMBDA_MULT', c['HP_UMP_LAMBDA_MULT'], 0.85, 1.15);
   warnRange('LHP_K_LAMBDA_MULT', c['LHP_K_LAMBDA_MULT'], 0.92, 1.12);
