@@ -253,6 +253,20 @@ function mlbHitsV2ComputeRow_(ss, gamePk, batterId, season, cfg) {
   out.paPerGameSzn = mlbHitsV2BatterPaPerGame_(batterId, season);
   out.estPa = out.paPerGameSzn;
 
+  // If tonight's confirmed lineup is available, use batting-order-slot PA
+  // instead of season average. Slot 1 ≈ 4.4 PA vs slot 9 ≈ 3.2 PA — a
+  // ~0.25 hit-probability swing for a .280 hitter.
+  if (typeof mlbLineupSlotForBatter_ === 'function') {
+    const slot = mlbLineupSlotForBatter_(gamePk, batterId);
+    if (slot) {
+      const slotPa = parseFloat(String(cfg['LINEUP_PA_SLOT_' + slot] != null
+        ? cfg['LINEUP_PA_SLOT_' + slot] : '0')) || 0;
+      if (slotPa > 0) out.estPa = slotPa;
+    }
+  }
+  // abMult (ablation audit) reflects estPa vs season baseline.
+  // It is recomputed below from the (potentially updated) out.estPa.
+
   // Compose base + λ. base already encodes vs-hand and est_PA.
   if (!isNaN(out.hpPaVsHand) && out.hpPaVsHand > 0 && out.estPa > 0) {
     out.base = out.hpPaVsHand * out.estPa;

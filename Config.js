@@ -132,6 +132,18 @@ function buildConfigTab() {
   row_('MIN_MODEL_PCT_K_OVER',  '0.60', 'Model P(Win) floor for K OVER plays on 🃏 card. Blank = use MIN_MODEL_PCT_K → MIN_MODEL_PCT_BET_CARD → 0.60. Data: K Over ≥0.60 shows +3.5pp edge (n=309 graded).');
   row_('MIN_MODEL_PCT_K_UNDER', '0.75', 'Model P(Win) floor for K UNDER plays on 🃏 card. Higher than Over floor — K Unders below 0.75 show -14% ROI (n≈378). Blank falls back to MIN_MODEL_PCT_K.');
   row_('MAX_ODDS_H', '-130', 'Max juice (American) for BATTER HITS plays on 🃏 card. H at -155 to -130 shows -34.4% ROI (n=178). 0 or blank = no cap. Example: -130 gates out -140, -155, -200 etc.');
+  // --- Lineup PA-per-slot table (Phase 2A) ---
+  row_('LINEUP_PA_SLOT_1', '4.4', 'Estimated PA/game for batting order slot 1. Used when lineup is confirmed; falls back to season PA/game when not. League avg 2024–2025.');
+  row_('LINEUP_PA_SLOT_2', '4.3', 'Estimated PA/game for batting order slot 2.');
+  row_('LINEUP_PA_SLOT_3', '4.1', 'Estimated PA/game for batting order slot 3.');
+  row_('LINEUP_PA_SLOT_4', '4.0', 'Estimated PA/game for batting order slot 4.');
+  row_('LINEUP_PA_SLOT_5', '3.9', 'Estimated PA/game for batting order slot 5.');
+  row_('LINEUP_PA_SLOT_6', '3.7', 'Estimated PA/game for batting order slot 6.');
+  row_('LINEUP_PA_SLOT_7', '3.6', 'Estimated PA/game for batting order slot 7.');
+  row_('LINEUP_PA_SLOT_8', '3.4', 'Estimated PA/game for batting order slot 8.');
+  row_('LINEUP_PA_SLOT_9', '3.2', 'Estimated PA/game for batting order slot 9.');
+  // --- H calibration shrink (Phase 2B) ---
+  row_('H_MODEL_P_SHRINK', '0.94', 'Multiplicative shrink on H P(win) before EV calculation. Closes empirical ~6pp calibration gap (model overestimates vs actual hit rate). 1.0 = off. Tune up toward 1.0 as lineup-hydration improves lambda accuracy. If this key is missing, re-run "0. Build Config tab".');
   row_('BANKROLL', '500', 'Bankroll in $ for Kelly stake column on 🃏 card. Default $500 = max bet $7.50 ≈ 1.5% of roll. Edit to your actual roll as it grows.');
   row_('KELLY_FRACTION', '0.25', 'Fractional-Kelly multiplier (0..1). Default 0.25 = quarter-Kelly (conservative, survives model overconfidence). Full-Kelly (1) is aggressive.');
   row_('STAKE_TIER_1_USD', '2.50', '1u stake size in $. With $7.50 cap and 1:2:3 ladder → 1u/2u/3u = $2.50/$5/$7.50.');
