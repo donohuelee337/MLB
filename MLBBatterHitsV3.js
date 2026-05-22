@@ -31,6 +31,12 @@ const MLB_HITS_V3_K_PER_PA_SHRINK = 100;
 const MLB_HITS_V3_K_PER_9_SHRINK_IP = 20;
 const MLB_HITS_V3_MULT_MIN = 0.85;
 const MLB_HITS_V3_MULT_MAX = 1.20;
+// 🧪 v3.deadpa shadow — opp SP (BB+HBP)/BF mult. Complements opp_sp_k9_mult:
+// K/9 captures dead PAs from strikeouts, this captures dead PAs from walks &
+// HBPs. Both shrink hit-eligible PAs but via different channels — independent
+// signals, no double-count. INVERSE: high SP BB rate → mult < 1.
+const MLB_HITS_V3_DEFAULT_LEAGUE_BB_HBP_RATE = 0.085;
+const MLB_HITS_V3_BB_HBP_SHRINK_BF = 100;
 
 var __mlbHitsV3StreakIdsCacheKey = '';
 var __mlbHitsV3StreakIdsCache = {};
@@ -84,6 +90,31 @@ function mlbHitsV3OpposingK9Mult_(pitcherId, season, leagueK9, minIp) {
     mult: Math.round(mult * 1000) / 1000,
     k9: Math.round(rawK9 * 100) / 100,
     ip: Math.round(stat.ip * 10) / 10,
+  };
+}
+
+// --- opposing SP (BB+HBP)/BF (inverse) multiplier — v3.deadpa shadow ----
+// Same shared pitcher fetch as opp_sp_k9_mult (no extra API call).
+// Shrinkage in BF units; clamps to v3 mult rails.
+
+function mlbHitsV3OpposingBbHbpMult_(pitcherId, season, leagueRate, minIp) {
+  const stat = mlbSharedFetchPitcherSeasonPitching_(pitcherId, season);
+  const ipFloor = minIp > 0 ? minIp : 10;
+  if (isNaN(stat.bb) || isNaN(stat.bf) || stat.bf <= 0 || stat.ip < ipFloor) {
+    return { mult: 1, rate: '', bf: '' };
+  }
+  const hbp = isNaN(stat.hbp) ? 0 : stat.hbp;
+  const rawRate = (stat.bb + hbp) / stat.bf;
+  const k = MLB_HITS_V3_BB_HBP_SHRINK_BF;
+  // BF-weighted shrinkage to league rate.
+  const shrunk = ((stat.bb + hbp) + leagueRate * k) / (stat.bf + k);
+  // INVERSE: high SP BB+HBP → mult < 1 (PAs that don't end in a hit chance).
+  let mult = leagueRate / shrunk;
+  mult = Math.max(MLB_HITS_V3_MULT_MIN, Math.min(MLB_HITS_V3_MULT_MAX, mult));
+  return {
+    mult: Math.round(mult * 1000) / 1000,
+    rate: Math.round(rawRate * 1000) / 1000,
+    bf: stat.bf,
   };
 }
 
@@ -151,6 +182,19 @@ function mlbHitsV3ComputeRow_(ss, gamePk, batterId, season, cfg) {
     : { mult: 1, k9: '', ip: '' };
   const streak = mlbHitsV3StreakOverlapMult_(ss, batterId, streakCfg);
 
+  // 🧪 v3.deadpa shadow — opp SP (BB+HBP)/BF multiplier. Computed alongside
+  // K/9 mult (same shared pitcher fetch). Not applied to live v3 λ — audit-only
+  // so we can grade λ_v3 vs λ_v3.deadpa side-by-side before promoting.
+  const leagueBbHbpCfg = parseFloat(String(
+    cfg['HITS_V3_LEAGUE_BB_HBP_RATE'] != null ? cfg['HITS_V3_LEAGUE_BB_HBP_RATE'] : MLB_HITS_V3_DEFAULT_LEAGUE_BB_HBP_RATE
+  ), 10);
+  const lgBbHbp = !isNaN(leagueBbHbpCfg) && leagueBbHbpCfg > 0
+    ? leagueBbHbpCfg
+    : MLB_HITS_V3_DEFAULT_LEAGUE_BB_HBP_RATE;
+  const sbb = v2.oppSpId
+    ? mlbHitsV3OpposingBbHbpMult_(v2.oppSpId, season, lgBbHbp, mlbOppSpMinIp_(cfg))
+    : { mult: 1, rate: '', bf: '' };
+
   const out = {
     v2: v2,
     lambda: NaN,
@@ -162,11 +206,18 @@ function mlbHitsV3ComputeRow_(ss, gamePk, batterId, season, cfg) {
     oppK9Ip: sk.ip,
     streakMult: streak.mult,
     onStreak: streak.onStreak,
+    // 🧪 v3.deadpa shadow audit fields.
+    oppBbHbpMult: sbb.mult,
+    oppBbHbpRate: sbb.rate,
+    oppBbHbpBf: sbb.bf,
+    lambdaDeadpa: NaN,
   };
 
   if (!isNaN(v2.lambda) && v2.lambda > 0) {
     const lam = v2.lambda * kr.mult * sk.mult * streak.mult;
     out.lambda = Math.round(lam * 1000) / 1000;
+    // Shadow λ = same composition × extra BB+HBP mult.
+    out.lambdaDeadpa = Math.round(lam * sbb.mult * 1000) / 1000;
   }
   return out;
 }
@@ -306,6 +357,11 @@ function refreshBatterHitsV3BetCard() {
       'h.v3-contact',
       hpUmp,
       hotCold,
+      // 🧪 v3.deadpa shadow audit (4 cols).
+      row && !isNaN(row.lambdaDeadpa) ? row.lambdaDeadpa : '',
+      row ? row.oppBbHbpMult : '',
+      row ? row.oppBbHbpRate : '',
+      row ? row.oppBbHbpBf : '',
     ]);
   });
 
@@ -339,13 +395,15 @@ function refreshBatterHitsV3BetCard() {
     'batter_k_per_pa', 'k_rate_sample_pa', 'opp_sp_k9', 'opp_sp_k9_ip', 'on_streak',
     'opp_sp_name', 'opp_sp_throws',
     'model_version', 'hp_umpire', 'hot_cold',
+    // 🧪 v3.deadpa shadow audit (opp SP BB+HBP rate channel)
+    'lambda_H_v3_deadpa', 'opp_sp_bb_hbp_mult', 'opp_sp_bb_hbp_rate', 'opp_sp_bf',
   ];
   const NEED_COLS = headers.length;
   if (sh.getMaxColumns() < NEED_COLS) {
     sh.insertColumnsAfter(sh.getMaxColumns(), NEED_COLS - sh.getMaxColumns());
   }
 
-  // Same widths schema as TB v3 for visual consistency.
+  // Same widths schema as TB v3 for visual consistency. Tail 4 widths = v3.deadpa shadow.
   const widths = [
     72, 200, 150, 56, 64, 64, 56, 56, 52, 52, 52, 52, 56, 56, 56, 56, 140, 88,
     56, 52, 64, 52, 52,
@@ -353,13 +411,14 @@ function refreshBatterHitsV3BetCard() {
     64, 56, 56, 52, 60,
     130, 44,
     80, 56, 56,
+    64, 64, 64, 56,
   ];
   widths.forEach(function (w, i) { sh.setColumnWidth(i + 1, w); });
 
   sh.getRange(1, 1, 1, NEED_COLS)
     .merge()
     .setValue(
-      '🧪 Batter Hits v3-contact (shadow) — λ_v3 = λ_v2 × batter_K-rate(inv) × opp_SP_K/9(inv) × Streak overlap; mults audited per row'
+      '🧪 Batter Hits v3-contact (shadow) — λ_v3 = λ_v2 × batter_K-rate(inv) × opp_SP_K/9(inv) × Streak overlap; mults audited per row. Tail 4 cols = 🧪 v3.deadpa (opp SP BB+HBP rate; audit only).'
     )
     .setFontWeight('bold')
     .setBackground('#1565c0')

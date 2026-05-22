@@ -127,6 +127,7 @@ function mlbFlagsCard_(injuryStatus, notes, hasModel) {
 function refreshPitcherKBetCard() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const cfg = getConfig();
+  const season = typeof mlbSlateSeasonYear_ === 'function' ? mlbSlateSeasonYear_(cfg) : new Date().getFullYear();
   const q = ss.getSheetByName(MLB_PITCHER_K_QUEUE_TAB);
   if (!q || q.getLastRow() < 4) {
     safeAlert_('Pitcher K card', 'Run Pitcher K queue first.');
@@ -135,7 +136,7 @@ function refreshPitcherKBetCard() {
 
   const last = q.getLastRow();
   const raw = q.getRange(4, 1, last, 20).getValues();
-  const rows = []; // each: { data: [30 cols], hot: 'HOT'|'COLD'|'' }
+  const rows = []; // each: { data: [34 cols], hot: 'HOT'|'COLD'|'' }
 
   raw.forEach(function (r) {
     const gamePk = r[0];
@@ -282,6 +283,36 @@ function refreshPitcherKBetCard() {
       lambdaV2 = Math.round(v2Base * mult * 100) / 100;
     }
 
+    // 🧪 v3.bf shadow lambda — K% × league PA/IP × proj_IP. Strips PA-per-IP
+    // inflation from walk-prone arms (high-walk SPs face more BF/IP, which
+    // K/9 reads as "more K opportunity" even when K skill is league-average).
+    // Uses shared pitcher season fetch (BF, K) — no extra API call.
+    let lambdaV3Bf = '';
+    let seasonBf = '';
+    let kPerPa = '';
+    let projPaBf = '';
+    const pidNum = parseInt(pitcherId, 10);
+    if (pidNum && typeof mlbSharedFetchPitcherSeasonPitching_ === 'function') {
+      const sznStat = mlbSharedFetchPitcherSeasonPitching_(pidNum, season);
+      if (!isNaN(sznStat.k) && !isNaN(sznStat.bf) && sznStat.bf > 0) {
+        seasonBf = sznStat.bf;
+        const kpa = sznStat.k / sznStat.bf;
+        kPerPa = Math.round(kpa * 1000) / 1000;
+        const leaguePaPerIpRaw = parseFloat(
+          String(cfg['LEAGUE_PA_PER_IP'] != null ? cfg['LEAGUE_PA_PER_IP'] : '4.3').trim(),
+          10
+        );
+        const lgPaIp = !isNaN(leaguePaPerIpRaw) && leaguePaPerIpRaw > 0 ? leaguePaPerIpRaw : 4.3;
+        const projPa = projIp * lgPaIp;
+        projPaBf = Math.round(projPa * 100) / 100;
+        const v3Base = kpa * projPa;
+        const v1Base = !isNaN(k9eff) && k9eff > 0 ? (k9eff / 9) * projIp : NaN;
+        // Apply v1's effective multiplier stack so the comparison is rate-only.
+        const multV3 = !isNaN(v1Base) && v1Base > 0 && !isNaN(lamNum) && lamNum > 0 ? lamNum / v1Base : 1;
+        lambdaV3Bf = Math.round(v3Base * multV3 * 100) / 100;
+      }
+    }
+
     const lineNum = parseFloat(line, 10);
     const hasModel = !isNaN(lamNum) && lamNum > 0 && !isNaN(lineNum);
     const pu = hasModel ? mlbProbOverUnderK_(line, lamNum) : { pOver: '', pUnder: '' };
@@ -352,6 +383,11 @@ function refreshPitcherKBetCard() {
         gamesRaw === '' || gamesRaw == null ? '' : gamesRaw,
         !isNaN(k9effV2) ? k9effV2 : '',
         projIpV2,
+        // 🧪 k.v3.bf audit cols (31..34). K% × league PA/IP shadow.
+        lambdaV3Bf,
+        seasonBf,
+        kPerPa,
+        projPaBf,
       ],
       hot: hotCold,
     });
@@ -383,21 +419,21 @@ function refreshPitcherKBetCard() {
     sh = ss.insertSheet(MLB_PITCHER_K_CARD_TAB);
   }
   sh.setTabColor('#c62828');
-  // 🧪 k.v2 audit cols 27..30 push total width past the default 26-col sheet
-  // size — expand FIRST or setColumnWidth(27..) throws and the writer leaves
-  // the sheet empty.
-  const NEED_COLS_K_CARD = 30;
+  // 🧪 k.v2 + k.v3.bf audit cols 27..34 push total width past the default
+  // 26-col sheet — expand FIRST or setColumnWidth(27..) throws and the
+  // writer leaves the sheet empty (auto-memory: apps_script_column_expansion).
+  const NEED_COLS_K_CARD = 34;
   if (sh.getMaxColumns() < NEED_COLS_K_CARD) {
     sh.insertColumnsAfter(sh.getMaxColumns(), NEED_COLS_K_CARD - sh.getMaxColumns());
   }
-  [72, 200, 52, 150, 56, 64, 64, 52, 52, 52, 52, 52, 52, 52, 52, 52, 64, 52, 140, 88, 140, 44, 56, 72, 72, 56, 64, 44, 56, 56].forEach(function (w, i) {
+  [72, 200, 52, 150, 56, 64, 64, 52, 52, 52, 52, 52, 52, 52, 52, 52, 64, 52, 140, 88, 140, 44, 56, 72, 72, 56, 64, 44, 56, 56, 64, 56, 56, 64].forEach(function (w, i) {
     sh.setColumnWidth(i + 1, w);
   });
 
-  sh.getRange(1, 1, 1, 30)
+  sh.getRange(1, 1, 1, NEED_COLS_K_CARD)
     .merge()
     .setValue(
-      '🎰 Pitcher K card — λ: K9 blend × park × L/R × opp K% (vs-hand if present) × ABS × HP ump; EV naive. Cols 27..30 = 🧪 k.v2 shadow (audit only). Sort: best_ev desc.'
+      '🎰 Pitcher K card — λ: K9 blend × park × L/R × opp K% (vs-hand if present) × ABS × HP ump; EV naive. Cols 27..30 = 🧪 k.v2 shadow · Cols 31..34 = 🧪 k.v3.bf shadow (audit only). Sort: best_ev desc.'
     )
     .setFontWeight('bold')
     .setBackground('#b71c1c')
@@ -437,6 +473,10 @@ function refreshPitcherKBetCard() {
     'games',
     'k9_eff_v2',
     'projIP_v2',
+    'lambda_K_v3_bf',
+    'season_bf',
+    'k_per_pa',
+    'proj_pa_bf',
   ];
   sh.getRange(3, 1, 1, headers.length)
     .setValues([headers])

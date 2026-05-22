@@ -28,10 +28,10 @@ function refreshPitcherKSimEngine_() {
   }
 
   const last = src.getLastRow();
-  // Read up to 30 cols so we can pick up 🧪 k.v2 audit (lambda_K_v2 at col 27..30).
-  // If card hasn't been rebuilt with v2 schema yet, fall back to its current width
-  // and v2 cells will be blank — sim degrades gracefully.
-  const colsToRead = Math.min(30, Math.max(22, src.getLastColumn()));
+  // Read up to 34 cols so we can pick up 🧪 k.v2 (27..30) and k.v3.bf (31..34) audits.
+  // If the card hasn't been rebuilt with the latest schema yet, fall back to its
+  // current width and the new cells will be blank — sim degrades gracefully.
+  const colsToRead = Math.min(34, Math.max(22, src.getLastColumn()));
   const rows = src.getRange(4, 1, last, colsToRead).getValues();
   const out = [];
 
@@ -51,6 +51,11 @@ function refreshPitcherKSimEngine_() {
     const gamesV2 = r[27] != null ? r[27] : '';
     const k9EffV2 = r[28] != null ? r[28] : '';
     const projIpV2 = r[29] != null ? r[29] : '';
+    // 🧪 v3.bf audit passthroughs from card (cols 31..34 of card → r[30..33]).
+    const lambdaV3BfModel = parseFloat(String(r[30] != null ? r[30] : ''), 10);
+    const seasonBfV3 = r[31] != null ? r[31] : '';
+    const kPerPaV3 = r[32] != null ? r[32] : '';
+    const projPaBfV3 = r[33] != null ? r[33] : '';
 
     let lamAnch = NaN;
     if (!isNaN(lambdaModel) && lambdaModel > 0 && !isNaN(lineNum)) {
@@ -85,6 +90,29 @@ function refreshPitcherKSimEngine_() {
       else { bestSideV2 = 'Under'; bestEvV2 = evUV2; }
     } else if (evOV2 !== '') { bestSideV2 = 'Over'; bestEvV2 = evOV2; }
     else if (evUV2 !== '') { bestSideV2 = 'Under'; bestEvV2 = evUV2; }
+
+    // 🧪 v3.bf anchored λ + EV stack (audit only — same anchor weight as v1).
+    let lamAnchV3Bf = NaN;
+    if (!isNaN(lambdaV3BfModel) && lambdaV3BfModel > 0 && !isNaN(lineNum)) {
+      lamAnchV3Bf = Math.round((lineNum * (1 - w) + lambdaV3BfModel * w) * 100) / 100;
+    }
+    let edgeV3Bf = '';
+    if (!isNaN(lamAnchV3Bf) && lamAnchV3Bf > 0 && !isNaN(lineNum)) {
+      edgeV3Bf = Math.round((lamAnchV3Bf - lineNum) * 100) / 100;
+    }
+    const hasV3Bf = !isNaN(lamAnchV3Bf) && lamAnchV3Bf > 0 && !isNaN(lineNum);
+    const puV3Bf = hasV3Bf ? mlbProbOverUnderK_(line, lamAnchV3Bf) : { pOver: '', pUnder: '' };
+    const pOverV3Bf = puV3Bf.pOver === '' ? '' : Math.round(puV3Bf.pOver * 1000) / 1000;
+    const pUnderV3Bf = puV3Bf.pUnder === '' ? '' : Math.round(puV3Bf.pUnder * 1000) / 1000;
+    const evOV3Bf = pOverV3Bf !== '' && fdOver !== '' ? mlbEvPerDollarRisked_(pOverV3Bf, fdOver) : '';
+    const evUV3Bf = pUnderV3Bf !== '' && fdUnder !== '' ? mlbEvPerDollarRisked_(pUnderV3Bf, fdUnder) : '';
+    let bestSideV3Bf = '';
+    let bestEvV3Bf = '';
+    if (evOV3Bf !== '' && evUV3Bf !== '') {
+      if (evOV3Bf >= evUV3Bf) { bestSideV3Bf = 'Over'; bestEvV3Bf = evOV3Bf; }
+      else { bestSideV3Bf = 'Under'; bestEvV3Bf = evUV3Bf; }
+    } else if (evOV3Bf !== '') { bestSideV3Bf = 'Over'; bestEvV3Bf = evOV3Bf; }
+    else if (evUV3Bf !== '') { bestSideV3Bf = 'Under'; bestEvV3Bf = evUV3Bf; }
 
     const hasModel = !isNaN(lamAnch) && lamAnch > 0 && !isNaN(lineNum);
     const pu = hasModel ? mlbProbOverUnderK_(line, lamAnch) : { pOver: '', pUnder: '' };
@@ -152,6 +180,15 @@ function refreshPitcherKSimEngine_() {
       gamesV2 === '' || gamesV2 == null ? '' : gamesV2,
       k9EffV2 === '' || k9EffV2 == null ? '' : k9EffV2,
       projIpV2 === '' || projIpV2 == null ? '' : projIpV2,
+      // 🧪 v3.bf audit cols 31..38.
+      !isNaN(lambdaV3BfModel) ? lambdaV3BfModel : '',
+      !isNaN(lamAnchV3Bf) ? lamAnchV3Bf : '',
+      edgeV3Bf,
+      bestSideV3Bf,
+      bestEvV3Bf,
+      seasonBfV3 === '' || seasonBfV3 == null ? '' : seasonBfV3,
+      kPerPaV3 === '' || kPerPaV3 == null ? '' : kPerPaV3,
+      projPaBfV3 === '' || projPaBfV3 == null ? '' : projPaBfV3,
     ]);
   });
 
@@ -166,11 +203,11 @@ function refreshPitcherKSimEngine_() {
 
   let sh = ss.getSheetByName(MLB_PITCHER_K_SIM_TAB);
   if (sh) {
-    // Floor at the new layout width (30) so breakApart covers any stale merge
-    // from prior runs — old floor was 22 (pre-v2). Capped at maxColumns to
-    // avoid the very error this whole guard is preventing.
+    // Floor at the new layout width (38) so breakApart covers any stale merge
+    // from prior runs — old floors were 22 (pre-v2) then 30 (pre-v3.bf).
+    // Capped at maxColumns to avoid the very error this guard is preventing.
     const cr = Math.max(sh.getLastRow(), 3);
-    const cc = Math.min(Math.max(sh.getLastColumn(), 30), sh.getMaxColumns());
+    const cc = Math.min(Math.max(sh.getLastColumn(), 38), sh.getMaxColumns());
     try {
       sh.getRange(1, 1, cr, cc).breakApart();
     } catch (e) {}
@@ -180,16 +217,16 @@ function refreshPitcherKSimEngine_() {
     sh = ss.insertSheet(MLB_PITCHER_K_SIM_TAB);
   }
   sh.setTabColor('#1565c0');
-  // Sim sheet may have been created at 22 cols (pre-v2); ensure room for v2 audit (23..30).
-  const NEED_COLS_K_SIM = 30;
+  // Sim sheet may have been created at 22 or 30 cols; ensure room for v2 (23..30) + v3.bf (31..38).
+  const NEED_COLS_K_SIM = 38;
   if (sh.getMaxColumns() < NEED_COLS_K_SIM) {
     sh.insertColumnsAfter(sh.getMaxColumns(), NEED_COLS_K_SIM - sh.getMaxColumns());
   }
 
-  sh.getRange(1, 1, 1, 30)
+  sh.getRange(1, 1, 1, NEED_COLS_K_SIM)
     .merge()
     .setValue(
-      '⚡ Sim_Pitcher_K — anchored Poisson (ANCHOR_WEIGHT_K); EV is authoritative for 🃏 K rows. Cols 23..30 = 🧪 k.v2 shadow (audit only).'
+      '⚡ Sim_Pitcher_K — anchored Poisson (ANCHOR_WEIGHT_K); EV is authoritative for 🃏 K rows. Cols 23..30 = 🧪 k.v2 shadow · Cols 31..38 = 🧪 k.v3.bf shadow (audit only).'
     )
     .setFontWeight('bold')
     .setBackground('#0d47a1')
@@ -229,6 +266,14 @@ function refreshPitcherKSimEngine_() {
     'games',
     'k9_eff_v2',
     'projIP_v2',
+    'lambda_K_v3_bf',
+    'lambda_K_anch_v3_bf',
+    'edge_v3_bf',
+    'best_side_v3_bf',
+    'best_ev_v3_bf',
+    'season_bf',
+    'k_per_pa',
+    'proj_pa_bf',
   ];
   sh.getRange(3, 1, 1, headers.length)
     .setValues([headers])
