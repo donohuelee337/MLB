@@ -176,7 +176,7 @@ function mlbSharedFetchPitcherThrows_(pitcherId) {
 
 function mlbSharedFetchPitcherSeasonPitching_(pitcherId, season) {
   const id = parseInt(pitcherId, 10);
-  if (!id) return { h: NaN, tb: NaN, k: NaN, hr: NaN, ip: 0 };
+  if (!id) return { h: NaN, tb: NaN, k: NaN, hr: NaN, ip: 0, bb: NaN, hbp: NaN, bf: NaN, oppAvg: NaN };
   const key = id + ':' + String(season);
   if (Object.prototype.hasOwnProperty.call(__mlbSharedPitcherSeasonPitchingCache, key)) {
     return __mlbSharedPitcherSeasonPitchingCache[key];
@@ -187,7 +187,7 @@ function mlbSharedFetchPitcherSeasonPitching_(pitcherId, season) {
     id +
     '/stats?stats=season&group=pitching&season=' +
     encodeURIComponent(String(season));
-  let out = { h: NaN, tb: NaN, k: NaN, hr: NaN, ip: 0 };
+  let out = { h: NaN, tb: NaN, k: NaN, hr: NaN, ip: 0, bb: NaN, hbp: NaN, bf: NaN, oppAvg: NaN };
   try {
     Utilities.sleep(40);
     const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
@@ -199,6 +199,9 @@ function mlbSharedFetchPitcherSeasonPitching_(pitcherId, season) {
         const h = parseInt(stat.hits, 10);
         const k = parseInt(stat.strikeOuts, 10);
         const hr = parseInt(stat.homeRuns, 10);
+        const bb = parseInt(stat.baseOnBalls, 10);
+        const hbp = parseInt(stat.hitBatsmen, 10);
+        const bf = parseInt(stat.battersFaced, 10);
         let tb = stat.totalBases != null ? parseInt(stat.totalBases, 10) : NaN;
         if (isNaN(tb) && !isNaN(h)) {
           const d = parseInt(stat.doubles, 10) || 0;
@@ -206,6 +209,19 @@ function mlbSharedFetchPitcherSeasonPitching_(pitcherId, season) {
           const hrx = parseInt(stat.homeRuns, 10) || 0;
           const singles = Math.max(0, h - d - t - hrx);
           tb = singles + 2 * d + 3 * t + 4 * hrx;
+        }
+        // opp_avg: prefer statsapi's `avg` (string like ".252"); else compute
+        // H / (BF - BB - HBP - SF). statsapi doesn't always send sacFlies on
+        // the pitching line, so fall back to (BF - BB - HBP) which slightly
+        // understates AB but is close enough for the dead-PA / hit-rate use.
+        let oppAvg = NaN;
+        const rawAvg = stat.avg != null ? parseFloat(stat.avg) : NaN;
+        if (!isNaN(rawAvg) && rawAvg >= 0 && rawAvg <= 1) {
+          oppAvg = rawAvg;
+        } else if (!isNaN(h) && !isNaN(bf) && !isNaN(bb) && bf > 0) {
+          const hbpSafe = isNaN(hbp) ? 0 : hbp;
+          const ab = bf - bb - hbpSafe;
+          if (ab > 0) oppAvg = h / ab;
         }
         const ipStr = String(stat.inningsPitched || '0').trim();
         let ipDec = 0;
@@ -221,6 +237,10 @@ function mlbSharedFetchPitcherSeasonPitching_(pitcherId, season) {
           k: isNaN(k) ? NaN : k,
           hr: isNaN(hr) ? NaN : hr,
           ip: ipDec,
+          bb: isNaN(bb) ? NaN : bb,
+          hbp: isNaN(hbp) ? NaN : hbp,
+          bf: isNaN(bf) ? NaN : bf,
+          oppAvg: isNaN(oppAvg) ? NaN : oppAvg,
         };
       }
     }
