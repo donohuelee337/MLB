@@ -30,13 +30,26 @@ const MLB_BET_CARD_ALLOWED_GRADES = { 'A+': true, 'A': true };
  * Per-market threshold lookup. Returns {minP, minEdge} where minP defaults to
  * the global floor and minEdge defaults to 0 (off) if not set.
  */
-function mlbBetCardThresholds_(cfg, marketKey) {
+function mlbBetCardThresholds_(cfg, marketKey, side) {
   const globalRaw = String(cfg['MIN_MODEL_PCT_BET_CARD'] != null ? cfg['MIN_MODEL_PCT_BET_CARD'] : '').trim();
   const globalNum = parseFloat(globalRaw, 10);
   const globalP = !isNaN(globalNum) && globalNum > 0 ? globalNum : MLB_BET_CARD_MIN_MODEL_PCT;
+
+  // Per-side key (K only for now): MIN_MODEL_PCT_K_OVER / MIN_MODEL_PCT_K_UNDER.
+  // Falls back to per-market key (MIN_MODEL_PCT_K), then global, then 0.60.
+  let sideKey = '';
+  if (marketKey === 'K' && side) {
+    sideKey = 'MIN_MODEL_PCT_K_' + String(side).toUpperCase();
+  }
+  const sideRaw = sideKey ? String(cfg[sideKey] != null ? cfg[sideKey] : '').trim() : '';
+  const sideNum = parseFloat(sideRaw, 10);
+
   const pRaw = String(cfg['MIN_MODEL_PCT_' + marketKey] != null ? cfg['MIN_MODEL_PCT_' + marketKey] : '').trim();
   const pNum = parseFloat(pRaw, 10);
-  const minP = !isNaN(pNum) && pNum > 0 ? pNum : globalP;
+  const marketP = !isNaN(pNum) && pNum > 0 ? pNum : globalP;
+
+  const minP = (!isNaN(sideNum) && sideNum > 0) ? sideNum : marketP;
+
   const eRaw = String(cfg['MIN_EDGE_' + marketKey] != null ? cfg['MIN_EDGE_' + marketKey] : '0').trim();
   const eNum = parseFloat(eRaw, 10);
   const minEdge = !isNaN(eNum) && eNum > 0 ? eNum : 0;
@@ -96,7 +109,7 @@ function refreshMLBBetCard() {
 
       const pWin = bestSide === 'Over' ? r[10] : r[11];
       const pwNum = parseFloat(String(pWin));
-      const kThr = mlbBetCardThresholds_(cfg, 'K');
+      const kThr = mlbBetCardThresholds_(cfg, 'K', bestSide);
       if (isNaN(pwNum) || pwNum < kThr.minP) return;
       const kEdge = parseFloat(String(r[9]));
       if (kThr.minEdge > 0 && (isNaN(kEdge) || Math.abs(kEdge) < kThr.minEdge)) return;
