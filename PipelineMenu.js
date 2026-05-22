@@ -36,6 +36,7 @@ function onOpen() {
     .addItem('🩺 HR + Grand Slam tab diagnostic', 'runHRSlamDiagnostic')
     .addItem('🩺 Pitcher data diagnostic (schedule → models)', 'runPitcherDataDiagnostic')
     .addItem('💰 Refresh profitability report', 'refreshMLBProfitabilityReport')
+    .addItem('🔬 Run gate backtest', 'runGateBacktest')
     .addItem('💰 Open profitability report', 'mlbActivateProfitabilityTab_')
     .addSeparator()
     .addSubMenu(
@@ -206,6 +207,7 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   // the tab. All per-batter card lookups (home abbr, matchup, opp SP) hit
   // this in-memory array instead of re-reading the sheet hundreds of times.
   if (typeof mlbResetScheduleBlockCache_ === 'function') mlbResetScheduleBlockCache_();
+  if (typeof mlbResetLineupsCache_ === 'function') mlbResetLineupsCache_();
   let savantTeamCount = -1;
   const outcomes = [];
 
@@ -244,6 +246,9 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   }
 
   step('MLB schedule (statsapi)', fetchMLBScheduleForSlate);
+  step('Lineups (statsapi)', function () {
+    if (typeof mlbFetchAndCacheLineups_ === 'function') mlbFetchAndCacheLineups_(ss, cfg);
+  });
   step('Pitcher game logs (statsapi)', refreshMLBPitcherGameLogs);
   step('FanDuel MLB odds', fetchMLBFanDuelOdds);
   step('Savant ingest (optional)', function () {
