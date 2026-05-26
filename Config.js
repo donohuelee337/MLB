@@ -172,6 +172,9 @@ function buildConfigTab() {
   row_('LINEUP_PA_SLOT_9', '3.2', 'Estimated PA/game for batting order slot 9.');
   // --- H calibration shrink (Phase 2B) ---
   row_('H_MODEL_P_SHRINK', '0.94', 'Multiplicative shrink on H P(win) before EV calculation. Closes empirical ~6pp calibration gap (model overestimates vs actual hit rate). 1.0 = off. Tune up toward 1.0 as lineup-hydration improves lambda accuracy. If this key is missing, re-run "0. Build Config tab".');
+  // --- Sim anchor weights (⚡ tabs → 🃏) — tune via 🔬 Sim_Gate_Backtest ---
+  row_('ANCHOR_WEIGHT_K', '0.35', '0..1 weight on model λ vs FD K line in ⚡ Sim_Pitcher_K (anchored Poisson). 0.35 = 65% line / 35% model. Tune with 🔬 Sim_Gate_Backtest on graded 📋 MLB_Results_Log.');
+  row_('ANCHOR_WEIGHT_BATTER_HITS', '0.35', '0..1 weight on model λ vs FD H line in ⚡ Sim_Batter_Hits. Tune with 🔬 Sim_Gate_Backtest.');
   row_('BANKROLL', '500', 'Bankroll in $ for Kelly stake column on 🃏 card. Default $500 = max bet $7.50 ≈ 1.5% of roll. Edit to your actual roll as it grows.');
   row_('KELLY_FRACTION', '0.25', 'Fractional-Kelly multiplier (0..1). Default 0.25 = quarter-Kelly (conservative, survives model overconfidence). Full-Kelly (1) is aggressive.');
   row_('STAKE_TIER_1_USD', '2.50', '1u stake size in $. With $7.50 cap and 1:2:3 ladder → 1u/2u/3u = $2.50/$5/$7.50.');
@@ -283,6 +286,9 @@ function validateMlbPipelineConfig_(cfg) {
   warnRange('MIN_MODEL_PCT_K_OVER',  c['MIN_MODEL_PCT_K_OVER'],  0.50, 0.90);
   warnRange('MIN_MODEL_PCT_K_UNDER', c['MIN_MODEL_PCT_K_UNDER'], 0.50, 0.95);
   warnRange('MAX_ODDS_H', c['MAX_ODDS_H'], -300, 0);
+  warnRange('ANCHOR_WEIGHT_K', c['ANCHOR_WEIGHT_K'], 0, 1);
+  warnRange('ANCHOR_WEIGHT_BATTER_HITS', c['ANCHOR_WEIGHT_BATTER_HITS'], 0, 1);
+  warnRange('H_MODEL_P_SHRINK', c['H_MODEL_P_SHRINK'], 0.85, 1.0);
   warnRange('OPP_K_RATE_LAMBDA_STRENGTH', c['OPP_K_RATE_LAMBDA_STRENGTH'], 0, 1);
   warnRange('HP_UMP_LAMBDA_MULT', c['HP_UMP_LAMBDA_MULT'], 0.85, 1.15);
   warnRange('LHP_K_LAMBDA_MULT', c['LHP_K_LAMBDA_MULT'], 0.92, 1.12);

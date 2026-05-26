@@ -19,7 +19,7 @@
 | Binomial + EV (Hits) | `MLBBatterHitsCard.js` → **`🎰 Batter_Hits_Card`** — P(≥k hits) on λ = season BA × est_AB; reads FD `batter_hits` + `batter_hits_alternate` |
 | Sim (Hits) | `MLBSimBatterHits.js` → **`⚡ Sim_Batter_Hits`** — **`ANCHOR_WEIGHT_BATTER_HITS`**; 🃏 hits rows use this tab |
 | Sim (TB) | `MLBSimBatterTB.js` → **`⚡ Sim_Batter_TB`** — **`ANCHOR_WEIGHT_BATTER_TB`**; 🃏 TB rows use this tab |
-| Bet card | `MLBBetCard.js` → **`🃏 MLB_Bet_Card`** — **K + Hits** from **`⚡ Sim_Pitcher_K`** + **`⚡ Sim_Batter_Hits`** (auto-refresh sim before merge); sorted by **game start time** then EV; **grade rubric** (A+/A/B+/B/C) with A+ bypass; **kelly $**, **model %**, **book %**, **proj**, **proj − line** columns; lineup-card aesthetic (ivory paper, navy ink, mono numbers) |
+| Bet card | `MLBBetCard.js` → **`🃏 MLB_Bet_Card`** — **K + Hits** from **`⚡ Sim_Pitcher_K`** + **`⚡ Sim_Batter_Hits`** (auto-refresh sim before merge); sorted by **game start time** then EV; gates from **Config** (calibration/backtest on **`📋 MLB_Results_Log`**); **kelly $**, **model %**, **book %**, **proj**, **proj − line** columns; lineup-card aesthetic (ivory paper, navy ink, mono numbers) |
 | Results log + grading | `MLBResultsLog.js` / **`📋 MLB_Results_Log`**; `MLBResultsGrader.js` — menu grader; runs at start of each ball window; supports K + batter hits (historical walk rows still grade) |
 | CLV proxy (close line) | **`close_line` / `close_odds` / `clv_note`** — `mlbBackfillResultsLogClosing_` on **FINAL** (after odds) + menu **📈 Backfill closing lines** (handles K and batter hits; legacy walk rows for backward compat) |
 | Umpire → λ (optional) | **`⚙️ HP_UMP_LAMBDA_MULT`** — scales 🎰 λ when **`hp_umpire`** present (default **1** = off) |
@@ -58,13 +58,8 @@ One-off menu items mirror those stages (e.g. **`📋 Pitcher K queue only`**, **
 
 ## Bet card details
 
-- **Layout** (20 cols): `slate · # · grade · gamePk · matchup · play · player · market · side · line · odds · model % · book % · ev/$1 · kelly $ · proj · proj − line · flags · player_id · time`
-- **Grade rubric** (in `mlbGradePlay_`):
-  - **A+**: EV ≥ 0.05 AND odds ≤ +130 — bypasses 2/game and 30 total caps
-  - **A**: EV ≥ 0.04 AND odds ≤ +180
-  - **B+**: EV ≥ 0.025
-  - **B**: EV ≥ 0.015
-  - **C**: EV > 0
+- **Layout** (19 cols): `slate · # · gamePk · matchup · play · player · market · side · line · odds · model % · book % · ev/$1 · kelly $ · proj · proj − line · flags · player_id · time`
+- **Gates** (Config, tuned from **`🎯 Bet_Card_Calibration`** / **`🔬 Gate_Backtest`** on graded **`📋 MLB_Results_Log`** rows): per-market **model P(Win)** floors (`MIN_MODEL_PCT_*`), **`MIN_EV_BET_CARD`**, **`MAX_ODDS_H`** (hits). P/EV from **⚡ Sim** (anchored Poisson/binomial) — not letter-grade heuristics.
 - **Kelly $** = `BANKROLL × KELLY_FRACTION × max(0, (p·b − q)/b)` for model probability `p` at American odds (b = decimal odds − 1). Default quarter-Kelly on $1000.
 - **Sort**: game start time asc, EV desc within game (read from schedule `gameDateRaw`).
 - **Visual cues**: model % colored dark-green when ≥62% (well above coin flip), amber when <55% (coin-flip zone). Grade cells colored with muted Topps card-back palette. Game dividers via hairline navy underline.
@@ -80,7 +75,7 @@ One-off menu items mirror those stages (e.g. **`📋 Pitcher K queue only`**, **
 ## Suggested next product steps
 
 1. Tune **`K9_BLEND_L7_WEIGHT`** / **`MIN_EV_BET_CARD`** / **`MAX_ODDS_BET_CARD`** / **`EST_AB_PER_GAME`** / **`KELLY_FRACTION`** on **`⚙️ Config`** after a few slates (re-run **0. Build Config tab** if keys are missing).
-2. After enough graded slates, analyze WIN% by **`grade`** column (Results Log col Y). If A+ doesn't dominate, tighten the rubric in `mlbGradePlay_`.
+2. After enough graded slates, tune **`⚙️ Config`** from **`🎯 Bet_Card_Calibration`**, **`🔬 Gate_Backtest`** (legacy logged P), and **`🔬 Sim_Gate_Backtest`** (anchored sim P/EV + anchor weights).
 3. Extend **`MLB_ABBR_ODDS_TEAM_ALTERNATES`** / Odds name map in `MLBMatchKeys.js` when a team rebrands or the Odds API changes strings.
 4. Pick one backlog theme: **Savant / platoon signals**, **CV gates on Sim**, or **new markets** (e.g. HR priced).
 

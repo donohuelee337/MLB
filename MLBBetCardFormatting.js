@@ -7,7 +7,6 @@
 // subtle alternating row bands within each game group.
 //
 // Public functions:
-//   mlbGradePlay_(ev, american)               → 'A+' | 'A' | 'B+' | 'B' | 'C' | ''
 //   mlbKellyStake_(p, american, bk, frac)     → integer $ (fractional Kelly)
 //   mlbScheduleGameTimeIndex_(ss)             → { gamePk: { iso, hhmm } }
 //   mlbApplyBetCardFormatting_(sh, n, ncol)   → applies all visual styling
@@ -56,27 +55,6 @@ function _bcNormSlate_(v, tz) {
     try { return Utilities.formatDate(v, tz || Session.getScriptTimeZone(), 'yyyy-MM-dd'); } catch (e) { return ''; }
   }
   return String(v).trim();
-}
-
-// ---- grade rubric --------------------------------------------------------
-/**
- * Rubric favors small +EV bites at low variance over speculative +odds.
- *  A+ : EV ≥ 0.05 AND odds ≤ +130   (high edge, low variance — bypass card caps)
- *  A  : EV ≥ 0.04 AND odds ≤ +180
- *  B+ : EV ≥ 0.025
- *  B  : EV ≥ 0.015
- *  C  : EV > 0
- */
-function mlbGradePlay_(ev, american) {
-  const e = parseFloat(String(ev));
-  const o = parseFloat(String(american));
-  if (isNaN(e) || e <= 0) return '';
-  if (isNaN(o)) return '';
-  if (e >= 0.05  && o <= 130) return 'A+';
-  if (e >= 0.04  && o <= 180) return 'A';
-  if (e >= 0.025)             return 'B+';
-  if (e >= 0.015)             return 'B';
-  return 'C';
 }
 
 /**

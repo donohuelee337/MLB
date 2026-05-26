@@ -16,25 +16,17 @@ Google Apps Script + Google Sheets pipeline in the **AI-BOIZ** spirit: slate-fir
 8. **🎰 Pitcher_K_Card** — Poisson + naive EV from K queue.
 9. **🎰 Batter_Hits_Card** — Binomial P(≥k hits) on λ = season BA × est_AB; reads FD `batter_hits` / `batter_hits_alternate`.
 10. **💣 Batter_HR_Queue** — research-only ranking by season HR/PA × park (no FD price required).
-11. **🃏 MLB_Bet_Card** — ranked **K + Batter Hits**, sorted by **game start time** then EV. Grade rubric (A+/A/B+/B/C); **A+ plays bypass** the per-game and total card caps. Each row shows **grade, model %, book %, ev/$1, kelly $, proj, proj − line**.
-12. **📋 MLB_Results_Log** + **📊** grading — upsert by `bet_key`; boxscore K / batter hits; `🔒 Final` + `📈 Backfill` close from ✅ FD tab. **`grade`** captured for post-hoc analysis.
+11. **🃏 MLB_Bet_Card** — ranked **K + Batter Hits** from **⚡ Sim** tabs, sorted by **game start time** then EV. Gates from **Config** (calibration/backtest on **`📋 MLB_Results_Log`**). Each row shows **model %, book %, ev/$1, kelly $, proj, proj − line**.
+12. **📋 MLB_Results_Log** + **📊** grading — upsert by `bet_key`; boxscore K / batter hits; `🔒 Final` + `📈 Backfill` close from ✅ FD tab.
 13. **⚾ Pipeline_Log** — funnel, warnings, near-misses, game coverage after Morning / Midday / Final.
 
 **Pitcher walks** were removed from the bet card and pipeline because FanDuel rarely posts straight walk lines. The walk queue/card files remain in the repo (disconnected); historical walk rows in the Results Log still grade and CLV-backfill for backward compat.
 
 **Menus:** **🌅 Morning**, **🌤 Midday**, **🔒 Final**, **📆 Set SLATE_DATE to tomorrow (NY) + Morning**, per-stage "only" items, **📋 Open Pipeline Log**.
 
-## Bet card grade rubric
+## Bet card gates
 
-| Grade | Criteria | Treatment |
-|---|---|---|
-| **A+** | EV ≥ 0.05 AND odds ≤ +130 | Bypasses 2/game and 30 total caps |
-| **A**  | EV ≥ 0.04 AND odds ≤ +180 | Subject to caps |
-| **B+** | EV ≥ 0.025 | Subject to caps |
-| **B**  | EV ≥ 0.015 | Subject to caps |
-| **C**  | EV > 0 | Subject to caps |
-
-A+ favors low-variance "small +EV bites" — high edge at favorite-ish prices.
+Qualifying plays must clear **Config** thresholds tuned from **`🎯 Bet_Card_Calibration`** and **`🔬 Gate_Backtest`** on graded **`📋 MLB_Results_Log`** rows: per-market **model P(Win)** floors (`MIN_MODEL_PCT_*`), **`MIN_EV_BET_CARD`**, **`MAX_ODDS_H`** (hits). P/EV come from **⚡ Sim** (anchored Poisson/binomial).
 
 `kelly $` = `BANKROLL × KELLY_FRACTION × max(0, (p·b − q)/b)` for model probability `p` at American odds `american` (b = decimal-1). Default is quarter-Kelly on a $1000 bank.
 
