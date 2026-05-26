@@ -115,3 +115,87 @@ function mlbHotColdFlag_(recentAvg, seasonAvg, threshold) {
   if (ratio <= 1 - t) return 'COLD';
   return '';
 }
+
+/** Config truthy — default TRUE when key missing (PROMO_EXCLUDE_COLD). */
+function mlbPromoExcludeColdEnabled_(cfg) {
+  const raw = cfg && cfg['PROMO_EXCLUDE_COLD'] != null ? cfg['PROMO_EXCLUDE_COLD'] : 'TRUE';
+  const v = String(raw).trim().toUpperCase();
+  return v !== 'FALSE' && v !== '0' && v !== 'NO' && v !== 'OFF';
+}
+
+/**
+ * Precomputed HOT/COLD by batter_id from 🧪 Batter_Hits_Card_v2-full and
+ * 📋 Batter_Hits_Queue — same source as 🃏 MLB_Bet_Card borders.
+ * @returns {Object<string, string>} id → 'HOT'|'COLD'
+ */
+function mlbBuildBatterHotColdMap_(ss) {
+  const map = {};
+  if (!ss) return map;
+
+  function put(id, flag) {
+    const key = String(parseInt(id, 10) || '');
+    if (!key) return;
+    const f = String(flag || '').trim().toUpperCase();
+    if (f === 'HOT' || f === 'COLD') map[key] = f;
+  }
+
+  const v2Tab =
+    typeof MLB_BATTER_HITS_V2_CARD_TAB !== 'undefined'
+      ? MLB_BATTER_HITS_V2_CARD_TAB
+      : '🧪 Batter_Hits_Card_v2-full';
+  const v2 = ss.getSheetByName(v2Tab);
+  if (v2 && v2.getLastRow() >= 4) {
+    const nRows = v2.getLastRow() - 3;
+    const data = v2.getRange(4, 1, nRows, 34).getValues();
+    for (let i = 0; i < data.length; i++) {
+      put(data[i][17], data[i][33]);
+    }
+  }
+
+  const qTab =
+    typeof MLB_BATTER_HITS_QUEUE_TAB !== 'undefined'
+      ? MLB_BATTER_HITS_QUEUE_TAB
+      : '📋 Batter_Hits_Queue';
+  const q = ss.getSheetByName(qTab);
+  if (q && q.getLastRow() >= 4) {
+    const nRows = q.getLastRow() - 3;
+    const data = q.getRange(4, 1, nRows, 16).getValues();
+    for (let i = 0; i < data.length; i++) {
+      const key = String(parseInt(data[i][3], 10) || '');
+      if (!key || map[key]) continue;
+      put(data[i][3], data[i][15]);
+    }
+  }
+
+  return map;
+}
+
+/**
+ * Hits hot/cold (L5 H/game vs season) — same semantics as 🃏 bet-card borders.
+ * @returns {'HOT'|'COLD'|''}
+ */
+function mlbBatterHitsHotColdFlag_(batterId, season, hotColdMap) {
+  const id = parseInt(batterId, 10);
+  if (!id) return '';
+  const key = String(id);
+  if (hotColdMap && hotColdMap[key]) {
+    return hotColdMap[key];
+  }
+  if (typeof mlbHittingHitsSummary_ !== 'function') return '';
+  try {
+    return String((mlbHittingHitsSummary_(id, season) || {}).hotCold || '').trim().toUpperCase();
+  } catch (e) {
+    return '';
+  }
+}
+
+/**
+ * Drop COLD batters from promo candidate pools (Streak / HR / GS).
+ * @param {string} [hotColdCached] optional precomputed flag from hits v2 card
+ */
+function mlbPromoDropColdBatter_(batterId, season, cfg, hotColdCached) {
+  if (!mlbPromoExcludeColdEnabled_(cfg)) return false;
+  const cached = String(hotColdCached || '').trim().toUpperCase();
+  const flag = cached || mlbBatterHitsHotColdFlag_(batterId, season);
+  return flag === 'COLD';
+}

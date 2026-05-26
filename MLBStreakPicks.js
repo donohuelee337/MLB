@@ -19,6 +19,8 @@
 //   • Lineup spot confirmation (in-game PAs)
 //
 // Hard constraint: DO NOT modify v2 outputs. Read-only consumer.
+// VISUAL FORMATTING is in MLBPromoFormatting.js — DO NOT mix rendering code
+// into this file or it will get rolled back with model changes.
 // ============================================================
 
 const MLB_STREAK_PICKS_TAB = '🔥 Streak_Picks';
@@ -183,36 +185,94 @@ function mlbStreakBuildScheduleGameMap_(ss) {
 }
 
 /**
- * Opposing SP + team for a batter — schedule probable IDs + batter team
- * from shared statsapi cache. Does not read the v2 hits card.
+ * Opposing SP + team for a batter — lineup side (when confirmed), then batter
+ * team abbr, then v2 opp_sp_name. Does not read the v2 card directly; callers
+ * pass v2OppSpName when available.
  */
-function mlbStreakPitcherContextForBatter_(gamePk, batterId, season, gameMap) {
+function mlbStreakPitcherContextForBatter_(ss, gamePk, batterId, gameMap, v2OppSpName) {
   const g = parseInt(gamePk, 10);
   const id = parseInt(batterId, 10);
   const game = gameMap[g];
   if (!game || !id) return null;
 
-  if (typeof mlbSharedFetchBatterHittingSplitsAndSeason_ === 'function') {
-    mlbSharedFetchBatterHittingSplitsAndSeason_(id, season);
+  // Confirmed lineup side is the most reliable team signal (avoids stale
+  // statsapi currentTeam mismatches vs tonight's game).
+  if (typeof mlbLineupSideForBatter_ === 'function') {
+    const side = mlbLineupSideForBatter_(g, id);
+    if (side === 'away') {
+      return {
+        spId: game.homeSpId,
+        oppAbbr: game.home,
+        oppSpName: game.homeSpName,
+        batAbbr: game.away,
+      };
+    }
+    if (side === 'home') {
+      return {
+        spId: game.awaySpId,
+        oppAbbr: game.away,
+        oppSpName: game.awaySpName,
+        batAbbr: game.home,
+      };
+    }
   }
-  const batAbbr = mlbCanonicalTeamAbbr_(mlbHitsV2BatterTeamAbbr_(id));
-  if (!batAbbr) return null;
 
-  if (batAbbr === game.away) {
-    return {
-      spId: game.homeSpId,
-      oppAbbr: game.home,
-      oppSpName: game.homeSpName,
-      batAbbr: batAbbr,
-    };
+  if (typeof mlbSharedFetchBatterHittingSplitsAndSeason_ === 'function') {
+    mlbSharedFetchBatterHittingSplitsAndSeason_(id, mlbSlateSeasonYear_(getConfig()));
   }
-  if (batAbbr === game.home) {
-    return {
-      spId: game.awaySpId,
-      oppAbbr: game.away,
-      oppSpName: game.awaySpName,
-      batAbbr: batAbbr,
-    };
+  let batAbbr = mlbCanonicalTeamAbbr_(mlbHitsV2BatterTeamAbbr_(id));
+  if (batAbbr) {
+    const oppSp = mlbGetOpposingProbableSp_(ss, g, batAbbr);
+    if (oppSp && oppSp.id) {
+      return {
+        spId: oppSp.id,
+        oppAbbr: mlbScheduleOppTeamAbbrForBatter_(ss, g, batAbbr),
+        oppSpName: oppSp.name || '',
+        batAbbr: batAbbr,
+      };
+    }
+    if (batAbbr === game.away) {
+      return {
+        spId: game.homeSpId,
+        oppAbbr: game.home,
+        oppSpName: game.homeSpName,
+        batAbbr: batAbbr,
+      };
+    }
+    if (batAbbr === game.home) {
+      return {
+        spId: game.awaySpId,
+        oppAbbr: game.away,
+        oppSpName: game.awaySpName,
+        batAbbr: batAbbr,
+      };
+    }
+  }
+
+  // Last resort: v2 already matched opp_sp_name — recover SP id from schedule
+  // or statsapi people search even when batter-team lookup failed.
+  const nameHint = String(v2OppSpName || '').trim();
+  if (nameHint) {
+    if (typeof mlbScheduleSpContextByName_ === 'function') {
+      const fb = mlbScheduleSpContextByName_(ss, g, nameHint);
+      if (fb && fb.spId) {
+        return {
+          spId: fb.spId,
+          oppAbbr: fb.oppAbbr || '',
+          oppSpName: fb.spName || nameHint,
+          batAbbr: fb.batAbbr || '',
+        };
+      }
+    }
+    const spFromName = mlbStatsApiResolvePlayerIdFromName_(nameHint);
+    if (spFromName && !isNaN(spFromName)) {
+      return {
+        spId: spFromName,
+        oppAbbr: '',
+        oppSpName: nameHint,
+        batAbbr: batAbbr || '',
+      };
+    }
   }
   return null;
 }
@@ -300,7 +360,10 @@ function mlbStreakCollectCandidates_(ss, cfg, season) {
   const out = [];
   const src = ss.getSheetByName(MLB_BATTER_HITS_V2_CARD_TAB);
   if (src && src.getLastRow() >= 4) {
-    const data = src.getRange(4, 1, src.getLastRow() - 3, 34).getValues();
+    const last = src.getLastRow();
+    const nRows = last - 3;
+    const nCols = Math.max(34, Math.min(src.getLastColumn(), 38));
+    const data = src.getRange(4, 1, nRows, nCols).getValues();
     data.forEach(function (r) {
       out.push({
         gamePk: r[0],
@@ -310,7 +373,10 @@ function mlbStreakCollectCandidates_(ss, cfg, season) {
         lambdaV2: r[6],
         estPa: r[25],
         oppSpName: String(r[27] || '').trim(),
+        v2OppSpIp: r[30],
+        v2OppAvg: nCols > 37 ? r[37] : '',
         flagsV2: String(r[16] || ''),
+        hotCold: nCols > 33 ? String(r[33] || '').trim().toUpperCase() : '',
       });
     });
     return out;
@@ -415,6 +481,7 @@ function refreshStreakPicks() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const cfg = getConfig();
   const season = mlbSlateSeasonYear_(cfg);
+  const slateDate = getSlateDateString_(cfg) || '';
   mlbStreakResetCaches_();
 
   const cfgNum_ = function (key, fallback, min) {
@@ -437,9 +504,15 @@ function refreshStreakPicks() {
     return !isNaN(n) && n > 0 ? n : MLB_STREAK_PICK_COUNT_DEFAULT;
   })();
 
-  const candidates = mlbStreakCollectCandidates_(ss, cfg, season);
+  let candidates = mlbStreakCollectCandidates_(ss, cfg, season);
+  if (mlbPromoExcludeColdEnabled_(cfg)) {
+    candidates = candidates.filter(function (c) {
+      if (!c.batterId) return true;
+      return !mlbPromoDropColdBatter_(c.batterId, season, cfg, c.hotCold);
+    });
+  }
   if (!candidates.length) {
-    mlbStreakWriteEmpty_(ss, 'No hits odds or v2 card — run schedule + FanDuel odds first.');
+    mlbStreakWriteEmpty_(ss, 'No streak candidates — run schedule + hits v2 (or check PROMO_EXCLUDE_COLD).');
     return;
   }
 
@@ -456,22 +529,13 @@ function refreshStreakPicks() {
     let deadPaRate = '';
     let oppAvg = '';
     if (c.gamePk && c.batterId) {
-      let ctx = mlbStreakPitcherContextForBatter_(c.gamePk, c.batterId, season, gameMap);
+      let ctx = mlbStreakPitcherContextForBatter_(ss, c.gamePk, c.batterId, gameMap, c.oppSpName);
       let spId = ctx ? ctx.spId : 0;
       if (ctx) {
-        oppSpName = ctx.oppSpName || '';
+        oppSpName = ctx.oppSpName || c.oppSpName || '';
         oppAbbr = ctx.oppAbbr || '';
-      }
-      // Fallback also fires when ctx resolved but the schedule's probable SP
-      // id was empty (early-morning runs before MLB publishes probables).
-      // Match v2 card's opp_sp_name back to the schedule by SP name to recover.
-      if ((!ctx || !spId) && c.oppSpName && typeof mlbScheduleSpContextByName_ === 'function') {
-        const fb = mlbScheduleSpContextByName_(ss, c.gamePk, c.oppSpName);
-        if (fb && fb.spId) {
-          spId = fb.spId;
-          oppSpName = fb.spName || c.oppSpName || oppSpName;
-          oppAbbr = fb.oppAbbr || oppAbbr;
-        }
+      } else if (c.oppSpName) {
+        oppSpName = c.oppSpName;
       }
       if (spId) {
         const stats = mlbStreakFillPitcherStats_(spId, season);
@@ -479,6 +543,17 @@ function refreshStreakPicks() {
         expSpIp = stats.expSpIp;
         deadPaRate = stats.deadPaRate;
         oppAvg = stats.oppAvg;
+      }
+      if (expSpIp === '' && c.v2OppSpIp !== '' && c.v2OppSpIp != null) {
+        const ipV2 = parseFloat(String(c.v2OppSpIp));
+        if (!isNaN(ipV2) && ipV2 > 0) expSpIp = Math.round(ipV2 * 10) / 10;
+      }
+      if (oppAvg === '' && c.v2OppAvg !== '' && c.v2OppAvg != null) {
+        const avgV2 = parseFloat(String(c.v2OppAvg));
+        if (!isNaN(avgV2) && avgV2 > 0) oppAvg = Math.round(avgV2 * 1000) / 1000;
+      }
+      if (oppAbbr === '' && ctx && ctx.batAbbr && typeof mlbScheduleOppTeamAbbrForBatter_ === 'function') {
+        oppAbbr = mlbScheduleOppTeamAbbrForBatter_(ss, c.gamePk, ctx.batAbbr);
       }
     }
 
@@ -536,6 +611,7 @@ function refreshStreakPicks() {
       penMult: penMult,
       deadPaMult: deadPaMult,
       pStreak: pStreak,
+      hotCold: String(c.hotCold || '').trim().toUpperCase(),
       notes: notes.join('; '),
     });
   });
@@ -564,7 +640,9 @@ function refreshStreakPicks() {
 
   // Pick top N — but only if pStreak is computable (non-empty).
   let pickIdx = 0;
+  const hotColdFlags = [];
   const ranked = deduped.map(function (row) {
+    hotColdFlags.push(row.hotCold || '');
     const havePstreak = row.pStreak !== '' && !isNaN(parseFloat(row.pStreak));
     let rank = '';
     let isPick = '';
@@ -599,10 +677,10 @@ function refreshStreakPicks() {
     ];
   });
 
-  mlbStreakWriteSheet_(ss, ranked);
+  mlbStreakWriteSheet_(ss, ranked, slateDate, hotColdFlags);
 }
 
-function mlbStreakWriteSheet_(ss, rows) {
+function mlbStreakWriteSheet_(ss, rows, slateDate, hotColdFlags) {
   let sh = ss.getSheetByName(MLB_STREAK_PICKS_TAB);
   if (sh) {
     sh.clearContents();
@@ -613,22 +691,9 @@ function mlbStreakWriteSheet_(ss, rows) {
   sh.setTabColor('#f59e0b');
 
   const NEED_COLS = 22;
-  // insertColumnsAfter BEFORE setColumnWidth — writing past the existing
-  // column count clears the sheet then silently throws (see auto-memory:
-  // apps_script_column_expansion).
   if (sh.getMaxColumns() < NEED_COLS) {
     sh.insertColumnsAfter(sh.getMaxColumns(), NEED_COLS - sh.getMaxColumns());
   }
-
-  sh.getRange(1, 1, 1, NEED_COLS)
-    .merge()
-    .setValue('🔥 Streak_Picks — daily FD MLB The Streak ranker · p_streak = p_hit_v2 × K/9 penalty × bullpen leverage × dead-PA penalty')
-    .setFontWeight('bold')
-    .setBackground('#b45309')
-    .setFontColor('#ffffff')
-    .setHorizontalAlignment('center')
-    .setWrap(true);
-  sh.setRowHeight(1, 34);
 
   const headers = [
     'gamePk',
@@ -654,12 +719,7 @@ function mlbStreakWriteSheet_(ss, rows) {
     'model_version',
     'notes',
   ];
-  sh.getRange(3, 1, 1, headers.length)
-    .setValues([headers])
-    .setFontWeight('bold')
-    .setBackground('#d97706')
-    .setFontColor('#ffffff');
-  sh.setFrozenRows(3);
+  sh.getRange(3, 1, 1, headers.length).setValues([headers]);
 
   const widths = [72, 200, 150, 72, 64, 72, 130, 64, 64, 72, 80, 60, 72, 64, 72, 80, 72, 64, 56, 56, 80, 220];
   widths.forEach(function (w, i) { sh.setColumnWidth(i + 1, w); });
@@ -669,16 +729,11 @@ function mlbStreakWriteSheet_(ss, rows) {
     try {
       ss.setNamedRange('MLB_STREAK_PICKS', sh.getRange(4, 1, rows.length, headers.length));
     } catch (e) {}
-    // Highlight pick rows in yellow to match the Bet Card visual treatment.
-    // is_pick is column 20 (0-indexed: rows[i][19]).
-    for (let i = 0; i < rows.length; i++) {
-      if (rows[i][19] === true) {
-        sh.getRange(4 + i, 1, 1, headers.length)
-          .setBackground('#fef3c7')
-          .setFontWeight('bold');
-      }
-    }
   }
+
+  // Visual rendering lives in MLBPromoFormatting.js — keep it that way.
+  mlbApplyStreakPromoFormatting_(sh, rows.length ? rows : [], headers, slateDate, hotColdFlags);
+  sh.setHiddenGridlines(true);
 
   try {
     ss.toast(rows.length + ' candidates · top picks marked', 'Streak Picks', 6);

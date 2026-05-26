@@ -11,6 +11,7 @@
 //   mlbKellyStake_(p, american, bk, frac)     → integer $ (fractional Kelly)
 //   mlbScheduleGameTimeIndex_(ss)             → { gamePk: { iso, hhmm } }
 //   mlbApplyBetCardFormatting_(sh, n, ncol)   → applies all visual styling
+//   mlbBcHeat_(pct)                           → shared heat-map lookup (promo sheets too)
 //   mlbAppendBetTrackerSection_(ss, sh, r, d) → appends results panel below card
 // ============================================================
 
@@ -29,7 +30,7 @@ const MLB_BC_TITLE_FONT  = 'Inter';
 
 // ---- heat-map palette (10% bands, no neutral) ---------------------------
 // <60% → red, darker toward 0; ≥60% → green, darker toward 100.
-function _bcHeat_(pct) {
+function mlbBcHeat_(pct) {
   if (pct == null || isNaN(pct)) return { bg: '#ffffff', fg: MLB_BC_INK };
   const p = Math.max(0, Math.min(1, pct));
   const band = Math.min(9, Math.floor(p * 10));
@@ -289,7 +290,7 @@ function mlbApplyBetCardFormatting_(sh, rows, headers, slateDate) {
   for (let i = 0; i < rows.length; i++) {
     const mp = parseFloat(String(rows[i][10]));
     if (isNaN(mp)) continue;
-    const heat = _bcHeat_(mp);
+    const heat = mlbBcHeat_(mp);
     sh.getRange(4 + i, 11).setBackground(heat.bg).setFontColor(heat.fg).setFontWeight('bold');
   }
 
@@ -299,7 +300,7 @@ function mlbApplyBetCardFormatting_(sh, rows, headers, slateDate) {
     if (isNaN(ev)) continue;
     // Map EV [-0.05 .. +0.15] to [0 .. 1] for heat lookup so most plays land mid-band.
     const t = Math.max(0, Math.min(1, (ev + 0.05) / 0.20));
-    const heat = _bcHeat_(t);
+    const heat = mlbBcHeat_(t);
     sh.getRange(4 + i, 13).setBackground(heat.bg).setFontColor(heat.fg).setFontWeight(Math.abs(ev) >= 0.05 ? 'bold' : 'normal');
   }
 
@@ -569,7 +570,7 @@ function _mlbRenderBetTrackerPanel_(ss, sh, startRow, slateDate, opts) {
     }
     return null;
   };
-  // Label-cell heat function: returns a 0..1 value passed to _bcHeat_.
+  // Label-cell heat function: returns a 0..1 value passed to mlbBcHeat_.
   const labelHeatFn = opts.labelHeat || function (b) { return (b.lo + Math.min(b.hi, 1.0)) / 2; };
   const cumulativeStyle = opts.cumulativeStyle || 'thresholds';  // 'thresholds' | 'simple' | 'none'
   const windows = ['yesterday', 'last7', 'last30', 'lifetime'];
@@ -712,7 +713,7 @@ function _mlbRenderBetTrackerPanel_(ss, sh, startRow, slateDate, opts) {
     buckets.forEach(function (b) {
       sh.getRange(r, 1, 1, ncol).setBackground('#ffffff');
       // Bucket label zone
-      const labelHeat = _bcHeat_(labelHeatFn(b));
+      const labelHeat = mlbBcHeat_(labelHeatFn(b));
       zMerge(r, 0, b.label)
         .setFontFamily(MLB_BC_TITLE_FONT)
         .setFontSize(10)
@@ -738,7 +739,7 @@ function _mlbRenderBetTrackerPanel_(ss, sh, startRow, slateDate, opts) {
         if (n === 0) {
           rng.setBackground('#ffffff').setFontColor(MLB_BC_INK_SOFT);
         } else {
-          const heat = _bcHeat_(s.w / n);
+          const heat = mlbBcHeat_(s.w / n);
           rng.setBackground(heat.bg).setFontColor(heat.fg);
         }
       });
@@ -812,7 +813,7 @@ function _mlbRenderBetTrackerPanel_(ss, sh, startRow, slateDate, opts) {
         if (n === 0) {
           rng.setBackground('#ffffff').setFontColor(MLB_BC_INK_SOFT);
         } else {
-          const heat = _bcHeat_(a.w / n);
+          const heat = mlbBcHeat_(a.w / n);
           rng.setBackground(heat.bg).setFontColor(heat.fg);
         }
       });

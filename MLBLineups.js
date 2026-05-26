@@ -26,7 +26,23 @@ function mlbLineupSlotForBatter_(gamePk, batterId) {
   const pKey = String(parseInt(batterId, 10) || 0);
   const gameMap = __mlbLineupsCache[gKey];
   if (!gameMap) return null;
-  return gameMap[pKey] || null;
+  const entry = gameMap[pKey];
+  if (entry == null || entry === '') return null;
+  if (typeof entry === 'object') return entry.slot || null;
+  return entry;
+}
+
+/** 'away' | 'home' when tonight's lineup is confirmed; else null. */
+function mlbLineupSideForBatter_(gamePk, batterId) {
+  if (__mlbLineupsCache === null) return null;
+  const gKey = String(parseInt(gamePk, 10) || 0);
+  const pKey = String(parseInt(batterId, 10) || 0);
+  const gameMap = __mlbLineupsCache[gKey];
+  if (!gameMap) return null;
+  const entry = gameMap[pKey];
+  if (!entry || typeof entry !== 'object') return null;
+  const side = String(entry.side || '').trim().toLowerCase();
+  return side === 'away' || side === 'home' ? side : null;
 }
 
 /**
@@ -93,7 +109,7 @@ function mlbFetchAndCacheLineups_(ss, cfg) {
           const slot = Math.round(orderNum / 100);
           if (slot < 1 || slot > 9) return;
           if (!__mlbLineupsCache[gamePk]) __mlbLineupsCache[gamePk] = {};
-          __mlbLineupsCache[gamePk][pid] = slot;
+          __mlbLineupsCache[gamePk][pid] = { slot: slot, side: teamLabel };
           tabRows.push([gamePk, matchup, teamLabel, slot, pid, p.fullName || '', 'YES']);
           hasAnySlot = true;
         });

@@ -20,6 +20,9 @@ function onOpen() {
     .addItem('📒 Pitcher game logs only (statsapi, warms cache)', 'refreshMLBPitcherGameLogs')
     .addItem('📋 Pitcher K queue only (schedule + FD K + game logs)', 'refreshPitcherKSlateQueue')
     .addItem('🎰 Pitcher K card only (Poisson + EV)', 'refreshPitcherKBetCard')
+    .addItem('⚡ Pitcher K Sim only (anchored λ)', 'refreshPitcherKSimEngine_')
+    .addItem('🧪 Batter Hits v2 card only (LIVE h.v2-full)', 'refreshBatterHitsV2BetCard')
+    .addItem('⚡ Batter Hits Sim only (anchored h.v2)', 'refreshBatterHitsSimEngine_')
     .addItem('📋 Batter Hits queue only (FD hits + hitting logs)', 'refreshBatterHitsSlateQueue')
     .addItem('🎯 Batter Hits card only (Poisson + EV)', 'refreshBatterHitsBetCard')
     .addItem('🃏 MLB Bet Card only (final plays)', 'refreshMLBBetCard')
@@ -259,15 +262,17 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   step('Slate board (join)', refreshMLBSlateBoard);
   step('Pitcher K queue', refreshPitcherKSlateQueue);
   step('Pitcher K card', refreshPitcherKBetCard);
+  step('Sim Engine (Pitcher K)', refreshPitcherKSimEngine_);
   // TB v1/v2/v3 retired from pipeline 2026-05-21 (losing market + API budget).
   // Source files remain for manual rebuild via Apps Script editor if needed.
   step('Batter Hits v2 card (LIVE h.v2-full)', refreshBatterHitsV2BetCard);
+  step('Sim Engine (Batter Hits)', refreshBatterHitsSimEngine_);
+  // --- Band D publish (broker): streak + bet card must succeed for operator ---
   // Streak picks must run BEFORE the Bet Card so the formatter can read 🔥
   // Streak_Picks to drive the yellow Streak highlight.
   step('Streak picks (streak.v1)', refreshStreakPicks);
   step('MLB Bet Card', refreshMLBBetCard);
-  // HR Promo built last so the snapshot block (after this) can read it.
-  // Appended (not inserted) so the existing outcomes[] indices stay stable.
+  // --- Band E workers (shadow/promo/analytics) — isolated try/catch below ---
   step('Batter HR Promo refresh', refreshBatterHrPromoSheet_);
   // Hits v3 must run AFTER Streak (already built above) for its streak overlap mult.
   step('Batter Hits v3 card (shadow h.v3-contact)', refreshBatterHitsV3BetCard);
@@ -285,9 +290,11 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   const oSlate = outcomes[7] || { ok: true };
   const oPk = outcomes[8] || { ok: true };
   const oCard = outcomes[9] || { ok: true };
-  const oHitsV2 = outcomes[10] || { ok: true };
-  const oStreak = outcomes[11] || { ok: true };
-  const oBet = outcomes[12] || { ok: true };
+  const oKSim = outcomes[10] || { ok: true };
+  const oHitsV2 = outcomes[11] || { ok: true };
+  const oHSim = outcomes[12] || { ok: true };
+  const oStreak = outcomes[13] || { ok: true };
+  const oBet = outcomes[14] || { ok: true };
 
   logStep_('Config', 1, oCfg.ok ? 1 : 0, oCfg.ok ? '' : oCfg.err || 'failed');
   logStep_(
@@ -345,10 +352,22 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
     oCard.ok ? '' : oCard.err || 'failed'
   );
   logStep_(
+    'Sim Engine (Pitcher K)',
+    0,
+    oKSim.ok ? mlbTabDataRowsBelowHeader3_(ss, MLB_PITCHER_K_SIM_TAB) : 0,
+    oKSim.ok ? '' : oKSim.err || 'failed'
+  );
+  logStep_(
     'Batter Hits v2 card (LIVE h.v2-full)',
     0,
     oHitsV2.ok ? mlbTabDataRowsBelowHeader3_(ss, MLB_BATTER_HITS_V2_CARD_TAB) : 0,
     oHitsV2.ok ? '' : oHitsV2.err || 'failed'
+  );
+  logStep_(
+    'Sim Engine (Batter Hits)',
+    0,
+    oHSim.ok ? mlbTabDataRowsBelowHeader3_(ss, MLB_BATTER_HITS_SIM_TAB) : 0,
+    oHSim.ok ? '' : oHSim.err || 'failed'
   );
   logStep_(
     'Streak picks (streak.v1)',
@@ -365,6 +384,7 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
 
   mlbAppendPitcherKNearMisses_(ss);
 
+  // Band D broker: snapshot durable even when Band E workers fail.
   if (oBet.ok) {
     try {
       snapshotMLBBetCardToLog(windowTag);
@@ -403,6 +423,7 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
     addPipelineWarning_('Hits compare panel: ' + (e.message || e));
   }
 
+  // Band E workers — analytics / calibration (non-blocking).
   try {
     refreshBetCardCalibration();
   } catch (e) {
@@ -465,7 +486,14 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   Logger.log('MLB window ' + windowTag + ':\n' + msg);
   try {
     const tip = buildPipelineToast_();
-    ss.toast('Done ' + windowTag + ' in ' + ((Date.now() - start) / 1000).toFixed(1) + 's — ' + tip, 'MLB-BOIZ', 10);
+    const build =
+      typeof mlbAppsScriptBuild_ === 'function' ? mlbAppsScriptBuild_() : '';
+    const buildSuffix = build !== '' && build != null ? ' · build ' + build : '';
+    ss.toast(
+      'Done ' + windowTag + ' in ' + ((Date.now() - start) / 1000).toFixed(1) + 's — ' + tip + buildSuffix,
+      'MLB-BOIZ',
+      10
+    );
   } catch (e) {
     ss.toast('Done in ' + ((Date.now() - start) / 1000).toFixed(1) + 's', 'MLB-BOIZ', 8);
   }

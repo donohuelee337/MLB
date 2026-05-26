@@ -49,12 +49,12 @@ function mlbResetV3SharedFetchesCaches_() {
 function mlbSharedFetchBatterTeamAbbr_(playerId) {
   const id = parseInt(playerId, 10);
   if (!id) return '';
-  if (Object.prototype.hasOwnProperty.call(__mlbSharedBatterTeamAbbrCache, id)) {
+  if (__mlbSharedBatterTeamAbbrCache[id]) {
     return __mlbSharedBatterTeamAbbrCache[id];
   }
-  // Fallback: basic /people endpoint — currentTeam.abbreviation is present
-  // for active roster players even without the hydrate parameter.
-  const url = mlbStatsApiBaseUrl_() + '/people/' + id;
+  // hydrate=currentTeam returns team.name even when abbreviation is absent
+  // (common in 2026 statsapi). mlbTeamAbbrFromStatsApiTeam_ maps name → abbr.
+  const url = mlbStatsApiBaseUrl_() + '/people/' + id + '?hydrate=currentTeam';
   let abbr = '';
   try {
     Utilities.sleep(40);
@@ -62,16 +62,14 @@ function mlbSharedFetchBatterTeamAbbr_(playerId) {
     if (res.getResponseCode() === 200) {
       const payload = JSON.parse(res.getContentText());
       const person = (payload.people && payload.people[0]) || {};
-      const team = person.currentTeam || {};
-      abbr = String(team.abbreviation || team.teamCode || '').trim().toUpperCase();
-      if (typeof mlbCanonicalTeamAbbr_ === 'function') {
-        abbr = mlbCanonicalTeamAbbr_(abbr);
+      if (typeof mlbTeamAbbrFromStatsApiTeam_ === 'function') {
+        abbr = mlbTeamAbbrFromStatsApiTeam_(person.currentTeam || {});
       }
     }
   } catch (e) {
     Logger.log('mlbSharedFetchBatterTeamAbbr_: ' + e.message);
   }
-  __mlbSharedBatterTeamAbbrCache[id] = abbr;
+  if (abbr) __mlbSharedBatterTeamAbbrCache[id] = abbr;
   return abbr;
 }
 
@@ -107,18 +105,18 @@ function mlbSharedFetchBatterHittingSplitsAndSeason_(playerId, season) {
       // it here so mlbSharedFetchBatterTeamAbbr_ reads from cache instead of
       // making a separate /people?hydrate=currentTeam call that may omit the
       // abbreviation field depending on API hydration depth.
-      if (!Object.prototype.hasOwnProperty.call(__mlbSharedBatterTeamAbbrCache, id)) {
+      if (!__mlbSharedBatterTeamAbbrCache[id]) {
         var teamAbbr = '';
         for (var gi = 0; gi < groups.length && !teamAbbr; gi++) {
           var gSplits = (groups[gi] && groups[gi].splits) || [];
           for (var si = 0; si < gSplits.length && !teamAbbr; si++) {
             var t = (gSplits[si] && gSplits[si].team) || {};
-            var a = String(t.abbreviation || t.teamCode || '').trim().toUpperCase();
-            if (a && typeof mlbCanonicalTeamAbbr_ === 'function') a = mlbCanonicalTeamAbbr_(a);
-            if (a) teamAbbr = a;
+            if (typeof mlbTeamAbbrFromStatsApiTeam_ === 'function') {
+              teamAbbr = mlbTeamAbbrFromStatsApiTeam_(t);
+            }
           }
         }
-        __mlbSharedBatterTeamAbbrCache[id] = teamAbbr;
+        if (teamAbbr) __mlbSharedBatterTeamAbbrCache[id] = teamAbbr;
       }
       groups.forEach(function (grp) {
         const ty = String((grp && grp.type && grp.type.displayName) || '').toLowerCase();

@@ -7,6 +7,13 @@
 
 const CONFIG_TAB_NAME = '⚙️ Config';
 
+/** Incremented by scripts/clasp-deploy.ps1 on each Apps Script push (visible on ⚙️ Config). */
+const MLB_APPS_SCRIPT_BUILD = 1;
+
+function mlbAppsScriptBuild_() {
+  return typeof MLB_APPS_SCRIPT_BUILD !== 'undefined' ? MLB_APPS_SCRIPT_BUILD : '';
+}
+
 function safeAlert_(title, message) {
   try {
     SpreadsheetApp.getUi().alert(title, message || title, SpreadsheetApp.getUi().ButtonSet.OK);
@@ -46,6 +53,22 @@ function mlbAbbrFromTeamName_(name) {
   const n = String(name || '').trim().toLowerCase();
   if (!n) return '';
   return MLB_TEAM_NAME_TO_ABBR[n] || '';
+}
+
+/** Resolve canonical team abbr from a statsapi team object (splits / currentTeam). */
+function mlbTeamAbbrFromStatsApiTeam_(team) {
+  const t = team || {};
+  let abbr = String(t.abbreviation || t.teamCode || '').trim().toUpperCase();
+  if (abbr && typeof mlbCanonicalTeamAbbr_ === 'function') {
+    abbr = mlbCanonicalTeamAbbr_(abbr);
+  }
+  if (!abbr && typeof mlbAbbrFromTeamName_ === 'function') {
+    abbr = mlbAbbrFromTeamName_(t.name);
+    if (abbr && typeof mlbCanonicalTeamAbbr_ === 'function') {
+      abbr = mlbCanonicalTeamAbbr_(abbr);
+    }
+  }
+  return abbr || '';
 }
 
 /** Map statsapi / schedule abbreviation variants → Config canonical abbr. */
@@ -109,6 +132,11 @@ function buildConfigTab() {
     sheet.getRange(row, 3).setValue(note || '');
     row++;
   }
+  row_(
+    'APPS_SCRIPT_BUILD',
+    String(typeof MLB_APPS_SCRIPT_BUILD !== 'undefined' ? MLB_APPS_SCRIPT_BUILD : ''),
+    'Deployed code build — auto-bumped by scripts/clasp-deploy.ps1 each clasp push. Re-run "0. Build Config tab" to refresh.'
+  );
   row_('RUN_WINDOW', 'MORNING', 'MORNING | MIDDAY | FINAL');
   row_('SLATE_DATE', defaultSlate, 'yyyy-MM-dd in script TZ — use menu "tomorrow" or set manually');
   row_('ODDS_BOOK', 'fanduel', 'the-odds-api bookmaker key');
@@ -178,7 +206,8 @@ function buildConfigTab() {
   );
   // HR promo tuning (📣 Batter_HR_Promo). Defaults match the in-code fallbacks
   // — edit here to tune from the sheet instead of changing source.
-  row_('HR_PROMO_LINEUP_FALLBACK', 'roster', 'When boxscore lineup is missing: "roster" = score every batter w/ ≥30 PA & ≥1 HR; "skip" = drop the game and warn.');
+  row_('HR_PROMO_LINEUP_FALLBACK', 'roster', 'When boxscore lineup is missing: "roster" = score every batter w/ ≥HR_PROMO_MIN_PA & ≥1 HR; "skip" = drop the game and warn.');
+  row_('HR_PROMO_MIN_PA', '30', 'Hard gate: exclude batters below this season PA from 📣 HR/GS promo (confirmed lineups too). Stops 1-HR-in-6-AB call-ups from topping the list.');
   row_('HR_PROMO_BLEND_L14_WEIGHT', '0.25', '0..1 blend of last-14-day HR/PA vs season HR/PA. Higher = more reactive to hot/cold streaks; lower = more season-anchored.');
   row_('HR_PROMO_SHRINK_MIN_PA', '50', 'Bayesian shrink min-PA toward season prior. Lower (~25) trusts small samples; higher (~100) needs full season before deviating.');
   row_(
@@ -190,6 +219,7 @@ function buildConfigTab() {
   row_('HR_PROMO_PITCHER_MULT_MAX', '1.15', 'Ceiling for SP HR9 multiplier.');
   row_('HR_PROMO_CALIB_MIN_ROWS', '500', 'Min graded rows before Platt calibration fits — until then p_calibrated == p_poisson.');
   row_('HR_PROMO_EXPECTED_PA_JSON', '', 'Optional: JSON array of 9 positive numbers — expected PA per lineup slot 1..9. Empty = built-in default [4.65, 4.55, ..., 3.6].');
+  row_('PROMO_EXCLUDE_COLD', 'TRUE', 'When TRUE, drop COLD batters (L5 H/game ≤85% of season) from 🔥 Streak_Picks, 📣 HR promo, and 📣 GS promo lists entirely. Set FALSE to include slumping hitters.');
   // 🔥 Streak picks (FanDuel MLB The Streak) — Streak-only adjustments on top of h.v2-full P(≥1 hit).
   row_('STREAK_K9_LEAGUE', '8.5', 'League SP K/9 baseline for 🔥 Streak_Picks K-rate penalty. Update yearly. Pitchers above this are penalized; below get a small bonus.');
   row_('STREAK_K9_PENALTY_ALPHA', '0.15', 'Sensitivity of Streak K-rate penalty (0 = off). penalty_mult = 1 − α × (sp_k9 − league)/league, clamped 0.80–1.05. Higher α = trust K/9 more.');
@@ -257,6 +287,9 @@ function validateMlbPipelineConfig_(cfg) {
   warnRange('HP_UMP_LAMBDA_MULT', c['HP_UMP_LAMBDA_MULT'], 0.85, 1.15);
   warnRange('LHP_K_LAMBDA_MULT', c['LHP_K_LAMBDA_MULT'], 0.92, 1.12);
   warnRange('RHP_K_LAMBDA_MULT', c['RHP_K_LAMBDA_MULT'], 0.92, 1.12);
+  warnRange('HR_PROMO_MIN_PA', c['HR_PROMO_MIN_PA'], 1, 200);
+  warnRange('HR_PROMO_SHRINK_MIN_PA', c['HR_PROMO_SHRINK_MIN_PA'], 1, 200);
+  warnRange('HR_PROMO_BLEND_L14_WEIGHT', c['HR_PROMO_BLEND_L14_WEIGHT'], 0, 1);
 }
 
 function setConfigValue_(key, value) {

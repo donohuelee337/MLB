@@ -67,10 +67,18 @@ function mlbGetOpposingProbableSp_(ss, gamePk, batterTeamAbbr) {
     const awayProbId = parseInt(block[i][11], 10);
     const homeProbId = parseInt(block[i][12], 10);
     if (wantBat && wantBat === away) {
-      return homeProbId ? { id: homeProbId, name: homeProb, throws: '' } : null;
+      let id = homeProbId;
+      if (!id && homeProb && typeof mlbStatsApiResolvePlayerIdFromName_ === 'function') {
+        id = parseInt(mlbStatsApiResolvePlayerIdFromName_(homeProb), 10) || 0;
+      }
+      return id ? { id: id, name: homeProb, throws: '' } : null;
     }
     if (wantBat && wantBat === home) {
-      return awayProbId ? { id: awayProbId, name: awayProb, throws: '' } : null;
+      let id = awayProbId;
+      if (!id && awayProb && typeof mlbStatsApiResolvePlayerIdFromName_ === 'function') {
+        id = parseInt(mlbStatsApiResolvePlayerIdFromName_(awayProb), 10) || 0;
+      }
+      return id ? { id: id, name: awayProb, throws: '' } : null;
     }
     return null;
   }
@@ -117,11 +125,23 @@ function mlbScheduleSpContextByName_(ss, gamePk, spName) {
     const homeProbId = parseInt(block[i][12], 10);
     const away = mlbCanonicalTeamAbbr_(block[i][3]);
     const home = mlbCanonicalTeamAbbr_(block[i][4]);
-    if (awayProbId && mlbNormalizePersonName_(awayProb) === want) {
-      return { spId: awayProbId, spName: awayProb, oppAbbr: away, batAbbr: home };
+    if (mlbNormalizePersonName_(awayProb) === want) {
+      let spId = awayProbId;
+      if (!spId && typeof mlbStatsApiResolvePlayerIdFromName_ === 'function') {
+        spId = parseInt(mlbStatsApiResolvePlayerIdFromName_(awayProb), 10) || 0;
+      }
+      if (spId) {
+        return { spId: spId, spName: awayProb, oppAbbr: away, batAbbr: home };
+      }
     }
-    if (homeProbId && mlbNormalizePersonName_(homeProb) === want) {
-      return { spId: homeProbId, spName: homeProb, oppAbbr: home, batAbbr: away };
+    if (mlbNormalizePersonName_(homeProb) === want) {
+      let spId = homeProbId;
+      if (!spId && typeof mlbStatsApiResolvePlayerIdFromName_ === 'function') {
+        spId = parseInt(mlbStatsApiResolvePlayerIdFromName_(homeProb), 10) || 0;
+      }
+      if (spId) {
+        return { spId: spId, spName: homeProb, oppAbbr: home, batAbbr: away };
+      }
     }
     return null;
   }

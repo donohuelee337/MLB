@@ -1,8 +1,9 @@
 // ============================================================
 // 🃏 MLB Bet Card — pitcher K + batter hits (ranked by EV)
 // ============================================================
-// Pulls 🎰 Pitcher_K_Card + 🧪 Batter_Hits_Card_v2-full; merges, ranks,
-// caps per game + total plays. A+ grades bypass caps.
+// Pulls ⚡ Sim_Pitcher_K + ⚡ Sim_Batter_Hits (authoritative P/EV);
+// stat cards (🎰 / 🧪 v2-full) are upstream audit only. Refreshes sim
+// before merge so menu "Bet Card only" stays coherent.
 // TB retired 2026-05-21 — removed from pipeline, odds fetch, and bet card panels.
 // VISUAL FORMATTING is in MLBBetCardFormatting.js — DO NOT mix
 // rendering code into this file or it will get rolled back with model
@@ -58,26 +59,45 @@ function mlbBetCardThresholds_(cfg, marketKey, side) {
   return { minP: minP, minEdge: minEdge };
 }
 
+/** Prefer sim tab; fall back to stat card with optional pipeline warning. */
+function mlbBetCardSourceSheet_(ss, simTab, cardTab, label) {
+  const sim = ss.getSheetByName(simTab);
+  if (sim && sim.getLastRow() >= 4) return sim;
+  const card = ss.getSheetByName(cardTab);
+  if (card && card.getLastRow() >= 4) {
+    if (typeof addPipelineWarning_ === 'function') {
+      addPipelineWarning_('Bet card: ' + label + ' sim empty — using stat card ' + cardTab);
+    }
+    return card;
+  }
+  return null;
+}
+
 function refreshMLBBetCard() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (typeof refreshPitcherKSimEngine_ === 'function') refreshPitcherKSimEngine_();
+  if (typeof refreshBatterHitsSimEngine_ === 'function') refreshBatterHitsSimEngine_();
+
   const cfg = getConfig();
   const bankroll = parseFloat(String(cfg['BANKROLL'] != null ? cfg['BANKROLL'] : '1000').trim(), 10) || 1000;
   const kellyFrac = parseFloat(String(cfg['KELLY_FRACTION'] != null ? cfg['KELLY_FRACTION'] : '0.25').trim(), 10) || 0.25;
   const slateDate = getSlateDateString_(cfg);
   const gameTimeIdx = mlbScheduleGameTimeIndex_(ss);
 
-  const srcK = ss.getSheetByName(MLB_PITCHER_K_CARD_TAB);
-  // Hits H block is sourced from the v2 card (h.v2-full is the active hits
-  // model). v1 still runs and feeds the shadow log below the bet card.
-  const srcHits = ss.getSheetByName(MLB_BATTER_HITS_V2_CARD_TAB);
+  const srcK = mlbBetCardSourceSheet_(ss, MLB_PITCHER_K_SIM_TAB, MLB_PITCHER_K_CARD_TAB, 'K');
+  const srcHits = mlbBetCardSourceSheet_(
+    ss,
+    MLB_BATTER_HITS_SIM_TAB,
+    typeof MLB_BATTER_HITS_V2_CARD_TAB !== 'undefined'
+      ? MLB_BATTER_HITS_V2_CARD_TAB
+      : '🧪 Batter_Hits_Card_v2-full',
+    'H'
+  );
 
-  if (
-    (!srcK || srcK.getLastRow() < 4) &&
-    (!srcHits || srcHits.getLastRow() < 4)
-  ) {
+  if (!srcK && !srcHits) {
     safeAlert_(
       'MLB Bet Card',
-      'Run at least one model card first (🎰 Pitcher_K_Card / 🧪 Batter_Hits_Card_v2-full). Morning pipeline builds all.'
+      'Run at least one sim chain first (🎰 Pitcher_K_Card → ⚡ Sim_Pitcher_K and/or 🧪 Batter_Hits_Card_v2-full → ⚡ Sim_Batter_Hits). Morning pipeline builds all.'
     );
     return;
   }
@@ -313,7 +333,7 @@ function refreshMLBBetCard() {
     blank[0] = slateDate;
     const allowed = Object.keys(MLB_BET_CARD_ALLOWED_GRADES).join('/');
     blank[4] =
-      'No qualifying plays — build 🎰 Pitcher_K_Card / 🧪 Batter_Hits_Card_v2-full with ' +
+      'No qualifying plays — build ⚡ Sim_Pitcher_K / ⚡ Sim_Batter_Hits with ' +
       'per-market model % floors (see Config: MIN_MODEL_PCT_*), ev > 0, grade ∈ {' + allowed + '}, valid FD price, no injury flag.';
     rows.push(blank);
   }
@@ -416,11 +436,12 @@ function diagnoseHitsBetCardInclusion() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const cfg = getConfig();
   const hThr = mlbBetCardThresholds_(cfg, 'H');
-  // Diag follows the live H source — h.v2-full now.
-  const src = ss.getSheetByName(MLB_BATTER_HITS_V2_CARD_TAB);
+  const srcTab =
+    typeof MLB_BATTER_HITS_SIM_TAB !== 'undefined' ? MLB_BATTER_HITS_SIM_TAB : '⚡ Sim_Batter_Hits';
+  const src = ss.getSheetByName(srcTab);
   const diagTab = '🔍 BetCard_Diag_Hits';
   const log = [];
-  log.push('Source tab: ' + MLB_BATTER_HITS_V2_CARD_TAB);
+  log.push('Source tab: ' + srcTab + ' (fallback: v2 stat card if sim empty on live merge)');
   const allowedGradesStr = Object.keys(MLB_BET_CARD_ALLOWED_GRADES).join('/');
   log.push('Gates (besides data prereqs): pWin ≥ ' + hThr.minP + (hThr.minEdge > 0 ? ' AND |edge| ≥ ' + hThr.minEdge : '') + ' AND ev > 0 AND grade ∈ {' + allowedGradesStr + '}');
 
@@ -439,7 +460,7 @@ function diagnoseHitsBetCardInclusion() {
     return;
   }
 
-  const vals = src.getRange(4, 1, lastRow - 3, 17).getValues();
+  const vals = src.getRange(4, 1, lastRow, 17).getValues();
   log.push('Scanned ' + vals.length + ' card rows.');
 
   const tally = {

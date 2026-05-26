@@ -19,7 +19,7 @@
 | Binomial + EV (Hits) | `MLBBatterHitsCard.js` → **`🎰 Batter_Hits_Card`** — P(≥k hits) on λ = season BA × est_AB; reads FD `batter_hits` + `batter_hits_alternate` |
 | Sim (Hits) | `MLBSimBatterHits.js` → **`⚡ Sim_Batter_Hits`** — **`ANCHOR_WEIGHT_BATTER_HITS`**; 🃏 hits rows use this tab |
 | Sim (TB) | `MLBSimBatterTB.js` → **`⚡ Sim_Batter_TB`** — **`ANCHOR_WEIGHT_BATTER_TB`**; 🃏 TB rows use this tab |
-| Bet card | `MLBBetCard.js` → **`🃏 MLB_Bet_Card`** — **K + Hits + TB** from **`⚡ Sim_*`** tabs (auto-refresh before merge); sorted by **game start time** then EV; **grade rubric** (A+/A/B+/B/C) with A+ bypass; **kelly $**, **model %**, **book %**, **proj**, **proj − line** columns; lineup-card aesthetic (ivory paper, navy ink, mono numbers) |
+| Bet card | `MLBBetCard.js` → **`🃏 MLB_Bet_Card`** — **K + Hits** from **`⚡ Sim_Pitcher_K`** + **`⚡ Sim_Batter_Hits`** (auto-refresh sim before merge); sorted by **game start time** then EV; **grade rubric** (A+/A/B+/B/C) with A+ bypass; **kelly $**, **model %**, **book %**, **proj**, **proj − line** columns; lineup-card aesthetic (ivory paper, navy ink, mono numbers) |
 | Results log + grading | `MLBResultsLog.js` / **`📋 MLB_Results_Log`**; `MLBResultsGrader.js` — menu grader; runs at start of each ball window; supports K + batter hits (historical walk rows still grade) |
 | CLV proxy (close line) | **`close_line` / `close_odds` / `clv_note`** — `mlbBackfillResultsLogClosing_` on **FINAL** (after odds) + menu **📈 Backfill closing lines** (handles K and batter hits; legacy walk rows for backward compat) |
 | Umpire → λ (optional) | **`⚙️ HP_UMP_LAMBDA_MULT`** — scales 🎰 λ when **`hp_umpire`** present (default **1** = off) |
@@ -44,14 +44,17 @@
 9. Pitcher K queue
 10. Pitcher K card (`🎰` — raw λ / audit)
 11. **Sim Engine (Pitcher K)** (`refreshPitcherKSimEngine_` → **`⚡ Sim_Pitcher_K`**)
-12. Batter Hits card  
-13. **Sim Engine (Batter Hits)** (`refreshBatterHitsSimEngine_` → **`⚡ Sim_Batter_Hits`**)  
-14. Batter TB card  
-15. **Sim Engine (Batter TB)** (`refreshBatterTBSimEngine_` → **`⚡ Sim_Batter_TB`**)  
-16. MLB Bet Card (merge from ⚡ sim tabs → grade → sort by game time)  
-17. `mlbAppendPitcherKNearMisses_` → `snapshotMLBBetCardToLog` (if bet card OK; captures `grade` in Results Log) → **`mlbBackfillResultsLogClosing_` when `FINAL` + odds OK** → `mlbAppendBetCardPipelineCoverage_` → step warnings → `writePipelineLogTab_` → toast; activates **`🃏 MLB_Bet_Card`**
+12. Batter Hits v2 card (LIVE `h.v2-full`)
+13. **Sim Engine (Batter Hits)** (`refreshBatterHitsSimEngine_` → **`⚡ Sim_Batter_Hits`**)
+14. Streak picks (before bet card — formatter highlight)
+15. MLB Bet Card (merge from ⚡ sim tabs → grade → sort by game time)
+16. `mlbAppendPitcherKNearMisses_` → `snapshotMLBBetCardToLog` (if bet card OK; captures `grade` in Results Log) → **`mlbBackfillResultsLogClosing_` when `FINAL` + odds OK** → workers (calibration, profitability, shadow snapshots) → `mlbAppendBetCardPipelineCoverage_` → step warnings → `writePipelineLogTab_` → toast; activates **`🃏 MLB_Bet_Card`**
 
-One-off menu items mirror those stages (e.g. **`📋 Pitcher K queue only`**, **`⚡ Pitcher K Sim only`**, **`🎰 Batter Hits card only`**, **`⚡ Batter Hits Sim only`**, **`🔧 Debug sanity**`, **`📋 Open Pipeline Log`**).
+TB retired from live pipeline 2026-05-21. **`⚡ Sim_Batter_TB`** module remains for manual use only.
+
+One-off menu items mirror those stages (e.g. **`📋 Pitcher K queue only`**, **`⚡ Pitcher K Sim only`**, **`🧪 Batter Hits v2 card only`**, **`⚡ Batter Hits Sim only`**, **`🔧 Debug sanity**`, **`📋 Open Pipeline Log`**).
+
+**Platform architecture:** `docs/superpowers/specs/2026-05-26-mlb-platform-architecture-design.md` (Syrakis broker/worker + Sim authority; Phase 1 shipped 2026-05-26).
 
 ## Bet card details
 

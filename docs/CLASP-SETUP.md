@@ -67,21 +67,36 @@ Optional: set **rootDir** if script files live in a subfolder; here `""` means t
 
 ---
 
-## 5. Push
+## 5. Push (use the deploy script)
 
-From your clone of this repo (e.g. `C:\Users\Lee\Documents\Cursor\MLB`):
+**Preferred:** from repo root, commit your changes first, then:
 
-```bash
-clasp push
+```powershell
+pwsh -File scripts/clasp-deploy.ps1
 ```
 
-If clasp warns that the **remote manifest** (`appsscript.json`) was updated and asks to overwrite, and your **local** manifest is what you want, run:
+Optional message for the Apps Script version history:
+
+```powershell
+pwsh -File scripts/clasp-deploy.ps1 -Message "platform sim authority"
+```
+
+The script will:
+
+1. Bump `MLB_APPS_SCRIPT_BUILD` in `Config.js` and commit that bump
+2. Tag git (`apps-script/pre-push-YYYYMMDD-HHMMSS-bN`) unless `-SkipTag`
+3. `clasp push --force`
+4. `clasp version "build N — …"` — **creates a new Apps Script version every deploy**
+
+After deploy, run menu **0. Build Config tab** once so **`APPS_SCRIPT_BUILD`** appears on **`⚙️ Config`**.
+
+**Manual push only** (no version bump — avoid for production):
 
 ```bash
 clasp push --force
 ```
 
-(`-f` is the short form.) That **forcibly overwrites the remote manifest** with your local `appsscript.json`.
+If clasp warns that the **remote manifest** (`appsscript.json`) was updated and asks to overwrite, and your **local** manifest is what you want, `--force` **forcibly overwrites the remote manifest** with your local `appsscript.json`.
 
 First push may ask to enable the Apps Script API — follow the link clasp prints, enable it, wait a minute, retry.
 

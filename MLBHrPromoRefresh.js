@@ -5,6 +5,8 @@
 // Depends: MLBResultsGrader.js, MLBBatterHRQueue.js, MLBBatterTBQueue.js,
 //   MLBParkFactors.js, MLBPitcherKQueue.js (mlbSlateSeasonYear_),
 //   MLBPitcherGameLogs.js (mlbStatsApiBaseUrl_), Config.js, MLBPipelineLog.js
+// VISUAL FORMATTING is in MLBPromoFormatting.js — DO NOT mix rendering code
+// into this file or it will get rolled back with model changes.
 // ============================================================
 
 var MLB_BATTER_HR_PROMO_TAB = '📣 Batter_HR_Promo';
@@ -13,6 +15,16 @@ var MLB_BATTER_HR_PROMO_NAMED_RANGE = 'MLB_BATTER_HR_PROMO';
 function mlbHrPromoParseConfigNum_(cfg, key, def) {
   const x = parseFloat(String(cfg[key] != null ? cfg[key] : def).trim(), 10);
   return isNaN(x) ? def : x;
+}
+
+/** Hard eligibility floor — separate from HR_PROMO_SHRINK_MIN_PA (Bayesian shrink only). */
+function mlbHrPromoMinPa_(cfg) {
+  return parseInt(String(cfg['HR_PROMO_MIN_PA'] != null ? cfg['HR_PROMO_MIN_PA'] : '30').trim(), 10) || 30;
+}
+
+function mlbHrPromoBatterEligible_(batterId, teamHitMap, cfg) {
+  const hit = teamHitMap[String(batterId)] || { pa: 0 };
+  return (parseInt(hit.pa, 10) || 0) >= mlbHrPromoMinPa_(cfg);
 }
 
 function mlbHrPromoBattingOrderFromPlayers_(players) {
@@ -146,6 +158,10 @@ function mlbHrPromoRowForBatter_(ctx) {
   }
 
   const name = String(hit.name || ctx.nameFallback || '').trim();
+  let hotCold = '';
+  if (typeof mlbBatterHitsHotColdFlag_ === 'function') {
+    hotCold = mlbBatterHitsHotColdFlag_(ctx.batterId, season, ctx.hotColdMap);
+  }
   return {
     gamePk: ctx.gamePk,
     matchup: ctx.matchup,
@@ -166,6 +182,7 @@ function mlbHrPromoRowForBatter_(ctx) {
     sznHr: sznHr,
     sznPa: sznPa,
     l14Hr: l14.l14hr,
+    hotCold: hotCold,
   };
 }
 
@@ -177,7 +194,9 @@ function refreshBatterHrPromoSheet_() {
   const fb = String(cfg['HR_PROMO_LINEUP_FALLBACK'] || 'roster')
     .trim()
     .toLowerCase();
+  const minPa = mlbHrPromoMinPa_(cfg);
   const abbrToId = mlbAbbrToTeamId_();
+  const hotColdMap = typeof mlbBuildBatterHotColdMap_ === 'function' ? mlbBuildBatterHotColdMap_(ss) : {};
 
   const sch = ss.getSheetByName(MLB_SCHEDULE_TAB);
   if (!sch || sch.getLastRow() < 4) {
@@ -207,6 +226,7 @@ function refreshBatterHrPromoSheet_() {
     if (order.length >= 9) {
       for (let i = 0; i < order.length; i++) {
         const o = order[i];
+        if (!mlbHrPromoBatterEligible_(o.batterId, hitMap, ctx2.cfg)) continue;
         rowsOut.push(
           mlbHrPromoRowForBatter_({
             cfg: ctx2.cfg,
@@ -222,6 +242,7 @@ function refreshBatterHrPromoSheet_() {
             baseConfidence: 'high',
             baseReason: '',
             teamHitMap: hitMap,
+            hotColdMap: hotColdMap,
           })
         );
       }
@@ -235,7 +256,7 @@ function refreshBatterHrPromoSheet_() {
     for (let j = 0; j < ids.length; j++) {
       const bid = parseInt(ids[j], 10);
       const h0 = hitMap[ids[j]];
-      if (!bid || !h0 || (parseInt(h0.pa, 10) || 0) < 30) continue;
+      if (!bid || !h0 || (parseInt(h0.pa, 10) || 0) < minPa) continue;
       if ((parseInt(h0.hr, 10) || 0) === 0) continue;
       rowsOut.push(
         mlbHrPromoRowForBatter_({
@@ -253,6 +274,7 @@ function refreshBatterHrPromoSheet_() {
           baseConfidence: 'low',
           baseReason: 'lineup_missing',
           teamHitMap: hitMap,
+          hotColdMap: hotColdMap,
         })
       );
     }
@@ -285,6 +307,12 @@ function refreshBatterHrPromoSheet_() {
     processTeam(ctxLoop, away, false, homeSp);
     if (schedRows.length > 1) Utilities.sleep(60);
     processTeam(ctxLoop, home, true, awaySp);
+  }
+
+  if (mlbPromoExcludeColdEnabled_(cfg)) {
+    for (let ri = rowsOut.length - 1; ri >= 0; ri--) {
+      if (mlbPromoDropColdBatter_(rowsOut[ri].batterId, season, cfg)) rowsOut.splice(ri, 1);
+    }
   }
 
   rowsOut.sort(function (a, b) {
@@ -327,22 +355,15 @@ function refreshBatterHrPromoSheet_() {
     sh = ss.insertSheet(MLB_BATTER_HR_PROMO_TAB);
   }
   sh.setTabColor('#e65100');
-  sh.getRange(1, 1, 1, headers.length)
-    .merge()
-    .setValue('📣 Batter HR promo — lineup λ × park_HR × SP · Poisson + optional Platt')
-    .setFontWeight('bold')
-    .setBackground('#e65100')
-    .setFontColor('#ffffff');
-  sh.getRange(3, 1, 1, headers.length)
-    .setValues([headers])
-    .setFontWeight('bold')
-    .setBackground('#f57c00')
-    .setFontColor('#ffffff');
+  sh.getRange(3, 1, 1, headers.length).setValues([headers]);
 
+  var topPick = null;
+  var grid = [];
+  var hotColdFlags = [];
   if (rowsOut.length) {
-    const grid = [];
     for (let i = 0; i < rowsOut.length; i++) {
       const o = rowsOut[i];
+      hotColdFlags.push(o.hotCold || '');
       grid.push([
         i + 1,
         o.gamePk,
@@ -367,31 +388,15 @@ function refreshBatterHrPromoSheet_() {
       ]);
     }
     sh.getRange(4, 1, grid.length, headers.length).setValues(grid);
-    sh.getRange(4, 9, grid.length, 1).setNumberFormat('0.0%');
-    sh.getRange(4, 10, grid.length, 1).setNumberFormat('0.0%');
     try {
       ss.setNamedRange(MLB_BATTER_HR_PROMO_NAMED_RANGE, sh.getRange(4, 1, grid.length, headers.length));
     } catch (e) {}
-
-    // Highlight the day's top HR matchup. rowsOut is already sorted by
-    // pCalibrated DESC then lambdaRaw DESC, so row index 0 is the pick. Gold
-    // on batter (col 4), p_calibrated (col 9), pitcher_mult (col 16) so the
-    // pair "batter + matchup + pitcher" reads as one unit. Note explains why.
-    const top = rowsOut[0];
-    const noteText =
-      '🔥 Best HR matchup of the slate · ' + top.batter +
-      ' vs SP id ' + (top.opponentSpId || '?') +
-      ' · p_calibrated=' + (Math.round(top.pCalibrated * 1000) / 10) + '%' +
-      ' · pitcher_mult=' + (Math.round(top.pitcherMult * 1000) / 1000) +
-      ' · park_mult=' + (Math.round(top.parkMult * 1000) / 1000);
-    [4, 9, 16].forEach(function (colIdx) {
-      sh.getRange(4, colIdx)
-        .setBackground('#fde047')
-        .setFontColor('#7c2d12')
-        .setFontWeight('bold');
-    });
-    sh.getRange(4, 4).setNote(noteText);
+    topPick = rowsOut[0];
   }
+
+  const slateDate = getSlateDateString_(cfg) || '';
+  mlbApplyHrPromoFormatting_(sh, grid, headers, slateDate, topPick, hotColdFlags);
+  sh.setHiddenGridlines(true);
   sh.setFrozenRows(3);
   ss.toast(rowsOut.length + ' promo HR rows', 'Batter HR promo', 8);
 }

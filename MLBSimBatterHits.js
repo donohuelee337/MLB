@@ -1,8 +1,9 @@
 // ============================================================
-// ⚡ Sim_Batter_Hits — anchored binomial (Phase 2)
+// ⚡ Sim_Batter_Hits — anchored binomial (live h.v2-full)
 // ============================================================
-// Reads 🎰 Batter_Hits_Card (22 cols). Writes ⚡ Sim_Batter_Hits same schema.
-// Anchors expected hits λ toward FD line; BA_used = λ_anch / est_AB (clamped).
+// Reads 🧪 Batter_Hits_Card_v2-full. Writes ⚡ Sim_Batter_Hits in the
+// same column layout (v2 schema) so 🃏 merge indices stay stable.
+// Anchors λ toward FD line; BA_used = λ_anch / est_pa (clamped).
 // ============================================================
 
 const MLB_BATTER_HITS_SIM_TAB = '⚡ Sim_Batter_Hits';
@@ -15,26 +16,27 @@ function refreshBatterHitsSimEngine_() {
   if (isNaN(w)) w = 0.35;
   w = Math.max(0, Math.min(1, w));
 
-  const src = ss.getSheetByName(MLB_BATTER_HITS_BINOMIAL_TAB);
+  const srcTab =
+    typeof MLB_BATTER_HITS_V2_CARD_TAB !== 'undefined'
+      ? MLB_BATTER_HITS_V2_CARD_TAB
+      : '🧪 Batter_Hits_Card_v2-full';
+  const src = ss.getSheetByName(srcTab);
   if (!src || src.getLastRow() < 4) {
     mlbClearBatterHitsSimSheet_(ss);
     return;
   }
 
   const last = src.getLastRow();
-  const rows = src.getRange(4, 1, last, 22).getValues();
+  const colsToRead = Math.min(34, Math.max(22, src.getLastColumn()));
+  const rows = src.getRange(4, 1, last, colsToRead).getValues();
   const pairs = [];
 
   rows.forEach(function (r) {
-    const gamePk = r[0];
-    const matchup = r[1];
-    const side = r[2];
-    const batter = r[3];
-    const line = r[4];
-    const fdOver = r[5];
-    const fdUnder = r[6];
-    const estAb = parseFloat(String(r[7]), 10);
-    const lambdaModel = parseFloat(String(r[8]), 10);
+    const line = r[3];
+    const fdOver = r[4];
+    const fdUnder = r[5];
+    const lambdaModel = parseFloat(String(r[6]), 10);
+    const estPa = parseFloat(String(r[25] != null ? r[25] : ''), 10);
     const lineNum = parseFloat(String(line), 10);
 
     let lamAnch = NaN;
@@ -55,13 +57,13 @@ function refreshBatterHitsSimEngine_() {
     let bestSide = '';
     let bestEv = '';
 
-    if (!isNaN(estAb) && estAb > 0 && !isNaN(lamAnch) && lamAnch > 0 && !isNaN(lineNum)) {
-      let baAnch = lamAnch / estAb;
+    if (!isNaN(estPa) && estPa > 0 && !isNaN(lamAnch) && lamAnch > 0 && !isNaN(lineNum)) {
+      let baAnch = lamAnch / estPa;
       baAnch = Math.max(0.02, Math.min(0.499, baAnch));
       const kO = Math.floor(lineNum) + 1;
       const kU = Math.floor(lineNum + 1e-9);
-      const pO = mlbBinomialPGeqK_(kO, estAb, baAnch);
-      const pU = mlbBinomialPLeqK_(kU, estAb, baAnch);
+      const pO = mlbBinomialPGeqK_(kO, estPa, baAnch);
+      const pU = mlbBinomialPLeqK_(kU, estPa, baAnch);
       pOver = Math.round(pO * 1000) / 1000;
       pUnder = Math.round(pU * 1000) / 1000;
       if (fdOver !== '') evO = mlbEvPerDollarRisked_(pO, fdOver);
@@ -92,37 +94,28 @@ function refreshBatterHitsSimEngine_() {
     const imO = mlbAmericanImplied_(fdOver);
     const imU = mlbAmericanImplied_(fdUnder);
 
-    const main = [
-      gamePk,
-      matchup,
-      side,
-      batter,
-      line,
-      fdOver,
-      fdUnder,
-      estAb,
-      !isNaN(lamAnch) ? lamAnch : '',
-      edge,
-      pOver,
-      pUnder,
-      imO,
-      imU,
-      evO,
-      evU,
-      bestSide,
-      bestEv,
-      r[18],
-      r[19],
-      r[20],
-      r[21],
-    ];
-    const aud = [!isNaN(lambdaModel) ? lambdaModel : '', 0];
-    pairs.push({ main: main, aud: aud });
+    const outRow = r.slice();
+    while (outRow.length < 34) outRow.push('');
+    outRow[6] = !isNaN(lamAnch) ? lamAnch : '';
+    outRow[7] = edge;
+    outRow[8] = pOver;
+    outRow[9] = pUnder;
+    outRow[10] = imO;
+    outRow[11] = imU;
+    outRow[12] = evO;
+    outRow[13] = evU;
+    outRow[14] = bestSide;
+    outRow[15] = bestEv;
+
+    pairs.push({
+      row: outRow,
+      aud: [!isNaN(lambdaModel) ? lambdaModel : '', 0],
+    });
   });
 
   pairs.sort(function (a, b) {
-    const be = parseFloat(b.main[17], 10);
-    const ae = parseFloat(a.main[17], 10);
+    const be = parseFloat(b.row[15], 10);
+    const ae = parseFloat(a.row[15], 10);
     if (isNaN(be) && isNaN(ae)) return 0;
     if (isNaN(be)) return -1;
     if (isNaN(ae)) return 1;
@@ -130,7 +123,7 @@ function refreshBatterHitsSimEngine_() {
   });
 
   const out = pairs.map(function (p) {
-    return p.main;
+    return p.row;
   });
   const audit = pairs.map(function (p) {
     return p.aud;
@@ -140,10 +133,11 @@ function refreshBatterHitsSimEngine_() {
 }
 
 function _mlbWriteBatterHitsSimSheet_(ss, out, audit) {
+  const NEED_COLS = 34;
   let sh = ss.getSheetByName(MLB_BATTER_HITS_SIM_TAB);
   if (sh) {
     const cr = Math.max(sh.getLastRow(), 3);
-    const cc = Math.max(sh.getLastColumn(), 24);
+    const cc = Math.max(sh.getLastColumn(), NEED_COLS + 2);
     try {
       sh.getRange(1, 1, cr, cc).breakApart();
     } catch (e) {}
@@ -152,11 +146,16 @@ function _mlbWriteBatterHitsSimSheet_(ss, out, audit) {
   } else {
     sh = ss.insertSheet(MLB_BATTER_HITS_SIM_TAB);
   }
+  if (sh.getMaxColumns() < NEED_COLS + 2) {
+    sh.insertColumnsAfter(sh.getMaxColumns(), NEED_COLS + 2 - sh.getMaxColumns());
+  }
   sh.setTabColor('#2e7d32');
 
-  sh.getRange(1, 1, 1, 22)
+  sh.getRange(1, 1, 1, NEED_COLS)
     .merge()
-    .setValue('⚡ Sim_Batter_Hits — anchored binomial (ANCHOR_WEIGHT_BATTER_HITS); 🃏 hits rows use this tab.')
+    .setValue(
+      '⚡ Sim_Batter_Hits — anchored h.v2-full (ANCHOR_WEIGHT_BATTER_HITS); 🃏 H rows use this tab. Cols 35..36 = model λ + context audit.'
+    )
     .setFontWeight('bold')
     .setBackground('#1b5e20')
     .setFontColor('#ffffff')
@@ -167,13 +166,11 @@ function _mlbWriteBatterHitsSimSheet_(ss, out, audit) {
   const headers = [
     'gamePk',
     'matchup',
-    'side',
     'batter',
     'fd_hits_line',
     'fd_over',
     'fd_under',
-    'est_AB',
-    'lambda_hits_anchored',
+    'lambda_H_anchored',
     'edge_vs_line',
     'p_over',
     'p_under',
@@ -185,8 +182,22 @@ function _mlbWriteBatterHitsSimSheet_(ss, out, audit) {
     'best_ev_$1',
     'flags',
     'batter_id',
-    '',
-    'team_abbr',
+    'base_lambda',
+    'park_mult',
+    'opp_sp_mult',
+    'hand_mult',
+    'ab_mult',
+    'h_per_pa_vs_hand',
+    'h_per_pa_szn',
+    'est_pa',
+    'vs_hand_sample_pa',
+    'opp_sp_name',
+    'opp_sp_throws',
+    'opp_sp_h9',
+    'opp_sp_ip',
+    'model_tag',
+    'hp_umpire',
+    'hot_cold',
   ];
   sh.getRange(3, 1, 1, headers.length)
     .setValues([headers])
@@ -195,16 +206,20 @@ function _mlbWriteBatterHitsSimSheet_(ss, out, audit) {
     .setFontColor('#ffffff');
 
   if (out.length) {
-    sh.getRange(4, 1, out.length, headers.length).setValues(out);
+    sh.getRange(4, 1, out.length, NEED_COLS).setValues(
+      out.map(function (row) {
+        return row.slice(0, NEED_COLS);
+      })
+    );
     try {
-      ss.setNamedRange('MLB_BATTER_HITS_SIM', sh.getRange(4, 1, out.length, headers.length));
+      ss.setNamedRange('MLB_BATTER_HITS_SIM', sh.getRange(4, 1, out.length, NEED_COLS));
     } catch (e) {}
-    sh.getRange(3, 23, 3, 24)
+    sh.getRange(3, NEED_COLS + 1, 1, 2)
       .setValues([['lambda_hits_model', 'context_score']])
       .setFontWeight('bold')
       .setBackground('#388e3c')
       .setFontColor('#ffffff');
-    sh.getRange(4, 23, out.length, 24).setValues(audit);
+    sh.getRange(4, NEED_COLS + 1, out.length, 2).setValues(audit);
   }
   sh.setFrozenRows(3);
   try {
@@ -216,5 +231,5 @@ function mlbClearBatterHitsSimSheet_(ss) {
   let sh = ss.getSheetByName(MLB_BATTER_HITS_SIM_TAB);
   if (!sh) sh = ss.insertSheet(MLB_BATTER_HITS_SIM_TAB);
   sh.clear();
-  sh.getRange(1, 1).setValue('⚡ Sim_Batter_Hits — run 🎰 Batter_Hits_Card first');
+  sh.getRange(1, 1).setValue('⚡ Sim_Batter_Hits — run 🧪 Batter_Hits_Card_v2-full first');
 }
