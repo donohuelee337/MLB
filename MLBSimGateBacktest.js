@@ -87,7 +87,7 @@ function mlbSimBacktestInvertEstPaH_(line, lambdaModel, side, targetP) {
 /**
  * @returns {Object|null} facts for K/H graded row, or null if not K/H or unusable.
  */
-function mlbSimBacktestParseRow_(r) {
+function mlbSimBacktestParseRow_(r, cfg) {
   const mktStr = String(r[5] || '').toLowerCase();
   const isK = mktStr.indexOf('strikeout') !== -1;
   const isH = mktStr.indexOf('batter hit') !== -1 && mktStr.indexOf('shadow') === -1;
@@ -98,22 +98,36 @@ function mlbSimBacktestParseRow_(r) {
   const odds = parseFloat(String(r[8] || '0'), 10);
   const loggedModelP = parseFloat(String(r[9] || '0'), 10);
   const loggedEv = parseFloat(String(r[10] || '0'), 10);
-  const proj = parseFloat(String(r[26] != null ? r[26] : ''), 10);
+  const projRaw = parseFloat(String(r[26] != null ? r[26] : ''), 10);
+  const c = cfg || {};
+  const hShrinkAtBet = parseFloat(String(c['H_MODEL_P_SHRINK'] != null ? c['H_MODEL_P_SHRINK'] : '0.94'), 10) || 0.94;
 
   if (isNaN(odds) || odds === 0) return null;
   if (isNaN(loggedModelP) || loggedModelP <= 0) return null;
 
-  let lambdaModel = !isNaN(proj) && proj > 0 ? proj : NaN;
+  let lambdaModel = NaN;
   let estPa = 3.8;
+  let lambdaSource = '';
 
   if (isK) {
-    if (isNaN(lambdaModel)) {
-      lambdaModel = mlbSimBacktestInvertLambdaK_(line, side, loggedModelP);
+    // Infer model λ from logged P (stat-card era). Avoid re-anchoring `proj` if it was already sim λ.
+    lambdaModel = mlbSimBacktestInvertLambdaK_(line, side, loggedModelP);
+    lambdaSource = 'inverted_from_logged_p';
+    if (!isNaN(projRaw) && projRaw > 0) {
+      const pu = mlbProbOverUnderK_(line, projRaw);
+      const pProj = side === 'under' ? pu.pUnder : pu.pOver;
+      if (pProj !== '' && !isNaN(pProj) && Math.abs(pProj - loggedModelP) < 0.04) {
+        lambdaModel = projRaw;
+        lambdaSource = 'proj_matches_logged_p';
+      }
     }
     if (isNaN(lambdaModel) || lambdaModel <= 0) return null;
   } else {
-    if (isNaN(lambdaModel)) return null;
-    estPa = mlbSimBacktestInvertEstPaH_(line, lambdaModel, side, loggedModelP);
+    if (isNaN(projRaw) || projRaw <= 0) return null;
+    lambdaModel = projRaw;
+    lambdaSource = 'proj';
+    const pForPa = hShrinkAtBet > 0 && hShrinkAtBet < 1 ? loggedModelP / hShrinkAtBet : loggedModelP;
+    estPa = mlbSimBacktestInvertEstPaH_(line, lambdaModel, side, pForPa);
   }
 
   return {
@@ -123,6 +137,7 @@ function mlbSimBacktestParseRow_(r) {
     line: line,
     odds: odds,
     lambdaModel: lambdaModel,
+    lambdaSource: lambdaSource,
     estPa: estPa,
     loggedModelP: loggedModelP,
     loggedEv: isNaN(loggedEv) ? 0 : loggedEv,
@@ -263,6 +278,14 @@ function mlbSimBacktestGatesFromCfg_(cfg) {
   };
 }
 
+function mlbSimBacktestWriteBlock_(sh, startRow, startCol, data) {
+  if (!data || !data.length) return startRow;
+  const nRows = data.length;
+  const nCols = data[0].length;
+  sh.getRange(startRow, startCol, nRows, nCols).setValues(data);
+  return startRow + nRows;
+}
+
 function mlbSimBacktestWriteSection_(sh, startRow, title, header, rows) {
   sh.getRange(startRow, 1).setValue(title).setFontWeight('bold');
   sh.getRange(startRow + 1, 1, 1, header.length)
@@ -271,7 +294,7 @@ function mlbSimBacktestWriteSection_(sh, startRow, title, header, rows) {
     .setBackground('#1b5e20')
     .setFontColor('#ffffff');
   if (rows.length) {
-    sh.getRange(startRow + 2, 1, rows.length, header.length).setValues(rows);
+    mlbSimBacktestWriteBlock_(sh, startRow + 2, 1, rows);
     return startRow + 2 + rows.length;
   }
   sh.getRange(startRow + 2, 1).setValue('(no rows)');
@@ -307,7 +330,7 @@ function runSimGateBacktest() {
   const parsed = [];
   var skipped = 0;
   graded.forEach(function (r) {
-    const f = mlbSimBacktestParseRow_(r);
+    const f = mlbSimBacktestParseRow_(r, cfg);
     if (f) parsed.push(f);
     else skipped++;
   });
@@ -325,6 +348,12 @@ function runSimGateBacktest() {
     const sim = facts.isK
       ? mlbSimBacktestSimK_(facts, liveGates.ANCHOR_WEIGHT_K)
       : mlbSimBacktestSimH_(facts, liveGates.ANCHOR_WEIGHT_BATTER_HITS, liveGates.H_MODEL_P_SHRINK);
+    return mlbSimBacktestPassesGates_(facts, sim, liveGates);
+  });
+  const simNoAnchorScore = mlbSimBacktestScoreRows_(parsed, function (facts) {
+    const sim = facts.isK
+      ? mlbSimBacktestSimK_(facts, 0)
+      : mlbSimBacktestSimH_(facts, 0, liveGates.H_MODEL_P_SHRINK);
     return mlbSimBacktestPassesGates_(facts, sim, liveGates);
   });
 
@@ -392,23 +421,23 @@ function runSimGateBacktest() {
   let row = 1;
   sh.getRange(row++, 1).setValue('🔬 Sim-era gate backtest — ' + new Date()).setFontWeight('bold');
   sh.getRange(row++, 1).setValue(
-    'Replay ' + parsed.length + ' graded K/H rows (skipped ' + skipped + ' non-K/H or missing proj/P). ' +
-    'λ_model from log `proj`; estPa inferred for H when needed. Outcomes = actual WIN/LOSS $.'
+    'Replay ' + parsed.length + ' graded K/H rows (skipped ' + skipped + ' non-K/H or missing P). ' +
+    'K: λ_model inverted from logged Model P(Win) (stat-card era). H: λ from proj, estPa inferred. ' +
+    'ROI uses actual WIN/LOSS $ on rows that pass gates — subset changes when sim tightens filters.'
   ).setWrap(true);
   row++;
 
   sh.getRange(row++, 1).setValue('Live Config baseline').setFontWeight('bold');
-  sh.getRange(row, 1, 1, 6).setValues([['mode', 'n', 'wins', 'hit%', 'ROI', 'pnl $']]).setFontWeight('bold');
-  sh.getRange(row + 1, 1, 1, 6).setValues([
+  const baselineRows = [
+    ['mode', 'n', 'wins', 'hit%', 'ROI', 'pnl $'],
     ['legacy (logged P/EV + gates)', legacyScore.n, legacyScore.wins, mlbSimBacktestFmtRoi_(legacyScore.hitRate), mlbSimBacktestFmtRoi_(legacyScore.roi), Math.round(legacyScore.pnl * 100) / 100],
-  ]);
-  row += 2;
-  sh.getRange(row, 1, 1, 6).setValues([
+    ['sim w=0 (recomputed P/EV, same gates)', simNoAnchorScore.n, simNoAnchorScore.wins, mlbSimBacktestFmtRoi_(simNoAnchorScore.hitRate), mlbSimBacktestFmtRoi_(simNoAnchorScore.roi), Math.round(simNoAnchorScore.pnl * 100) / 100],
     ['sim @ ANCHOR_K=' + liveGates.ANCHOR_WEIGHT_K + ' ANCHOR_H=' + liveGates.ANCHOR_WEIGHT_BATTER_HITS,
       simLiveScore.n, simLiveScore.wins, mlbSimBacktestFmtRoi_(simLiveScore.hitRate),
       mlbSimBacktestFmtRoi_(simLiveScore.roi), Math.round(simLiveScore.pnl * 100) / 100],
-  ]);
-  row += 2;
+  ];
+  mlbSimBacktestWriteBlock_(sh, row, 1, baselineRows);
+  row += baselineRows.length + 1;
 
   row = mlbSimBacktestWriteSection_(
     sh, row, 'Anchor sweep (gates fixed to live Config)',
@@ -445,7 +474,7 @@ function runSimGateBacktest() {
 
   if (anchorRows.length) {
     sh.getRange(row++, 1).setValue('Suggested anchor review (best ROI in sweep — verify n before applying)').setFontWeight('bold');
-    sh.getRange(row, 1, 1, 2).setValues([
+    mlbSimBacktestWriteBlock_(sh, row, 1, [
       ['ANCHOR_WEIGHT_K', anchorRows[0][0]],
       ['ANCHOR_WEIGHT_BATTER_HITS', anchorRows[0][1]],
     ]);
@@ -454,7 +483,7 @@ function runSimGateBacktest() {
   if (gridResults.length) {
     const best = gridResults[0];
     sh.getRange(row++, 1).setValue('Best sim gate combo (n≥' + MLB_SIM_BACKTEST_MIN_N + ')').setFontWeight('bold');
-    sh.getRange(row, 1, 7, 2).setValues([
+    mlbSimBacktestWriteBlock_(sh, row, 1, [
       ['ROI', mlbSimBacktestFmtRoi_(best.score.roi)],
       ['n', best.score.n],
       ['ANCHOR_WEIGHT_K', best.params.ANCHOR_WEIGHT_K],
