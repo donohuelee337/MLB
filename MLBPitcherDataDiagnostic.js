@@ -154,14 +154,15 @@ function mlbBuildPitcherDataDiagnosticReport_(ss, cfg, season) {
   if (!gs || gs.getLastRow() < 4) {
     addSection('💎 Batter_GS_Promo', [], ['tab missing or empty — runs after HR promo']);
   } else {
-    const data = gs.getRange(4, 1, gs.getLastRow() - 3, 20).getValues();
+    const data = gs.getRange(4, 1, gs.getLastRow() - 3, 22).getValues();
     let n = 0;
     let spMissing = 0;
     data.forEach(function (r) {
       const batter = String(r[3] || '').trim();
       if (!batter) return;
       n++;
-      const spId = parseInt(r[13], 10);
+      // GS schema: … reason=12, lineup_slot=13, opponent_sp_id=14 (extra λ_HR_ref vs HR tab).
+      const spId = parseInt(r[14], 10);
       if (!spId) spMissing++;
     });
     addSection(
