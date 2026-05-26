@@ -12,6 +12,15 @@
 
 const MLB_BET_CARD_TAB = '🃏 MLB_Bet_Card';
 const MLB_BET_CARD_NCOL = 19;
+const MLB_BET_CARD_DIAG_FUNNEL_TAB = '🔍 BetCard_Diag_Funnel';
+
+/** Set by refreshMLBBetCard — authoritative pick count (excludes tracker panels). */
+var __mlbBetCardLastStats_ = null;
+
+function mlbBetCardPlayStats_() {
+  if (__mlbBetCardLastStats_) return __mlbBetCardLastStats_;
+  return { picks: 0, games: 0, cardBlockRows: 0, sheetLastRow: 0 };
+}
 /**
  * Bet card filters (a play must clear ALL of these to make 🃏):
  *   1. model P(Win) ≥ per-market floor (Config: MIN_MODEL_PCT_<K|TB|H>,
@@ -424,7 +433,23 @@ function refreshMLBBetCard() {
   sh.setHiddenGridlines(true);
 
   const aPlus = selected.filter(function (p) { return p.grade === 'A+'; }).length;
-  ss.toast(rows.length + ' bet rows · ' + aPlus + ' A+ · ' + slateDate, 'MLB Bet Card', 6);
+  const gameSet = {};
+  selected.forEach(function (p) {
+    gameSet[String(p.gamePk != null ? p.gamePk : '')] = true;
+  });
+  __mlbBetCardLastStats_ = {
+    picks: selected.length,
+    games: Object.keys(gameSet).filter(function (k) { return k !== ''; }).length,
+    cardBlockRows: rows.length,
+    sheetLastRow: sh.getLastRow(),
+    aPlus: aPlus,
+  };
+  ss.toast(
+    selected.length + ' picks · ' + Object.keys(gameSet).filter(function (k) { return k !== ''; }).length +
+      ' games · ' + aPlus + ' A+ · ' + slateDate,
+    'MLB Bet Card',
+    6
+  );
 }
 
 // ============================================================
@@ -575,4 +600,221 @@ function diagnoseHitsBetCardInclusion() {
 
   Logger.log(log.join('\n'));
   ss.toast('passed=' + tally.passed + ' · see ' + diagTab, 'Hits diag', 8);
+}
+
+function mlbActivateBetCardDiagFunnelTab_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sh = ss.getSheetByName(MLB_BET_CARD_DIAG_FUNNEL_TAB);
+  if (sh) sh.activate();
+  else safeAlert_('Bet Card funnel diag', 'Run 🔍 Diagnose Bet Card funnel first.');
+}
+
+/**
+ * Full K + H funnel: sim row counts, gate rejection tallies, passed picks,
+ * and sheet vs toast miscount explanation. Writes 🔍 BetCard_Diag_Funnel.
+ */
+function diagnoseBetCardFunnel_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const cfg = getConfig();
+  const allowedGradesStr = Object.keys(MLB_BET_CARD_ALLOWED_GRADES).join('/');
+  const minEv = parseFloat(String(cfg['MIN_EV_BET_CARD'] != null ? cfg['MIN_EV_BET_CARD'] : '0')) || 0;
+  const maxOddsH = parseFloat(String(cfg['MAX_ODDS_H'] != null ? cfg['MAX_ODDS_H'] : '0')) || 0;
+
+  const srcK = mlbBetCardSourceSheet_(ss, MLB_PITCHER_K_SIM_TAB, MLB_PITCHER_K_CARD_TAB, 'K');
+  const srcH = mlbBetCardSourceSheet_(
+    ss,
+    MLB_BATTER_HITS_SIM_TAB,
+    typeof MLB_BATTER_HITS_V2_CARD_TAB !== 'undefined' ? MLB_BATTER_HITS_V2_CARD_TAB : '🧪 Batter_Hits_Card_v2-full',
+    'H'
+  );
+
+  function tallyMarket(kind, rows, checkFn) {
+    const tally = { passed: 0 };
+    const rejects = [];
+    const passes = [];
+    rows.forEach(function (r, i) {
+      const rowNum = i + 4;
+      const res = checkFn(r, rowNum);
+      if (res.ok) {
+        tally.passed++;
+        if (passes.length < 50) passes.push(res.passRow);
+      } else {
+        tally[res.reason] = (tally[res.reason] || 0) + 1;
+        if (rejects.length < 40) rejects.push([rowNum, res.label, res.matchup, res.reason, res.detail || '']);
+      }
+    });
+    return { tally: tally, rejects: rejects, passes: passes, scanned: rows.length };
+  }
+
+  function checkK(r) {
+    const flags = String(r[18] || '');
+    const pitcher = String(r[3] || '').trim();
+    const matchup = String(r[1] || '');
+    const bestSide = String(r[16] || '').trim();
+    const line = r[4];
+    const fdOver = r[5];
+    const fdUnder = r[6];
+    const label = pitcher || '(blank)';
+    if (flags.indexOf('injury') !== -1) return { ok: false, reason: 'injury_flag', label: label, matchup: matchup };
+    if (bestSide !== 'Over' && bestSide !== 'Under') return { ok: false, reason: 'bad_best_side', label: label, matchup: matchup, detail: bestSide };
+    if (line === '' || line == null) return { ok: false, reason: 'blank_line', label: label, matchup: matchup };
+    const american = bestSide === 'Over' ? fdOver : fdUnder;
+    if (american === '' || american == null || isNaN(parseFloat(String(american)))) {
+      return { ok: false, reason: 'bad_price', label: label, matchup: matchup };
+    }
+    if (!pitcher) return { ok: false, reason: 'blank_pitcher', label: label, matchup: matchup };
+    const pWin = bestSide === 'Over' ? r[10] : r[11];
+    const pwNum = parseFloat(String(pWin));
+    const kThr = mlbBetCardThresholds_(cfg, 'K', bestSide);
+    if (isNaN(pwNum)) return { ok: false, reason: 'bad_pwin', label: label, matchup: matchup };
+    if (pwNum < kThr.minP) {
+      return { ok: false, reason: 'pwin_below_floor', label: label, matchup: matchup, detail: 'p=' + pwNum + ' floor=' + kThr.minP };
+    }
+    const kEdge = parseFloat(String(r[9]));
+    if (kThr.minEdge > 0 && (isNaN(kEdge) || Math.abs(kEdge) < kThr.minEdge)) {
+      return { ok: false, reason: 'edge_below_floor', label: label, matchup: matchup };
+    }
+    const ev = parseFloat(String(r[17]));
+    if (isNaN(ev) || ev <= 0) return { ok: false, reason: 'ev_not_positive', label: label, matchup: matchup, detail: String(r[17]) };
+    if (minEv > 0 && ev < minEv) return { ok: false, reason: 'ev_below_min_ev', label: label, matchup: matchup, detail: 'ev=' + ev + ' min=' + minEv };
+    const grade = mlbGradePlay_(ev, american);
+    if (!MLB_BET_CARD_ALLOWED_GRADES[grade]) {
+      return { ok: false, reason: 'grade_below_floor', label: label, matchup: matchup, detail: grade || '(blank)' };
+    }
+    return {
+      ok: true,
+      passRow: [pitcher, matchup, bestSide, line, american, pwNum, ev, grade],
+    };
+  }
+
+  function checkH(r) {
+    const flags = String(r[16] || '');
+    const batter = String(r[2] || '').trim();
+    const matchup = String(r[1] || '');
+    const bestSide = String(r[14] || '').trim();
+    const line = r[3];
+    const fdOver = r[4];
+    const fdUnder = r[5];
+    const label = batter || '(blank)';
+    if (flags.indexOf('injury') !== -1) return { ok: false, reason: 'injury_flag', label: label, matchup: matchup };
+    if (bestSide !== 'Over' && bestSide !== 'Under') return { ok: false, reason: 'bad_best_side', label: label, matchup: matchup, detail: bestSide };
+    if (line === '' || line == null) return { ok: false, reason: 'blank_line', label: label, matchup: matchup };
+    const american = bestSide === 'Over' ? fdOver : fdUnder;
+    if (american === '' || american == null || isNaN(parseFloat(String(american)))) {
+      return { ok: false, reason: 'bad_price', label: label, matchup: matchup };
+    }
+    if (maxOddsH < 0 && parseFloat(String(american)) < maxOddsH) {
+      return { ok: false, reason: 'h_odds_too_juiced', label: label, matchup: matchup, detail: String(american) };
+    }
+    if (!batter) return { ok: false, reason: 'blank_batter', label: label, matchup: matchup };
+    const pWin = bestSide === 'Over' ? r[8] : r[9];
+    const pwNum = parseFloat(String(pWin));
+    const hThr = mlbBetCardThresholds_(cfg, 'H');
+    if (isNaN(pwNum)) return { ok: false, reason: 'bad_pwin', label: label, matchup: matchup };
+    if (pwNum < hThr.minP) {
+      return { ok: false, reason: 'pwin_below_floor', label: label, matchup: matchup, detail: 'p=' + pwNum + ' floor=' + hThr.minP };
+    }
+    const hEdge = parseFloat(String(r[7]));
+    if (hThr.minEdge > 0 && (isNaN(hEdge) || Math.abs(hEdge) < hThr.minEdge)) {
+      return { ok: false, reason: 'edge_below_floor', label: label, matchup: matchup };
+    }
+    const ev = parseFloat(String(r[15]));
+    if (isNaN(ev) || ev <= 0) return { ok: false, reason: 'ev_not_positive', label: label, matchup: matchup };
+    if (minEv > 0 && ev < minEv) return { ok: false, reason: 'ev_below_min_ev', label: label, matchup: matchup, detail: 'ev=' + ev };
+    const grade = mlbGradePlay_(ev, american);
+    if (!MLB_BET_CARD_ALLOWED_GRADES[grade]) {
+      return { ok: false, reason: 'grade_below_floor', label: label, matchup: matchup, detail: grade || '(blank)' };
+    }
+    return {
+      ok: true,
+      passRow: [batter, matchup, bestSide, line, american, pwNum, ev, grade],
+    };
+  }
+
+  const kRows = srcK && srcK.getLastRow() >= 4
+    ? srcK.getRange(4, 1, srcK.getLastRow(), Math.min(26, srcK.getLastColumn())).getValues()
+    : [];
+  const hRows = srcH && srcH.getLastRow() >= 4
+    ? srcH.getRange(4, 1, srcH.getLastRow(), Math.min(34, srcH.getLastColumn())).getValues()
+    : [];
+
+  const kRes = tallyMarket('K', kRows, checkK);
+  const hRes = tallyMarket('H', hRows, checkH);
+  const stats = typeof mlbBetCardPlayStats_ === 'function' ? mlbBetCardPlayStats_() : {};
+  const sheetSh = ss.getSheetByName(MLB_BET_CARD_TAB);
+  const sheetMiscount = sheetSh && sheetSh.getLastRow() > 3 ? sheetSh.getLastRow() - 3 : 0;
+
+  let sh = ss.getSheetByName(MLB_BET_CARD_DIAG_FUNNEL_TAB);
+  if (sh) { sh.clearContents(); sh.clearFormats(); }
+  else { sh = ss.insertSheet(MLB_BET_CARD_DIAG_FUNNEL_TAB); }
+  sh.setTabColor('#1565c0');
+
+  let row = 1;
+  sh.getRange(row++, 1).setValue('🔍 Bet Card funnel diagnostic — ' + new Date()).setFontWeight('bold');
+  sh.getRange(row++, 1).setValue(
+    'Sources: K=' + (srcK ? srcK.getName() : 'missing') + ' (' + kRows.length + ' rows) · H=' +
+    (srcH ? srcH.getName() : 'missing') + ' (' + hRows.length + ' rows)'
+  );
+  sh.getRange(row++, 1).setValue(
+    'Gates: grades ∈ {' + allowedGradesStr + '} · MIN_EV_BET_CARD=' + minEv +
+    (maxOddsH < 0 ? ' · MAX_ODDS_H=' + maxOddsH : '')
+  );
+  row++;
+  sh.getRange(row++, 1).setValue('Summary').setFontWeight('bold');
+  const summaryRows = [
+    ['K passed (sim/source)', kRes.tally.passed + ' / ' + kRes.scanned],
+    ['H passed (sim/source)', hRes.tally.passed + ' / ' + hRes.scanned],
+    ['Total passed (K+H)', String(kRes.tally.passed + hRes.tally.passed)],
+    ['Last refresh picks (authoritative)', stats.picks != null ? String(stats.picks) : '(run Bet Card first)'],
+    ['Sheet rows below header (old toast bug)', String(sheetMiscount)],
+    ['Card block rows only (incl spacers)', stats.cardBlockRows != null ? String(stats.cardBlockRows) : ''],
+    ['Note', 'Toast now counts picks only — not Bet Tracker panels appended below.'],
+  ];
+  sh.getRange(row, 1, summaryRows.length, 2).setValues(summaryRows);
+  row += summaryRows.length + 1;
+
+  function writeTally(title, res, startRow) {
+    sh.getRange(startRow, 1).setValue(title).setFontWeight('bold');
+    const keys = Object.keys(res.tally).filter(function (k) { return k !== 'passed'; });
+    const rows = keys.map(function (k) { return [k, res.tally[k]]; });
+    rows.unshift(['passed', res.tally.passed]);
+    sh.getRange(startRow + 1, 1, 1, 2).setValues([['gate', 'count']]).setFontWeight('bold');
+    if (rows.length) sh.getRange(startRow + 2, 1, rows.length, 2).setValues(rows);
+    return startRow + 2 + rows.length + 1;
+  }
+
+  row = writeTally('K rejection tally', kRes, row);
+  row = writeTally('H rejection tally', hRes, row);
+
+  sh.getRange(row++, 1).setValue('Passed picks (should match 🃏)').setFontWeight('bold');
+  sh.getRange(row, 1, 1, 8).setValues([['player', 'matchup', 'side', 'line', 'odds', 'pWin', 'ev', 'grade']])
+    .setFontWeight('bold');
+  const allPasses = kRes.passes.map(function (p) { return ['K'].concat(p); })
+    .concat(hRes.passes.map(function (p) { return ['H'].concat(p); }));
+  if (allPasses.length) {
+    sh.getRange(row + 1, 1, allPasses.length, 8).setValues(
+      allPasses.map(function (p) { return p.slice(1); })
+    );
+    row += 1 + allPasses.length;
+  } else {
+    row += 2;
+  }
+
+  sh.getRange(row++, 1).setValue('Sample rejections (first 40 per market)').setFontWeight('bold');
+  const rejHdr = [['row', 'player', 'matchup', 'reason', 'detail']];
+  sh.getRange(row, 1, 1, 5).setValues(rejHdr).setFontWeight('bold');
+  const rejAll = kRes.rejects.concat(hRes.rejects);
+  if (rejAll.length) sh.getRange(row + 1, 1, rejAll.length, 5).setValues(rejAll);
+
+  sh.setColumnWidth(1, 200);
+  sh.setColumnWidth(2, 220);
+  sh.setColumnWidth(5, 280);
+  sh.activate();
+
+  const msg =
+    'K pass=' + kRes.tally.passed + '/' + kRes.scanned +
+    ' · H pass=' + hRes.tally.passed + '/' + hRes.scanned +
+    ' · see ' + MLB_BET_CARD_DIAG_FUNNEL_TAB;
+  Logger.log(msg);
+  ss.toast(msg, 'Bet Card funnel diag', 10);
 }

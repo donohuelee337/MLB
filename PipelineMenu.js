@@ -28,6 +28,7 @@ function onOpen() {
     .addItem('🃏 MLB Bet Card only (final plays)', 'refreshMLBBetCard')
     .addItem('🎯 Refresh Bet Card Calibration panel', 'refreshBetCardCalibration')
     .addItem('🎯 Open Calibration panel', 'mlbActivateCalibrationTab_')
+    .addItem('🔍 Diagnose Bet Card funnel (K + H)', 'diagnoseBetCardFunnel_')
     .addItem('🔍 Diagnose Hits → BetCard inclusion', 'diagnoseHitsBetCardInclusion')
     .addItem('📊 Grade pending MLB results (boxscore)', 'gradeMLBPendingResults_')
     .addItem('📈 Backfill closing K (Results Log)', 'mlbBackfillClosingMenu_')
@@ -378,7 +379,9 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   logStep_(
     'MLB Bet Card',
     0,
-    oBet.ok ? mlbTabDataRowsBelowHeader3_(ss, MLB_BET_CARD_TAB) : 0,
+    oBet.ok
+      ? (typeof mlbBetCardPlayStats_ === 'function' ? mlbBetCardPlayStats_().picks : mlbTabDataRowsBelowHeader3_(ss, MLB_BET_CARD_TAB))
+      : 0,
     oBet.ok ? '' : oBet.err || 'failed'
   );
 

@@ -77,16 +77,20 @@ function addPipelineWarning_(msg) {
 function buildPipelineToast_() {
   if (!pipelineLog_) return '';
   const warnCount = pipelineLog_.warnings.length;
-  let cardStep = null;
-  pipelineLog_.steps.forEach(function (s) {
-    if (s.name === 'MLB Bet Card') cardStep = s;
-  });
-  const playCount = cardStep ? cardStep.outputCount : 0;
-  let gameCount = 0;
-  Object.keys(pipelineLog_.gameCoverage).forEach(function (g) {
-    if (pipelineLog_.gameCoverage[g].cardPicks > 0) gameCount++;
-  });
-  const base = playCount + ' plays across ' + gameCount + ' games';
+  const stats = typeof mlbBetCardPlayStats_ === 'function' ? mlbBetCardPlayStats_() : null;
+  let playCount = stats && stats.picks != null ? stats.picks : 0;
+  let gameCount = stats && stats.games != null ? stats.games : 0;
+  if (!stats || stats.picks == null) {
+    let cardStep = null;
+    pipelineLog_.steps.forEach(function (s) {
+      if (s.name === 'MLB Bet Card') cardStep = s;
+    });
+    if (cardStep && cardStep.outputCount) playCount = cardStep.outputCount;
+    Object.keys(pipelineLog_.gameCoverage).forEach(function (g) {
+      if (pipelineLog_.gameCoverage[g].cardPicks > 0) gameCount++;
+    });
+  }
+  const base = playCount + ' picks across ' + gameCount + ' games';
   if (warnCount > 0) {
     return (
       base +
@@ -321,12 +325,22 @@ function mlbAppendBetCardPipelineCoverage_(ss) {
   if (!pipelineLog_) return;
   const sh = ss.getSheetByName(MLB_BET_CARD_TAB);
   if (!sh || sh.getLastRow() < 4) return;
-  // Bet card 0-indexed: 3=matchup, 4=play. See MLBBetCard.js headers.
-  const data = sh.getRange(4, 1, sh.getLastRow(), 5).getValues();
+  let data = [];
+  try {
+    const nr = ss.getRangeByName('MLB_BET_CARD');
+    if (nr) data = nr.getValues();
+  } catch (e) {}
+  if (!data.length) {
+    const stats = typeof mlbBetCardPlayStats_ === 'function' ? mlbBetCardPlayStats_() : null;
+    const n = stats && stats.cardBlockRows ? stats.cardBlockRows : 0;
+    if (n > 0) data = sh.getRange(4, 1, 4 + n - 1, 5).getValues();
+  }
   data.forEach(function (r) {
     const matchup = String(r[3] || '').trim();
     const play = String(r[4] || '');
-    if (!matchup || play.indexOf('No qualifying') !== -1) return;
+    const player = String(r[5] || '').trim();
+    if (!matchup || !player || play.indexOf('No qualifying') !== -1) return;
+    if (play.indexOf('Bet Tracker') !== -1) return;
     logGameCoverage_(matchup, undefined, undefined, 0, 1);
   });
 }
