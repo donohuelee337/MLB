@@ -16,6 +16,14 @@ function refreshBatterHitsSimEngine_() {
   if (isNaN(w)) w = 0.35;
   w = Math.max(0, Math.min(1, w));
 
+  // H_MODEL_P_SHRINK: empirical calibration factor. The sim layer is authoritative
+  // for the bet card, so the shrink MUST be applied here (the v2-full card applies
+  // it too but those values get overwritten when the sim recomputes from lambda).
+  // Audit: graded Results Log shows model overestimates P(≥1 hit) by +10..+18pp
+  // across all model% buckets ≥0.60. Closes the systemic H calibration gap.
+  const hShrinkRaw = parseFloat(String(cfg['H_MODEL_P_SHRINK'] != null ? cfg['H_MODEL_P_SHRINK'] : '1'));
+  const hShrink = (!isNaN(hShrinkRaw) && hShrinkRaw > 0 && hShrinkRaw <= 1) ? hShrinkRaw : 1;
+
   const srcTab =
     typeof MLB_BATTER_HITS_V2_CARD_TAB !== 'undefined'
       ? MLB_BATTER_HITS_V2_CARD_TAB
@@ -62,12 +70,14 @@ function refreshBatterHitsSimEngine_() {
       baAnch = Math.max(0.02, Math.min(0.499, baAnch));
       const kO = Math.floor(lineNum) + 1;
       const kU = Math.floor(lineNum + 1e-9);
-      const pO = mlbBinomialPGeqK_(kO, estPa, baAnch);
-      const pU = mlbBinomialPLeqK_(kU, estPa, baAnch);
-      pOver = Math.round(pO * 1000) / 1000;
-      pUnder = Math.round(pU * 1000) / 1000;
-      if (fdOver !== '') evO = mlbEvPerDollarRisked_(pO, fdOver);
-      if (fdUnder !== '') evU = mlbEvPerDollarRisked_(pU, fdUnder);
+      const pORaw = mlbBinomialPGeqK_(kO, estPa, baAnch);
+      const pURaw = mlbBinomialPLeqK_(kU, estPa, baAnch);
+      const pOAdj = (hShrink > 0 && hShrink < 1) ? Math.min(pORaw * hShrink, 0.9999) : pORaw;
+      const pUAdj = (hShrink > 0 && hShrink < 1) ? Math.min(pURaw * hShrink, 0.9999) : pURaw;
+      pOver = Math.round(pOAdj * 1000) / 1000;
+      pUnder = Math.round(pUAdj * 1000) / 1000;
+      if (fdOver !== '') evO = mlbEvPerDollarRisked_(pOAdj, fdOver);
+      if (fdUnder !== '') evU = mlbEvPerDollarRisked_(pUAdj, fdUnder);
       if (evO !== '' && evU !== '') {
         if (evO >= evU && evO > 0) {
           bestSide = 'Over';

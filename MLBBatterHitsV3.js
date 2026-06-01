@@ -248,7 +248,7 @@ function refreshBatterHitsV3BetCard() {
   const agg = mlbCollectBatterHitsOddsRows_(ss);
   const gamePkMap = mlbBuildOddsGameNormToGamePk_(ss);
 
-  const out = [];
+  const rowObjs = [];
 
   Object.keys(agg).forEach(function (key) {
     const entry = agg[key];
@@ -303,24 +303,64 @@ function refreshBatterHitsV3BetCard() {
     const evO = pOver !== '' && px.over !== '' ? mlbEvPerDollarRisked_(pOver, px.over) : '';
     const evU = pUnder !== '' && px.under !== '' ? mlbEvPerDollarRisked_(pUnder, px.under) : '';
 
-    let bestSide = '';
-    let bestEv = '';
+    let leanSide = '';
+    let leanEv = '';
     if (evO !== '' && evU !== '') {
-      if (evO >= evU) { bestSide = 'Over';  bestEv = evO; }
-      else            { bestSide = 'Under'; bestEv = evU; }
-    } else if (evO !== '') { bestSide = 'Over';  bestEv = evO; }
-    else if (evU !== '')   { bestSide = 'Under'; bestEv = evU; }
+      if (evO >= evU) {
+        leanSide = 'Over';
+        leanEv = evO;
+      } else {
+        leanSide = 'Under';
+        leanEv = evU;
+      }
+    } else if (evO !== '') {
+      leanSide = 'Over';
+      leanEv = evO;
+    } else if (evU !== '') {
+      leanSide = 'Under';
+      leanEv = evU;
+    }
 
-    const flags = mlbFlagsHitsV3Card_(
+    const pickBoard =
+      typeof mlbHitsPickOnBoard_ === 'function'
+        ? mlbHitsPickOnBoard_(lambdaDisp, mainPt, null)
+        : { onBoard: false, lean: '', edge: edge };
+    let pick = '';
+    let pickEv = '';
+    let offBoard = false;
+    if (pickBoard.onBoard && pickBoard.lean) {
+      pick = pickBoard.lean;
+      pickEv = pick === 'Over' ? evO : evU;
+      if (pickEv === '') {
+        pickEv = leanEv;
+      }
+    } else if (hasModel) {
+      offBoard = true;
+    }
+
+    let batTeam = '';
+    if (pidNum && typeof mlbHitsV2BatterTeamAbbr_ === 'function') {
+      batTeam = mlbCanonicalTeamAbbr_(mlbHitsV2BatterTeamAbbr_(pidNum)) || '';
+    }
+
+    let flags = mlbFlagsHitsV3Card_(
       inj[mlbNormalizePersonName_(entry.displayName)] || '',
       note,
       hasModel
     );
+    if (offBoard) {
+      flags = flags ? flags + '; agree_fd' : 'agree_fd';
+    }
 
-    out.push([
+    rowObjs.push({
+      sortKey: pickEv !== '' && !isNaN(parseFloat(pickEv)) ? parseFloat(pickEv) : -999,
+      hot: hotCold,
+      offBoard: offBoard,
+      data: [
       gamePk || '',
       matchup,
       entry.displayName,
+      batTeam,
       mainPt != null ? mainPt : '',
       px.over,
       px.under,
@@ -332,8 +372,8 @@ function refreshBatterHitsV3BetCard() {
       imU,
       evO,
       evU,
-      bestSide,
-      bestEv,
+      pick,
+      pickEv,
       flags,
       pidNum && !isNaN(pidNum) ? pidNum : '',
       // v2 audit
@@ -362,31 +402,32 @@ function refreshBatterHitsV3BetCard() {
       row ? row.oppBbHbpMult : '',
       row ? row.oppBbHbpRate : '',
       row ? row.oppBbHbpBf : '',
-    ]);
+    ],
+    });
   });
 
-  out.sort(function (a, b) {
-    const be = parseFloat(b[15], 10);
-    const ae = parseFloat(a[15], 10);
+  rowObjs.sort(function (a, b) {
+    const be = parseFloat(b.sortKey, 10);
+    const ae = parseFloat(a.sortKey, 10);
     if (isNaN(be) && isNaN(ae)) return 0;
     if (isNaN(be)) return -1;
     if (isNaN(ae)) return 1;
     return be - ae;
   });
-
-  let sh = ss.getSheetByName(MLB_BATTER_HITS_V3_CARD_TAB);
-  if (sh) {
-    sh.clearContents();
-    sh.clearFormats();
-  } else {
-    sh = ss.insertSheet(MLB_BATTER_HITS_V3_CARD_TAB);
-  }
-  sh.setTabColor('#0d47a1');
+  const out = rowObjs.map(function (r) {
+    return r.data;
+  });
+  const sortedHot = rowObjs.map(function (r) {
+    return r.hot;
+  });
+  const sortedOffBoard = rowObjs.map(function (r) {
+    return r.offBoard;
+  });
 
   const headers = [
-    'gamePk', 'matchup', 'batter', 'fd_hits_line', 'fd_over', 'fd_under',
-    'lambda_H_v3', 'edge_vs_line', 'p_over', 'p_under', 'implied_over', 'implied_under',
-    'ev_over_$1', 'ev_under_$1', 'best_side', 'best_ev_$1', 'flags', 'batter_id',
+    'gamePk', 'matchup', 'batter', 'bat_team', 'fd_hits_line', 'fd_over', 'fd_under',
+    'proj_hits', 'edge_vs_line', 'p_over', 'p_under', 'implied_over', 'implied_under',
+    'ev_over_$1', 'ev_under_$1', 'pick', 'pick_ev_$1', 'flags', 'batter_id',
     // v2 audit
     'base_lambda', 'park_mult', 'opp_sp_h9_mult', 'hand_mult', 'ab_mult',
     // v3 mults (inverse — high = boost, low = penalty)
@@ -399,13 +440,27 @@ function refreshBatterHitsV3BetCard() {
     'lambda_H_v3_deadpa', 'opp_sp_bb_hbp_mult', 'opp_sp_bb_hbp_rate', 'opp_sp_bf',
   ];
   const NEED_COLS = headers.length;
+
+  let sh = ss.getSheetByName(MLB_BATTER_HITS_V3_CARD_TAB);
+  if (sh) {
+    const cr = Math.max(sh.getLastRow(), 3);
+    const cc = Math.min(Math.max(sh.getLastColumn(), NEED_COLS), sh.getMaxColumns());
+    try {
+      sh.getRange(1, 1, cr, cc).breakApart();
+    } catch (e) {}
+    sh.clearContents();
+    sh.clearFormats();
+  } else {
+    sh = ss.insertSheet(MLB_BATTER_HITS_V3_CARD_TAB);
+  }
+  sh.setTabColor('#0d47a1');
   if (sh.getMaxColumns() < NEED_COLS) {
     sh.insertColumnsAfter(sh.getMaxColumns(), NEED_COLS - sh.getMaxColumns());
   }
 
-  // Same widths schema as TB v3 for visual consistency. Tail 4 widths = v3.deadpa shadow.
+  // One width per header column (41). Extra width here caused "columns out of bounds".
   const widths = [
-    72, 200, 150, 56, 64, 64, 56, 56, 52, 52, 52, 52, 56, 56, 56, 56, 140, 88,
+    72, 200, 150, 44, 56, 64, 64, 56, 56, 52, 52, 52, 52, 56, 56, 52, 56, 140, 88,
     56, 52, 64, 52, 52,
     56, 64, 64,
     64, 56, 56, 52, 60,
@@ -413,12 +468,17 @@ function refreshBatterHitsV3BetCard() {
     80, 56, 56,
     64, 64, 64, 56,
   ];
-  widths.forEach(function (w, i) { sh.setColumnWidth(i + 1, w); });
+  if (widths.length !== NEED_COLS) {
+    throw new Error('Hits v3 widths.length ' + widths.length + ' !== headers ' + NEED_COLS);
+  }
+  widths.forEach(function (w, i) {
+    sh.setColumnWidth(i + 1, w);
+  });
 
   sh.getRange(1, 1, 1, NEED_COLS)
     .merge()
     .setValue(
-      '🧪 Batter Hits v3-contact (shadow) — λ_v3 = λ_v2 × batter_K-rate(inv) × opp_SP_K/9(inv) × Streak overlap; mults audited per row. Tail 4 cols = 🧪 v3.deadpa (opp SP BB+HBP rate; audit only).'
+      '🧪 Batter Hits v3-contact (shadow) — proj_hits = λ_v2 × contact mults. pick when |proj − FD line| ≥ 0.5; gray row = agree_fd. bat_team = tonight\'s club. Tail 4 cols = v3.deadpa audit.'
     )
     .setFontWeight('bold')
     .setBackground('#1565c0')
@@ -435,11 +495,31 @@ function refreshBatterHitsV3BetCard() {
   sh.setFrozenRows(3);
 
   if (out.length) {
+    for (let ri = 0; ri < out.length; ri++) {
+      if (out[ri].length !== NEED_COLS) {
+        throw new Error(
+          'Hits v3 row ' + ri + ' has ' + out[ri].length + ' cols, expected ' + NEED_COLS
+        );
+      }
+    }
     sh.getRange(4, 1, out.length, NEED_COLS).setValues(out);
     try {
       ss.setNamedRange('MLB_BATTER_HITS_V3_CARD', sh.getRange(4, 1, out.length, NEED_COLS));
     } catch (e) {}
+    if (typeof mlbApplyBatterHitsShadowCardFormatting_ === 'function') {
+      mlbApplyBatterHitsShadowCardFormatting_(sh, out, headers, {
+        hotColdFlags: sortedHot,
+        offBoardFlags: sortedOffBoard,
+        startRow: 4,
+        headerRow: 3,
+      });
+    } else if (typeof mlbApplyHotColdBorders_ === 'function') {
+      mlbApplyHotColdBorders_(sh, 4, sortedHot, NEED_COLS);
+      if (typeof mlbApplyOffBoardRowShading_ === 'function') {
+        mlbApplyOffBoardRowShading_(sh, 4, sortedOffBoard, NEED_COLS);
+      }
+    }
   }
 
-  ss.toast(out.length + ' Hits v3 rows · sorted by best_ev', 'Batter Hits v3 (shadow)', 6);
+  ss.toast(out.length + ' Hits v3 rows · sorted by pick_ev', 'Batter Hits v3 (shadow)', 6);
 }

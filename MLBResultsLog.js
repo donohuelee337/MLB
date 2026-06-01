@@ -7,7 +7,7 @@
 // ============================================================
 
 const MLB_RESULTS_LOG_TAB = '📋 MLB_Results_Log';
-const MLB_RESULTS_LOG_NCOL = 27;
+const MLB_RESULTS_LOG_NCOL = 38;
 
 const MLB_RESULTS_HEADERS = [
   'Logged At',
@@ -37,7 +37,39 @@ const MLB_RESULTS_HEADERS = [
   'stake $',
   'pnl $',
   'proj',
+  'p_win_raw',
+  'p_win_cal',
+  'segment_id',
+  'matchup_tags',
+  'lambda_raw',
+  'opp_k_l14',
+  'clv_pp',
+  'proj_IP',
+  'projIP_v2',
+  'actual_IP',
+  'ip_error',
 ];
+
+/** Extend results log headers for IP audit cols (cols 35–38). */
+function mlbEnsureResultsLogIpHeaders_(logSh) {
+  const HEADER_ROW = 3;
+  if (String(logSh.getRange(HEADER_ROW, 35).getValue() || '').trim() !== 'proj_IP') {
+    logSh.getRange(HEADER_ROW, 35, 1, 4).setValues([['proj_IP', 'projIP_v2', 'actual_IP', 'ip_error']]);
+  }
+}
+
+/**
+ * Numeric closing-line value in percentage points for the side we bet.
+ * +ve = the market moved toward our side after we logged it (we beat the
+ * close); the single most reliable leading indicator of a real edge on a
+ * finite bankroll, where outcomes are too noisy to judge skill short-term.
+ */
+function mlbClvPpFromOpenClose_(openOdds, closeOdds) {
+  const pO = mlbAmericanToImpliedProb_(openOdds);
+  const pC = mlbAmericanToImpliedProb_(closeOdds);
+  if (isNaN(pO) || isNaN(pC)) return '';
+  return Math.round((pC - pO) * 1000) / 10;
+}
 
 /** Profit (in $) for a graded row at this American price. Stake is in $. */
 function mlbPnlFromResult_(result, stake, american) {
@@ -225,6 +257,8 @@ function mlbBackfillResultsLogClosingK_(ss) {
     }
     const note = mlbClvNoteFromOpenClose_(openLine, openOdds, cl.line, cl.american, side);
     logSh.getRange(4 + i, 19, 1, 3).setValues([[cl.line, cl.american, note]]);
+    const clvPp = mlbClvPpFromOpenClose_(openOdds, cl.american);
+    if (clvPp !== '') logSh.getRange(4 + i, 34).setValue(clvPp);
     n++;
   }
   return n;
@@ -245,6 +279,7 @@ function mlbEnsureResultsLogLayout_(logSh) {
     .setBackground('#1565C0')
     .setFontColor('#ffffff');
   logSh.setFrozenRows(HEADER_ROW);
+  mlbEnsureResultsLogIpHeaders_(logSh);
 }
 
 /**
@@ -262,9 +297,10 @@ function snapshotMLBBetCardToLog(windowTag) {
   const last = bc.getLastRow();
   // Bet card column layout (0-indexed) — keep in sync with MLBBetCard.js headers:
   //  0:date 1:# 2:gamePk 3:matchup 4:play 5:player 6:market
-  //  7:side 8:line 9:odds 10:model% 11:book% 12:ev 13:stake$
-  //  14:proj 15:proj−line 16:flags 17:player_id 18:time
-  const block = bc.getRange(4, 1, last, MLB_BET_CARD_NCOL).getValues();
+  //  7:side 8:line 9:odds 10:proj 11:proj−line 12:model% 13:book%
+  //  14:ev 15:stake$ 16:flags 17:player_id 18:time
+  const bcCols = Math.max(MLB_BET_CARD_NCOL, bc.getLastColumn());
+  const block = bc.getRange(4, 1, last, bcCols).getValues();
   const window = windowTag || 'UNKNOWN';
   const now = new Date();
   const tz = Session.getScriptTimeZone();
@@ -299,6 +335,15 @@ function snapshotMLBBetCardToLog(windowTag) {
   if (String(logSh.getRange(HEADER_ROW, 27).getValue() || '').trim() !== 'proj') {
     logSh.getRange(HEADER_ROW, 27).setValue('proj');
   }
+  if (String(logSh.getRange(HEADER_ROW, 34).getValue() || '').trim() !== 'clv_pp') {
+    logSh.getRange(HEADER_ROW, 34).setValue('clv_pp');
+  }
+  if (String(logSh.getRange(HEADER_ROW, 28).getValue() || '').trim() !== 'p_win_raw') {
+    logSh.getRange(HEADER_ROW, 28, 1, 6).setValues([[
+      'p_win_raw', 'p_win_cal', 'segment_id', 'matchup_tags', 'lambda_raw', 'opp_k_l14',
+    ]]);
+  }
+  mlbEnsureResultsLogIpHeaders_(logSh);
 
   let appended = 0;
   let updated = 0;
@@ -321,11 +366,25 @@ function snapshotMLBBetCardToLog(windowTag) {
     const side = String(row[7] || '').trim();
     const line = row[8];
     const odds = row[9];
-    const modelProb = row[10];
-    const ev = row[12];
-    const stake = row[13];
-    const proj = row[14];
+    const proj = row[10];
+    const modelProb = row[12];
+    const ev = row[14];
+    const stake = row[15];
     const playerId = row[17];
+    const pWinRaw = row.length > 19 ? row[19] : '';
+    const pWinCal = row.length > 20 ? row[20] : '';
+    const segmentId = row.length > 21 ? row[21] : '';
+    const matchupTags = row.length > 22 ? row[22] : '';
+    const lambdaRaw = row.length > 23 ? row[23] : '';
+    const oppKL14 = row.length > 24 ? row[24] : '';
+    const projIp =
+      row.length > 27 && String(market || '').toLowerCase().indexOf('strikeout') !== -1
+        ? row[27]
+        : '';
+    const projIpV2 =
+      row.length > 28 && String(market || '').toLowerCase().indexOf('strikeout') !== -1
+        ? row[28]
+        : '';
     const betKey = mlbBetResultKey_(slate, gamePk, playerId, side, line);
     const hitRow = mlbFindResultsLogSheetRowForUpsert_(logSh, slate, betKey, gamePk, playerId, side, line);
 
@@ -344,6 +403,8 @@ function snapshotMLBBetCardToLog(windowTag) {
         logSh.getRange(hitRow, 22).setValue(betKey);
       }
       const clv = mlbClvNoteFromOpenClose_(openL, openO, line, odds, side);
+      const clvPp = mlbClvPpFromOpenClose_(openO, odds);
+      if (clvPp !== '') logSh.getRange(hitRow, 34).setValue(clvPp);
       logSh.getRange(hitRow, 1, 1, 12).setValues([
         [
           loggedAt,
@@ -371,6 +432,11 @@ function snapshotMLBBetCardToLog(windowTag) {
       }
       // proj at col 27 — always refresh from latest snapshot.
       if (proj !== '' && proj != null) logSh.getRange(hitRow, 27).setValue(proj);
+      logSh.getRange(hitRow, 28, 1, 6).setValues([[
+        pWinRaw, pWinCal, segmentId, matchupTags, lambdaRaw, oppKL14,
+      ]]);
+      if (projIp !== '' && projIp != null) logSh.getRange(hitRow, 35).setValue(projIp);
+      if (projIpV2 !== '' && projIpV2 != null) logSh.getRange(hitRow, 36).setValue(projIpV2);
       updated++;
       return;
     }
@@ -407,6 +473,17 @@ function snapshotMLBBetCardToLog(windowTag) {
           stake !== '' && stake != null ? stake : '',
           '',  // pnl filled in by grader / backfill
           proj,
+          pWinRaw,
+          pWinCal,
+          segmentId,
+          matchupTags,
+          lambdaRaw,
+          oppKL14,
+          '',  // clv_pp — filled once closing odds are known (MIDDAY/FINAL/backfill)
+          projIp,
+          projIpV2,
+          '',
+          '',
         ],
       ]);
     appended++;
@@ -433,6 +510,11 @@ function mlbBackfillHistoricalStakes_() {
 
   // Make sure the new columns exist + are formatted.
   const HEADER_ROW = 3;
+  if (logSh.getLastRow() >= HEADER_ROW && String(logSh.getRange(HEADER_ROW, 28).getValue() || '').trim() !== 'p_win_raw') {
+    logSh.getRange(HEADER_ROW, 28, 1, 6).setValues([[
+      'p_win_raw', 'p_win_cal', 'segment_id', 'matchup_tags', 'lambda_raw', 'opp_k_l14',
+    ]]);
+  }
   if (String(logSh.getRange(HEADER_ROW, 25).getValue() || '').trim() !== 'stake $') {
     logSh.getRange(HEADER_ROW, 25, 1, 2)
       .setValues([['stake $', 'pnl $']])

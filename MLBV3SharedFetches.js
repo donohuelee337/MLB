@@ -174,7 +174,12 @@ function mlbSharedFetchPitcherThrows_(pitcherId) {
 
 function mlbSharedFetchPitcherSeasonPitching_(pitcherId, season) {
   const id = parseInt(pitcherId, 10);
-  if (!id) return { h: NaN, tb: NaN, k: NaN, hr: NaN, ip: 0, bb: NaN, hbp: NaN, bf: NaN, oppAvg: NaN };
+  if (!id) {
+    return {
+      h: NaN, tb: NaN, k: NaN, hr: NaN, ip: 0, bb: NaN, hbp: NaN, bf: NaN, oppAvg: NaN,
+      er: NaN, era: NaN, fip: NaN, er9: NaN, go: NaN, ao: NaN,
+    };
+  }
   const key = id + ':' + String(season);
   if (Object.prototype.hasOwnProperty.call(__mlbSharedPitcherSeasonPitchingCache, key)) {
     return __mlbSharedPitcherSeasonPitchingCache[key];
@@ -185,7 +190,10 @@ function mlbSharedFetchPitcherSeasonPitching_(pitcherId, season) {
     id +
     '/stats?stats=season&group=pitching&season=' +
     encodeURIComponent(String(season));
-  let out = { h: NaN, tb: NaN, k: NaN, hr: NaN, ip: 0, bb: NaN, hbp: NaN, bf: NaN, oppAvg: NaN };
+  let out = {
+    h: NaN, tb: NaN, k: NaN, hr: NaN, ip: 0, bb: NaN, hbp: NaN, bf: NaN, oppAvg: NaN,
+    er: NaN, era: NaN, fip: NaN, er9: NaN, go: NaN, ao: NaN,
+  };
   try {
     Utilities.sleep(40);
     const res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
@@ -200,6 +208,10 @@ function mlbSharedFetchPitcherSeasonPitching_(pitcherId, season) {
         const bb = parseInt(stat.baseOnBalls, 10);
         const hbp = parseInt(stat.hitBatsmen, 10);
         const bf = parseInt(stat.battersFaced, 10);
+        const er = parseInt(stat.earnedRuns, 10);
+        const go = parseInt(stat.groundOuts, 10);
+        const ao = parseInt(stat.airOuts, 10);
+        const eraRaw = stat.era != null ? parseFloat(stat.era) : NaN;
         let tb = stat.totalBases != null ? parseInt(stat.totalBases, 10) : NaN;
         if (isNaN(tb) && !isNaN(h)) {
           const d = parseInt(stat.doubles, 10) || 0;
@@ -208,10 +220,6 @@ function mlbSharedFetchPitcherSeasonPitching_(pitcherId, season) {
           const singles = Math.max(0, h - d - t - hrx);
           tb = singles + 2 * d + 3 * t + 4 * hrx;
         }
-        // opp_avg: prefer statsapi's `avg` (string like ".252"); else compute
-        // H / (BF - BB - HBP - SF). statsapi doesn't always send sacFlies on
-        // the pitching line, so fall back to (BF - BB - HBP) which slightly
-        // understates AB but is close enough for the dead-PA / hit-rate use.
         let oppAvg = NaN;
         const rawAvg = stat.avg != null ? parseFloat(stat.avg) : NaN;
         if (!isNaN(rawAvg) && rawAvg >= 0 && rawAvg <= 1) {
@@ -229,6 +237,11 @@ function mlbSharedFetchPitcherSeasonPitching_(pitcherId, season) {
           const outs = parts.length > 1 ? parseInt(parts[1], 10) || 0 : 0;
           ipDec = whole + outs / 3;
         }
+        let fip = stat.fip != null ? parseFloat(stat.fip) : NaN;
+        if ((isNaN(fip) || fip <= 0) && ipDec > 0 && !isNaN(k) && !isNaN(bb)) {
+          fip = mlbComputeFipFromCountingStats_(hr, bb, hbp, k, ipDec, 3.1);
+        }
+        const er9 = ipDec > 0 && !isNaN(er) ? Math.round((er / ipDec) * 900) / 100 : NaN;
         out = {
           h: isNaN(h) ? NaN : h,
           tb: isNaN(tb) ? NaN : tb,
@@ -239,6 +252,12 @@ function mlbSharedFetchPitcherSeasonPitching_(pitcherId, season) {
           hbp: isNaN(hbp) ? NaN : hbp,
           bf: isNaN(bf) ? NaN : bf,
           oppAvg: isNaN(oppAvg) ? NaN : oppAvg,
+          er: isNaN(er) ? NaN : er,
+          era: isNaN(eraRaw) ? NaN : Math.round(eraRaw * 100) / 100,
+          fip: isNaN(fip) ? NaN : Math.round(fip * 100) / 100,
+          er9: isNaN(er9) ? NaN : er9,
+          go: isNaN(go) ? NaN : go,
+          ao: isNaN(ao) ? NaN : ao,
         };
       }
     }
@@ -247,6 +266,19 @@ function mlbSharedFetchPitcherSeasonPitching_(pitcherId, season) {
   }
   __mlbSharedPitcherSeasonPitchingCache[key] = out;
   return out;
+}
+
+/** Standard FIP: ((13*HR + 3*(BB+HBP) - 2*K) / IP) + constant. */
+function mlbComputeFipFromCountingStats_(hr, bb, hbp, k, ip, fipConstant) {
+  const ipNum = parseFloat(ip, 10);
+  if (isNaN(ipNum) || ipNum <= 0) return NaN;
+  const hrN = isNaN(hr) ? 0 : hr;
+  const bbN = isNaN(bb) ? 0 : bb;
+  const hbpN = isNaN(hbp) ? 0 : hbp;
+  const kN = isNaN(k) ? 0 : k;
+  const c = parseFloat(fipConstant, 10);
+  const constant = !isNaN(c) ? c : 3.1;
+  return Math.round((((13 * hrN + 3 * (bbN + hbpN) - 2 * kN) / ipNum) + constant) * 100) / 100;
 }
 
 // --- v3 back-compat thin wrappers ---------------------------------------

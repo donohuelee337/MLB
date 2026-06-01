@@ -1,0 +1,236 @@
+// ============================================================
+// 📋 F5 Results Log — snapshots from ⚾ F5_Card (total only)
+// ============================================================
+
+const MLB_F5_RESULTS_LOG_TAB = '📋 F5_Results_Log';
+const MLB_F5_RESULTS_LOG_NCOL = 23;
+
+const MLB_F5_RESULTS_HEADERS = [
+  'Logged At',
+  'Slate',
+  'Rank',
+  'Matchup',
+  'gamePk',
+  'Side',
+  'Line',
+  'Odds',
+  'p_model',
+  'ev_$1',
+  'lambda_total',
+  'lambda_away',
+  'lambda_home',
+  'actual_F5_runs',
+  'result',
+  'grade_notes',
+  'stake $',
+  'pnl $',
+  'bet_key',
+  'Window',
+  'flags',
+  'away_SP',
+  'home_SP',
+];
+
+function mlbEnsureF5ResultsLogLayout_(sh) {
+  sh.getRange(1, 1, 1, MLB_F5_RESULTS_LOG_NCOL)
+    .merge()
+    .setValue('📋 F5 Results — top EV F5 total picks from ⚾ F5_Card · graded innings 1–5 runs')
+    .setFontWeight('bold')
+    .setBackground('#0d47a1')
+    .setFontColor('#ffffff');
+  sh.getRange(3, 1, 1, MLB_F5_RESULTS_LOG_NCOL)
+    .setValues([MLB_F5_RESULTS_HEADERS])
+    .setFontWeight('bold')
+    .setBackground('#1976d2')
+    .setFontColor('#ffffff');
+  sh.setFrozenRows(3);
+}
+
+function mlbF5ResultKey_(slate, gamePk, side, line) {
+  return [
+    String(slate || '').trim(),
+    String(gamePk != null ? gamePk : '').trim(),
+    String(side || '')
+      .trim()
+      .toLowerCase(),
+    String(line != null ? line : '').trim(),
+  ].join('|');
+}
+
+function _mlbF5FindLogRow_(logSh, slate, gamePk, side, line) {
+  if (logSh.getLastRow() < 4) return -1;
+  const data = logSh.getRange(4, 1, logSh.getLastRow() - 3, MLB_F5_RESULTS_LOG_NCOL).getValues();
+  const wantSlate = String(slate || '').trim();
+  const wantPk = parseInt(gamePk, 10);
+  const wantSide = String(side || '')
+    .trim()
+    .toLowerCase();
+  const wantLine = String(line != null ? line : '').trim();
+  for (let i = data.length - 1; i >= 0; i--) {
+    const cellSlate =
+      data[i][1] instanceof Date
+        ? Utilities.formatDate(data[i][1], Session.getScriptTimeZone(), 'yyyy-MM-dd')
+        : String(data[i][1] || '').trim();
+    if (cellSlate !== wantSlate) continue;
+    if (parseInt(data[i][4], 10) !== wantPk) continue;
+    if (
+      String(data[i][5] || '')
+        .trim()
+        .toLowerCase() !== wantSide
+    ) {
+      continue;
+    }
+    if (String(data[i][6] != null ? data[i][6] : '').trim() !== wantLine) continue;
+    return 4 + i;
+  }
+  return -1;
+}
+
+function mlbF5DefaultStake_(cfg) {
+  const raw = parseFloat(String(cfg && cfg['F5_DEFAULT_STAKE'] != null ? cfg['F5_DEFAULT_STAKE'] : '10').trim());
+  return !isNaN(raw) && raw > 0 ? raw : 10;
+}
+
+function snapshotF5ToLog(windowTag) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const card = ss.getSheetByName(MLB_F5_CARD_TAB);
+  if (!card || card.getLastRow() < 4) {
+    Logger.log('snapshotF5ToLog: no F5 card rows');
+    return;
+  }
+
+  const cfg = getConfig();
+  const slate = getSlateDateString_(cfg);
+  const topN = parseInt(String(cfg['F5_SNAPSHOT_TOP_N'] != null ? cfg['F5_SNAPSHOT_TOP_N'] : '8').trim(), 10) || 8;
+  const minEv = parseFloat(String(cfg['F5_SNAPSHOT_MIN_EV'] != null ? cfg['F5_SNAPSHOT_MIN_EV'] : '0.03').trim());
+  const minEvCut = !isNaN(minEv) ? minEv : 0.03;
+  const stake = mlbF5DefaultStake_(cfg);
+  const tz = Session.getScriptTimeZone();
+  const loggedAt = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd HH:mm');
+  const window = windowTag || 'UNKNOWN';
+
+  // Outcome-first snapshot: rank/select by model win probability (most likely
+  // winners), EV only a guardrail. Legacy 'ev' mode = rank/gate by EV.
+  const pickMode = mlbPickBy_(cfg);
+  const minConf = mlbPickMinConfidence_(cfg);
+  const minEvGuard = mlbPickMinEvGuard_(cfg);
+  const rows = card.getRange(4, 1, card.getLastRow() - 3, 26).getValues();
+  const picks = [];
+  rows.forEach(function (r) {
+    const bestSide = String(r[22] || '').trim();
+    if (bestSide !== 'Over' && bestSide !== 'Under') return;
+    const bestEv = parseFloat(String(r[23]));
+    const conf = parseFloat(String(bestSide === 'Over' ? r[16] : r[17])); // p_over / p_under
+    let rank;
+    if (pickMode === 'ev') {
+      if (isNaN(bestEv) || bestEv < minEvCut) return;
+      rank = bestEv;
+    } else {
+      if (isNaN(conf) || conf < minConf) return;
+      if (isNaN(bestEv) || bestEv < minEvGuard) return; // need a posted price + not awful
+      rank = conf;
+    }
+    picks.push({ row: r, bestSide: bestSide, bestEv: isNaN(bestEv) ? '' : bestEv, rank: rank });
+  });
+  picks.sort(function (a, b) {
+    return b.rank - a.rank;
+  });
+
+  let logSh = ss.getSheetByName(MLB_F5_RESULTS_LOG_TAB);
+  if (!logSh) {
+    logSh = ss.insertSheet(MLB_F5_RESULTS_LOG_TAB);
+    logSh.setTabColor('#1976d2');
+  }
+  if (logSh.getLastRow() < 3 || !String(logSh.getRange(3, 1).getValue() || '').trim()) {
+    mlbEnsureF5ResultsLogLayout_(logSh);
+  }
+
+  let appended = 0;
+  let updated = 0;
+
+  for (let i = 0; i < picks.length && i < topN; i++) {
+    const r = picks[i].row;
+    const rank = i + 1;
+    const gamePk = r[0];
+    const matchup = String(r[1] || '').trim();
+    const awaySp = r[3];
+    const homeSp = r[4];
+    const side = picks[i].bestSide;
+    const line = r[5];
+    const odds = side === 'Over' ? r[6] : r[7];
+    const pModel = side === 'Over' ? r[16] : r[17];
+    const ev = picks[i].bestEv;
+    const lambdaTotal = r[14];
+    const lambdaAway = r[12];
+    const lambdaHome = r[13];
+    const flags = String(r[24] || '').trim();
+    const betKey = mlbF5ResultKey_(slate, gamePk, side, line);
+
+    const hit = _mlbF5FindLogRow_(logSh, slate, gamePk, side, line);
+    if (hit > 0) {
+      logSh.getRange(hit, 1, 1, 13).setValues([[
+        loggedAt,
+        slate,
+        rank,
+        matchup,
+        gamePk,
+        side,
+        line,
+        odds,
+        pModel,
+        ev,
+        lambdaTotal,
+        lambdaAway,
+        lambdaHome,
+      ]]);
+      logSh.getRange(hit, 17).setValue(stake);
+      logSh.getRange(hit, 19).setValue(betKey);
+      logSh.getRange(hit, 20).setValue(window);
+      logSh.getRange(hit, 21).setValue(flags);
+      logSh.getRange(hit, 22).setValue(awaySp);
+      logSh.getRange(hit, 23).setValue(homeSp);
+      updated++;
+      continue;
+    }
+
+    const nextRow = Math.max(logSh.getLastRow(), 3) + 1;
+    logSh.getRange(nextRow, 1, 1, MLB_F5_RESULTS_LOG_NCOL).setValues([[
+      loggedAt,
+      slate,
+      rank,
+      matchup,
+      gamePk,
+      side,
+      line,
+      odds,
+      pModel,
+      ev,
+      lambdaTotal,
+      lambdaAway,
+      lambdaHome,
+      '',
+      'PENDING',
+      '',
+      stake,
+      '',
+      betKey,
+      window,
+      flags,
+      awaySp,
+      homeSp,
+    ]]);
+    appended++;
+  }
+
+  if (appended + updated > 0) {
+    try {
+      ss.toast('F5 log: +' + appended + ' new · ' + updated + ' updated · ' + window, 'MLB-BOIZ', 6);
+    } catch (e) {}
+  }
+}
+
+function mlbActivateF5ResultsLogTab_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sh = ss.getSheetByName(MLB_F5_RESULTS_LOG_TAB);
+  if (sh) sh.activate();
+}

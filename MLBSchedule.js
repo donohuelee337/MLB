@@ -199,6 +199,17 @@ function mlbScheduleHomeAbbrForGamePk_(ss, gamePk) {
   return '';
 }
 
+/** Away team abbreviation from schedule row (col `away`). */
+function mlbScheduleAwayAbbrForGamePk_(ss, gamePk) {
+  const g = parseInt(gamePk, 10);
+  if (!g) return '';
+  const block = mlbGetScheduleBlock_(ss);
+  for (let i = 0; i < block.length; i++) {
+    if (parseInt(block[i][0], 10) === g) return String(block[i][3] || '').trim();
+  }
+  return '';
+}
+
 function mlbScheduleMatchupForGamePk_(ss, gamePk) {
   const g = parseInt(gamePk, 10);
   if (!g) return '';

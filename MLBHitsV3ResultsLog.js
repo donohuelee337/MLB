@@ -94,7 +94,7 @@ function mlbFindResultsLogHitsV3RowForUpsert_(logSh, slateWant, betKey, gamePk, 
 
 /**
  * Append the Hits v3 shadow card to 🧪 MLB_Results_Log_Hits_v3.
- * Filters: best_side present, best_ev > 0, no 'injury' flag. Mirrors v2.
+ * Filters: pick Over/Under (not agree_fd), pick_ev > 0, no 'injury' flag. Mirrors v2.
  * @param {string} windowTag MORNING | MIDDAY | FINAL
  */
 function snapshotMLBHitsV3BetCardToLog(windowTag) {
@@ -133,44 +133,44 @@ function snapshotMLBHitsV3BetCardToLog(windowTag) {
     const gamePk = row[0];
     const matchup = row[1];
     const batter = String(row[2] || '').trim();
-    const line = row[3];
-    const fdOver = row[4];
-    const fdUnder = row[5];
-    const pOver = row[8];
-    const pUnder = row[9];
-    const bestSide = String(row[14] || '').trim();
-    const bestEv = row[15];
-    const flags = String(row[16] || '');
-    const batterId = row[17];
-    // v2 audit cols 18..22, then v3 mults 23..25, audit 26..30, sp_name/throws 31..32, model_version 33.
-    const baseLam  = row[18];
-    const parkMult = row[19];
-    const h9Mult   = row[20];
-    const handMult = row[21];
-    const abMult   = row[22];
-    const kRateMult     = row[23];
-    const oppK9Mult     = row[24];
-    const streakOverlap = row[25];
-    const modelVer = String(row[33] || 'h.v3-contact').trim() || 'h.v3-contact';
+    const line = row[4];
+    const fdOver = row[5];
+    const fdUnder = row[6];
+    const pOver = row[9];
+    const pUnder = row[10];
+    const pick = String(row[15] || '').trim();
+    const pickEv = row[16];
+    const flags = String(row[17] || '');
+    const batterId = row[18];
+    // v2 audit 19..23, v3 mults 24..26, audit 27..31, sp 32..33, model_version 34.
+    const baseLam  = row[19];
+    const parkMult = row[20];
+    const h9Mult   = row[21];
+    const handMult = row[22];
+    const abMult   = row[23];
+    const kRateMult     = row[24];
+    const oppK9Mult     = row[25];
+    const streakOverlap = row[26];
+    const modelVer = String(row[34] || 'h.v3-contact').trim() || 'h.v3-contact';
 
     if (!batter) return;
     if (flags.indexOf('injury') !== -1) return;
-    if (bestSide !== 'Over' && bestSide !== 'Under') return;
+    if (pick !== 'Over' && pick !== 'Under') return;
     if (line === '' || line == null) return;
-    const odds = bestSide === 'Over' ? fdOver : fdUnder;
+    const odds = pick === 'Over' ? fdOver : fdUnder;
     if (odds === '' || odds == null) return;
-    const pWin = bestSide === 'Over' ? pOver : pUnder;
-    const ev = parseFloat(String(bestEv));
+    const pWin = pick === 'Over' ? pOver : pUnder;
+    const ev = parseFloat(String(pickEv));
     if (isNaN(ev) || ev <= 0) return;
     if (minEvFloor > 0 && ev < minEvFloor) return;
 
     rank += 1;
     const playText =
-      batter + ' — H ' + bestSide + ' ' + String(line) + ' [shadow:' + modelVer + ']';
+      batter + ' — H ' + pick + ' ' + String(line) + ' [shadow:' + modelVer + ']';
 
     const slate = slateFallback;
-    const betKey = mlbBetResultKey_(slate, gamePk, batterId, bestSide, line) + '|' + modelVer;
-    const hitRow = mlbFindResultsLogHitsV3RowForUpsert_(logSh, slate, betKey, gamePk, batterId, bestSide, line);
+    const betKey = mlbBetResultKey_(slate, gamePk, batterId, pick, line) + '|' + modelVer;
+    const hitRow = mlbFindResultsLogHitsV3RowForUpsert_(logSh, slate, betKey, gamePk, batterId, pick, line);
 
     if (hitRow > 0) {
       const nc = Math.max(MLB_RESULTS_LOG_HITS_V3_NCOL, logSh.getLastColumn());
@@ -190,7 +190,7 @@ function snapshotMLBHitsV3BetCardToLog(windowTag) {
         [
           loggedAt, slate, rank, batter, matchup,
           'Batter hits (shadow v3)',
-          line, bestSide, odds, pWin, ev, window,
+          line, pick, odds, pWin, ev, window,
         ],
       ]);
       logSh.getRange(hitRow, 13).setValue(playText);
@@ -211,7 +211,7 @@ function snapshotMLBHitsV3BetCardToLog(windowTag) {
         [
           loggedAt, slate, rank, batter, matchup,
           'Batter hits (shadow v3)',
-          line, bestSide, odds, pWin, ev, window,
+          line, pick, odds, pWin, ev, window,
           playText, gamePk, batterId,
           '', 'PENDING', '',
           '', '', '',

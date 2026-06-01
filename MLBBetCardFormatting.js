@@ -159,20 +159,20 @@ function mlbScheduleGameTimeIndex_(ss) {
  *   row 3: header row written
  *   rows 4..(3+n): data rows already written, 0-indexed column layout below
  *     0:date 1:# 2:gamePk 3:matchup 4:play 5:player 6:market
- *     7:side 8:line 9:odds 10:model% 11:book% 12:ev 13:stake$
- *     14:proj 15:proj−line 16:flags 17:player_id 18:time
+ *     7:side 8:line 9:odds 10:proj 11:proj−line 12:model% 13:book%
+ *     14:ev 15:stake$ 16:flags 17:player_id 18:time
  */
 function mlbApplyBetCardFormatting_(sh, rows, headers, slateDate) {
   const ncol = headers.length;
 
-  // Column widths
-  [76, 36, 64, 168, 280, 130, 96, 46, 44, 56, 60, 60, 64, 56, 50, 60, 130, 64, 56]
+  // Column widths (order matches header layout above: proj/proj−line sit after odds)
+  [76, 36, 64, 168, 280, 130, 96, 46, 44, 56, 50, 60, 60, 60, 64, 56, 130, 64, 56]
     .forEach(function (w, i) { sh.setColumnWidth(i + 1, w); });
 
   // Title bar (row 1) — italic serif on ivory, navy underline
   sh.getRange(1, 1, 1, ncol)
     .merge()
-    .setValue('MLB Card · ' + slateDate + ' · sorted by game time, EV within game')
+    .setValue('MLB Card · ' + slateDate + ' · sorted by game time, then win probability within game')
     .setFontFamily(MLB_BC_TITLE_FONT)
     .setFontSize(11)
     .setFontStyle('italic')
@@ -210,21 +210,21 @@ function mlbApplyBetCardFormatting_(sh, rows, headers, slateDate) {
       .setBorder(true, true, true, true, true, true, MLB_BC_RULE, SpreadsheetApp.BorderStyle.SOLID);
   sh.setRowHeights(4, rows.length, 21);
 
-  // Tabular monospace on numeric columns (1-indexed: line, odds, model%, book%, ev, kelly, proj, proj−line)
+  // Tabular monospace on numeric columns (1-indexed: line, odds, proj, proj−line, model%, book%, ev, kelly)
   const numCols = [9, 10, 11, 12, 13, 14, 15, 16];
   numCols.forEach(function (c) {
     sh.getRange(4, c, rows.length, 1).setFontFamily(MLB_BC_NUM_FONT).setFontSize(9.5);
   });
 
-  // Number formats
+  // Number formats (proj + proj−line now sit right after odds)
   sh.getRange(4,  9, rows.length, 1).setNumberFormat('0.0').setHorizontalAlignment('right');       // line
   sh.getRange(4, 10, rows.length, 1).setNumberFormat('+0;-0').setHorizontalAlignment('right');     // odds
-  sh.getRange(4, 11, rows.length, 1).setNumberFormat('0.0%').setHorizontalAlignment('right');      // model %
-  sh.getRange(4, 12, rows.length, 1).setNumberFormat('0.0%').setHorizontalAlignment('right');      // book %
-  sh.getRange(4, 13, rows.length, 1).setNumberFormat('+0.000;-0.000').setHorizontalAlignment('right'); // ev
-  sh.getRange(4, 14, rows.length, 1).setNumberFormat('$0.00').setHorizontalAlignment('right');    // stake (1u/2u/3u $)
-  sh.getRange(4, 15, rows.length, 1).setNumberFormat('0.00').setHorizontalAlignment('right');      // proj
-  sh.getRange(4, 16, rows.length, 1).setNumberFormat('+0.00;-0.00').setHorizontalAlignment('right'); // proj−line
+  sh.getRange(4, 11, rows.length, 1).setNumberFormat('0.00').setHorizontalAlignment('right');      // proj
+  sh.getRange(4, 12, rows.length, 1).setNumberFormat('+0.00;-0.00').setHorizontalAlignment('right'); // proj−line
+  sh.getRange(4, 13, rows.length, 1).setNumberFormat('0.0%').setHorizontalAlignment('right');      // model %
+  sh.getRange(4, 14, rows.length, 1).setNumberFormat('0.0%').setHorizontalAlignment('right');      // book %
+  sh.getRange(4, 15, rows.length, 1).setNumberFormat('+0.000;-0.000').setHorizontalAlignment('right'); // ev
+  sh.getRange(4, 16, rows.length, 1).setNumberFormat('$0.00').setHorizontalAlignment('right');    // stake (1u/2u/3u $)
   sh.getRange(4,  8, rows.length, 1).setHorizontalAlignment('center');                              // side
 
   // Spacer rows (blank gamePk + blank play) — taller white gap with no borders.
@@ -254,7 +254,7 @@ function mlbApplyBetCardFormatting_(sh, rows, headers, slateDate) {
   //   |proj − line| < 0.5 → very light red   (weak projected edge)
   for (let i = 0; i < rows.length; i++) {
     if (!rows[i][2] && !rows[i][4]) continue;  // spacer rows
-    const edge = parseFloat(String(rows[i][15]));
+    const edge = parseFloat(String(rows[i][11]));
     if (isNaN(edge)) continue;
     const a = Math.abs(edge);
     if (a > 1) {
@@ -266,32 +266,32 @@ function mlbApplyBetCardFormatting_(sh, rows, headers, slateDate) {
 
   // Model % cell — heat-map shading (same palette the tracker uses below).
   for (let i = 0; i < rows.length; i++) {
-    const mp = parseFloat(String(rows[i][10]));
+    const mp = parseFloat(String(rows[i][12]));
     if (isNaN(mp)) continue;
     const heat = mlbBcHeat_(mp);
-    sh.getRange(4 + i, 11).setBackground(heat.bg).setFontColor(heat.fg).setFontWeight('bold');
+    sh.getRange(4 + i, 13).setBackground(heat.bg).setFontColor(heat.fg).setFontWeight('bold');
   }
 
   // EV cell — same heat scale, mapped from neg/pos EV magnitude
   for (let i = 0; i < rows.length; i++) {
-    const ev = parseFloat(String(rows[i][12]));
+    const ev = parseFloat(String(rows[i][14]));
     if (isNaN(ev)) continue;
     // Map EV [-0.05 .. +0.15] to [0 .. 1] for heat lookup so most plays land mid-band.
     const t = Math.max(0, Math.min(1, (ev + 0.05) / 0.20));
     const heat = mlbBcHeat_(t);
-    sh.getRange(4 + i, 13).setBackground(heat.bg).setFontColor(heat.fg).setFontWeight(Math.abs(ev) >= 0.05 ? 'bold' : 'normal');
+    sh.getRange(4 + i, 15).setBackground(heat.bg).setFontColor(heat.fg).setFontWeight(Math.abs(ev) >= 0.05 ? 'bold' : 'normal');
   }
 
   // proj − line cell — green when |edge| > 1 (strong projected edge),
   // red when |edge| < 0.5 (weak projected edge).
   for (let i = 0; i < rows.length; i++) {
-    const edge = parseFloat(String(rows[i][15]));
+    const edge = parseFloat(String(rows[i][11]));
     if (isNaN(edge)) continue;
     const a = Math.abs(edge);
     if (a > 1) {
-      sh.getRange(4 + i, 16).setBackground('#15803d').setFontColor('#ffffff');
+      sh.getRange(4 + i, 12).setBackground('#15803d').setFontColor('#ffffff');
     } else if (a < 0.5) {
-      sh.getRange(4 + i, 16).setBackground('#b91c1c').setFontColor('#ffffff');
+      sh.getRange(4 + i, 12).setBackground('#b91c1c').setFontColor('#ffffff');
     }
   }
 
@@ -340,7 +340,7 @@ function mlbApplyBetCardFormatting_(sh, rows, headers, slateDate) {
     for (let i = 0; i < rows.length; i++) {
       const market = String(rows[i][6] || '').toLowerCase();
       if (market !== 'batter hits') continue;
-      const proj = parseFloat(String(rows[i][14]));
+      const proj = parseFloat(String(rows[i][10]));
       if (isNaN(proj)) continue;
       streakCandidates.push({ rowIdx: i, proj: proj, player: String(rows[i][5] || '').trim() });
     }
@@ -367,7 +367,7 @@ function mlbApplyBetCardFormatting_(sh, rows, headers, slateDate) {
       .setFontColor('#7c2d12')
       .setFontWeight('bold')
       .setNote('🔥 MLB The Streak —' + rankTxt + ' · ' + pick.label);
-    sh.getRange(4 + pick.rowIdx, 15)
+    sh.getRange(4 + pick.rowIdx, 11)
       .setBackground('#fde047')
       .setFontColor('#7c2d12')
       .setFontWeight('bold');
@@ -448,6 +448,141 @@ function mlbAppendBetTrackerSectionTBV3_(ss, sh, startRow, slateDate) {
  * Hits v3 shadow tracker — reads 🧪 MLB_Results_Log_Hits_v3. Hit-rate panel
  * for h.v3-contact (v2 + batter K-rate inv + opp SP K/9 inv + Streak overlap).
  */
+/** Resolve 1-based column index from header row; names may be string or string[]. */
+function mlbPropCol_(headers, names) {
+  const list = Array.isArray(names) ? names : [names];
+  for (let n = 0; n < list.length; n++) {
+    const i = headers.indexOf(list[n]);
+    if (i >= 0) return i + 1;
+  }
+  return 0;
+}
+
+/**
+ * Shared prop-card visuals (Hv3 / K card rules): gray agree_fd rows, HOT/COLD borders,
+ * bold FD line + projection + team, prob heat on O/U, yellow pick highlight.
+ *
+ * @param {GoogleAppsScript.Spreadsheet.Sheet} sh
+ * @param {Array[]} rows
+ * @param {string[]} headers
+ * @param {Object} [opts] hotColdFlags, offBoardFlags, startRow, headerRow, skipHeaderNotes, cols
+ */
+function mlbApplyPropCardFormatting_(sh, rows, headers, opts) {
+  if (!sh || !headers || !headers.length) return;
+  const o = opts || {};
+  const startRow = o.startRow > 0 ? o.startRow : 4;
+  const headerRow = o.headerRow > 0 ? o.headerRow : 3;
+  const ncol = headers.length;
+  const n = rows && rows.length ? rows.length : 0;
+  const C = o.cols || {};
+
+  if (!o.skipHeaderNotes && typeof mlbApplyHeaderNotes_ === 'function') {
+    mlbApplyHeaderNotes_(sh, headerRow, headers);
+  }
+  if (!n) return;
+
+  mlbPromoApplyBodyBase_(sh, n, ncol);
+
+  const cLine = mlbPropCol_(headers, C.line || ['fd_hits_line', 'fd_k_line', 'fd_line']);
+  const cProj = mlbPropCol_(
+    headers,
+    C.proj || ['proj_hits', 'proj_K', 'lambda_total', 'p_redeem', 'p_streak', 'λ_raw', 'λ_GS']
+  );
+  const cPick = mlbPropCol_(headers, C.pick || ['pick', 'best_side']);
+  const cPickEv = mlbPropCol_(headers, C.pickEv || ['pick_ev_$1', 'best_ev_$1']);
+  const cPlayer = mlbPropCol_(headers, C.player || ['batter', 'pitcher']);
+  const cTeam = mlbPropCol_(headers, C.team || ['bat_team', 'team', 'pitch_team', 'opp_team']);
+  const cPO = mlbPropCol_(headers, C.pOver || ['p_over', 'p_yrfi']);
+  const cPU = mlbPropCol_(headers, C.pUnder || ['p_under', 'p_nrfi']);
+  const cBatterId = mlbPropCol_(headers, C.batterId || ['batter_id']);
+
+  for (let i = 0; i < n; i++) {
+    const sheetRow = startRow + i;
+    if (cLine) {
+      sh.getRange(sheetRow, cLine).setFontWeight('bold').setHorizontalAlignment('center');
+    }
+    if (cProj) {
+      sh.getRange(sheetRow, cProj).setFontWeight('bold').setHorizontalAlignment('center');
+    }
+    if (cTeam) {
+      sh.getRange(sheetRow, cTeam).setFontWeight('bold').setHorizontalAlignment('center');
+    }
+    if (cPick) {
+      sh.getRange(sheetRow, cPick).setHorizontalAlignment('center');
+    }
+  }
+
+  if (cPO) {
+    mlbPromoApplyProbHeat_(
+      sh,
+      startRow,
+      n,
+      cPO,
+      rows.map(function (r) {
+        return r[cPO - 1];
+      })
+    );
+  }
+  if (cPU) {
+    mlbPromoApplyProbHeat_(
+      sh,
+      startRow,
+      n,
+      cPU,
+      rows.map(function (r) {
+        return r[cPU - 1];
+      })
+    );
+  }
+
+  const offBoard = o.offBoardFlags || [];
+  if (offBoard.length && typeof mlbApplyOffBoardRowShading_ === 'function') {
+    mlbApplyOffBoardRowShading_(sh, startRow, offBoard, ncol);
+  }
+
+  const hotFlags = o.hotColdFlags || [];
+  if (hotFlags.length) {
+    if (typeof mlbApplyHotColdBorders_ === 'function') {
+      mlbApplyHotColdBorders_(sh, startRow, hotFlags, ncol);
+    }
+    if (cPlayer && cBatterId && typeof mlbPromoApplyHotColdNameBorders_ === 'function') {
+      mlbPromoApplyHotColdNameBorders_(sh, startRow, rows, cPlayer, cBatterId, null, hotFlags);
+    }
+  }
+
+  for (let i = 0; i < n; i++) {
+    if (offBoard[i]) continue;
+    const pickVal = cPick ? String(rows[i][cPick - 1] || '').trim() : '';
+    const isOu = pickVal === 'Over' || pickVal === 'Under';
+    const isNrfi = pickVal === 'NRFI' || pickVal === 'YRFI';
+    const isPromoPick = pickVal === 'PICK' || pickVal === 'TRUE' || pickVal === true;
+    if ((isOu || isNrfi || isPromoPick) && cPick) {
+      const cols = [cPick];
+      if (cPickEv) cols.push(cPickEv);
+      if (cLine) cols.push(cLine);
+      if (cProj) cols.push(cProj);
+      mlbPromoHighlightCells_(sh, startRow + i, cols, null, '#7c2d12');
+    }
+  }
+}
+
+/** @deprecated name — use mlbApplyPropCardFormatting_ */
+function mlbApplyBatterHitsShadowCardFormatting_(sh, rows, headers, opts) {
+  const o = opts || {};
+  o.cols = o.cols || {
+    line: 'fd_hits_line',
+    proj: 'proj_hits',
+    pick: 'pick',
+    pickEv: 'pick_ev_$1',
+    player: 'batter',
+    team: 'bat_team',
+    pOver: 'p_over',
+    pUnder: 'p_under',
+    batterId: 'batter_id',
+  };
+  mlbApplyPropCardFormatting_(sh, rows, headers, o);
+}
+
 function mlbAppendBetTrackerSectionHitsV3_(ss, sh, startRow, slateDate) {
   if (typeof MLB_RESULTS_LOG_HITS_V3_TAB === 'undefined') return startRow;
   return _mlbRenderBetTrackerPanel_(ss, sh, startRow, slateDate, {

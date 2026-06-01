@@ -7,13 +7,16 @@
 // Optional Script Property: STATSAPI_BASE (default …/api/v1)
 // ============================================================
 
-var __mlbTeamHittingSeasonCache = {};
+  var __mlbTeamHittingSeasonCache = {};
 /** Key teamId:season:vsL or :vsR — aggregated SO/PA vs opposing pitcher hand (stats /stats). */
 var __mlbTeamHittingVsHandCache = {};
+/** Key teamId:season — runs per game from team season hitting. */
+var __mlbTeamRunsPerGameCache = {};
 
 function mlbResetTeamHittingSeasonCache_() {
   __mlbTeamHittingSeasonCache = {};
   __mlbTeamHittingVsHandCache = {};
+  __mlbTeamRunsPerGameCache = {};
 }
 
 /**
@@ -166,6 +169,64 @@ function mlbTeamHittingKPerPaVsPitcherHand_(teamId, season, pitchHand) {
   } catch (e) {
     Logger.log('mlbTeamHittingKPerPaVsPitcherHand_: ' + e.message);
     __mlbTeamHittingVsHandCache[key] = NaN;
+    return NaN;
+  }
+}
+
+/**
+ * Team runs per game (season hitting split). Used by 🌅 NRFI model for offense multiplier.
+ * @param {*} teamId
+ * @param {*} season
+ * @returns {number} RPG rounded 2 decimals, or NaN.
+ */
+function mlbTeamSeasonRunsPerGame_(teamId, season) {
+  var id = parseInt(teamId, 10);
+  if (!id) {
+    return NaN;
+  }
+  var se = String(season);
+  var key = id + ':' + se + ':rpg';
+  if (Object.prototype.hasOwnProperty.call(__mlbTeamRunsPerGameCache, key)) {
+    return __mlbTeamRunsPerGameCache[key];
+  }
+
+  var url =
+    mlbStatsApiBaseUrl_() +
+    '/teams/' +
+    id +
+    '/stats?stats=season&season=' +
+    encodeURIComponent(se) +
+    '&group=hitting';
+
+  try {
+    Utilities.sleep(50);
+    var res = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+    if (res.getResponseCode() !== 200) {
+      __mlbTeamRunsPerGameCache[key] = NaN;
+      return NaN;
+    }
+    var payload = JSON.parse(res.getContentText());
+    var statsArr = payload.stats || [];
+    var firstStat = statsArr[0] || {};
+    var splits = firstStat.splits || [];
+    var first = splits[0];
+    if (!first || !first.stat) {
+      __mlbTeamRunsPerGameCache[key] = NaN;
+      return NaN;
+    }
+    var st = first.stat;
+    var runs = parseInt(st.runs, 10);
+    var gp = parseInt(st.gamesPlayed, 10) || parseInt(st.games, 10);
+    if (isNaN(runs) || !(gp > 0)) {
+      __mlbTeamRunsPerGameCache[key] = NaN;
+      return NaN;
+    }
+    var out = Math.round((runs / gp) * 100) / 100;
+    __mlbTeamRunsPerGameCache[key] = out;
+    return out;
+  } catch (e) {
+    Logger.log('mlbTeamSeasonRunsPerGame_: ' + e.message);
+    __mlbTeamRunsPerGameCache[key] = NaN;
     return NaN;
   }
 }

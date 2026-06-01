@@ -558,15 +558,17 @@ function refreshStreakPicks() {
     }
 
     let penH9 = '';
-    let penIp = '';
     if (oppAbbr) {
       const pen = mlbStreakOpposingPenH9_(oppAbbr, season);
       if (!isNaN(pen.h9)) penH9 = pen.h9;
-      if (!isNaN(pen.ip)) penIp = pen.ip;
     }
 
     const k9Mult = mlbStreakK9PenaltyMult_(spK9, leagueK9, alpha);
     const ipForLeverage = expSpIp !== '' ? expSpIp : spIpDefault;
+    // Expected bullpen innings this game = the 9 innings not covered by the
+    // starter. Matches the leverage weight (penShare = 1 - expSpIp/9); the
+    // statsapi value is a season total and would show hundreds here.
+    const penIp = Math.max(0, Math.round((9 - ipForLeverage) * 10) / 10);
     const penMult = mlbStreakBullpenLeverageMult_(ipForLeverage, penH9, leagueH9, penBeta);
     const deadPaMult = mlbStreakDeadPaPenaltyMult_(deadPaRate, leagueDeadPa, deadPaAlpha);
 
@@ -605,6 +607,10 @@ function refreshStreakPicks() {
       oppAvg: oppAvg === '' ? '' : oppAvg,
       deadPaRate: deadPaRate === '' ? '' : deadPaRate,
       oppAbbr: oppAbbr || '',
+      batTeam:
+        c.batterId && typeof mlbHitsV2BatterTeamAbbr_ === 'function'
+          ? mlbCanonicalTeamAbbr_(mlbHitsV2BatterTeamAbbr_(c.batterId)) || ''
+          : '',
       penH9: penH9 === '' ? '' : penH9,
       penIp: penIp === '' ? '' : penIp,
       k9Mult: k9Mult,
@@ -655,6 +661,7 @@ function refreshStreakPicks() {
       row.gamePk,
       row.matchup,
       row.batter,
+      row.batTeam || '',
       row.batterId,
       row.pHitV2,
       row.babip,
@@ -690,7 +697,7 @@ function mlbStreakWriteSheet_(ss, rows, slateDate, hotColdFlags) {
   }
   sh.setTabColor('#f59e0b');
 
-  const NEED_COLS = 22;
+  const NEED_COLS = 23;
   if (sh.getMaxColumns() < NEED_COLS) {
     sh.insertColumnsAfter(sh.getMaxColumns(), NEED_COLS - sh.getMaxColumns());
   }
@@ -699,6 +706,7 @@ function mlbStreakWriteSheet_(ss, rows, slateDate, hotColdFlags) {
     'gamePk',
     'matchup',
     'batter',
+    'bat_team',
     'batter_id',
     'p_hit_v2',
     'season_babip',
@@ -720,8 +728,9 @@ function mlbStreakWriteSheet_(ss, rows, slateDate, hotColdFlags) {
     'notes',
   ];
   sh.getRange(3, 1, 1, headers.length).setValues([headers]);
+  if (typeof mlbApplyHeaderNotes_ === 'function') mlbApplyHeaderNotes_(sh, 3, headers);
 
-  const widths = [72, 200, 150, 72, 64, 72, 130, 64, 64, 72, 80, 60, 72, 64, 72, 80, 72, 64, 56, 56, 80, 220];
+  const widths = [72, 200, 150, 44, 72, 64, 72, 130, 64, 64, 72, 80, 60, 72, 64, 72, 80, 72, 64, 56, 56, 80, 220];
   widths.forEach(function (w, i) { sh.setColumnWidth(i + 1, w); });
 
   if (rows.length) {
@@ -766,15 +775,15 @@ function mlbStreakPicksByPlayer_(ss) {
   const sh = ss.getSheetByName(MLB_STREAK_PICKS_TAB);
   if (!sh || sh.getLastRow() < 4) return out;
   const last = sh.getLastRow();
-  // Schema (1-indexed): col 3 = batter, col 18 = p_streak, col 19 = pick_rank,
-  // col 20 = is_pick. Read first 20 columns.
-  const vals = sh.getRange(4, 1, last - 3, 20).getValues();
+  // Schema (1-indexed): col 3 = batter, col 19 = p_streak, col 20 = pick_rank,
+  // col 21 = is_pick (bat_team inserted at col 4).
+  const vals = sh.getRange(4, 1, last - 3, 21).getValues();
   for (let i = 0; i < vals.length; i++) {
-    if (vals[i][19] !== true) continue;
+    if (vals[i][20] !== true) continue;
     const name = String(vals[i][2] || '').trim().toLowerCase();
     if (!name) continue;
-    const rank = parseInt(vals[i][18], 10) || 0;
-    const pStreak = parseFloat(vals[i][17]);
+    const rank = parseInt(vals[i][19], 10) || 0;
+    const pStreak = parseFloat(vals[i][18]);
     out[name] = { rank: rank, pStreak: isNaN(pStreak) ? null : pStreak };
   }
   return out;

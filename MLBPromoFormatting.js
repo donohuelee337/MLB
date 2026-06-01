@@ -163,45 +163,57 @@ function mlbApplyStreakPromoFormatting_(sh, rows, headers, slateDate, hotColdFla
   mlbPromoApplyTitleBar_(
     sh,
     ncol,
-    'Streak Picks · ' + slateDate + ' · p_streak = p_hit_v2 × K/9 × bullpen × dead-PA'
+    'Streak Picks · ' + slateDate + ' · p_streak = p_hit_v2 × K/9 × bullpen × dead-PA · gray = agree_fd band'
   );
   mlbPromoApplyHeaderRow_(sh, ncol);
 
   if (!rows || !rows.length) return;
-  mlbPromoApplyBodyBase_(sh, rows.length, ncol);
+  if (typeof mlbApplyPropCardFormatting_ === 'function') {
+    mlbApplyPropCardFormatting_(sh, rows, headers, {
+      hotColdFlags: hotColdFlags,
+      startRow: 4,
+      headerRow: 3,
+      skipHeaderNotes: true,
+      cols: { player: 'batter', team: 'bat_team', proj: 'p_streak', batterId: 'batter_id' },
+    });
+  } else {
+    mlbPromoApplyBodyBase_(sh, rows.length, ncol);
+  }
 
-  // Numeric formats (1-indexed cols): p_hit_v2=5, babip=6, mult cols, p_streak=18
-  sh.getRange(4, 5, rows.length, 1).setNumberFormat('0.0%').setFontFamily(MLB_BC_NUM_FONT).setFontSize(9.5);
-  sh.getRange(4, 18, rows.length, 1).setNumberFormat('0.0%').setFontFamily(MLB_BC_NUM_FONT).setFontSize(9.5);
-  [8, 9, 10, 11, 13, 14, 15, 16, 17].forEach(function (c) {
+  const cHit = typeof mlbPropCol_ === 'function' ? mlbPropCol_(headers, 'p_hit_v2') : 6;
+  const cStreak = typeof mlbPropCol_ === 'function' ? mlbPropCol_(headers, 'p_streak') : 19;
+  const cRank = typeof mlbPropCol_ === 'function' ? mlbPropCol_(headers, 'pick_rank') : 20;
+  const cIsPick = typeof mlbPropCol_ === 'function' ? mlbPropCol_(headers, 'is_pick') : 21;
+  const cBat = typeof mlbPropCol_ === 'function' ? mlbPropCol_(headers, 'batter') : 3;
+
+  sh.getRange(4, cHit, rows.length, 1).setNumberFormat('0.0%').setFontFamily(MLB_BC_NUM_FONT).setFontSize(9.5);
+  sh.getRange(4, cStreak, rows.length, 1).setNumberFormat('0.0%').setFontFamily(MLB_BC_NUM_FONT).setFontSize(9.5);
+  const cBabip = typeof mlbPropCol_ === 'function' ? mlbPropCol_(headers, 'season_babip') : 7;
+  [9, 10, 11, 12, 14, 15, 16, 17, 18].forEach(function (c) {
     sh.getRange(4, c, rows.length, 1).setFontFamily(MLB_BC_NUM_FONT).setFontSize(9.5);
   });
-  sh.getRange(4, 4, rows.length, 1).setNumberFormat('0.000').setFontFamily(MLB_BC_NUM_FONT).setFontSize(9.5);
+  sh.getRange(4, cBabip, rows.length, 1).setNumberFormat('0.000').setFontFamily(MLB_BC_NUM_FONT).setFontSize(9.5);
   sh.getRange(4, 1, rows.length, 1).setFontColor(MLB_BC_INK).setFontFamily(MLB_BC_NUM_FONT).setFontSize(9);
-  sh.getRange(4, 4, rows.length, 1).setFontColor(MLB_BC_INK).setFontFamily(MLB_BC_NUM_FONT).setFontSize(9);
-
-  mlbPromoApplyProbHeat_(sh, 4, rows.length, 5, rows.map(function (r) { return r[4]; }), MLB_BC_INK);
-  mlbPromoApplyProbHeat_(sh, 4, rows.length, 18, rows.map(function (r) { return r[17]; }), MLB_BC_INK);
+  mlbPromoApplyProbHeat_(sh, 4, rows.length, cHit, rows.map(function (r) { return r[cHit - 1]; }), MLB_BC_INK);
+  mlbPromoApplyProbHeat_(sh, 4, rows.length, cStreak, rows.map(function (r) { return r[cStreak - 1]; }), MLB_BC_INK);
 
   for (let i = 0; i < rows.length; i++) {
-    if (rows[i][19] !== true) continue;
-    const rank = parseInt(rows[i][18], 10) || 0;
-    const pStreak = parseFloat(rows[i][17]);
+    if (rows[i][cIsPick - 1] !== true && String(rows[i][cIsPick - 1]).toUpperCase() !== 'TRUE') continue;
+    const rank = parseInt(rows[i][cRank - 1], 10) || 0;
+    const pStreak = parseFloat(rows[i][cStreak - 1]);
     const label = !isNaN(pStreak)
       ? 'P(≥1 hit) ' + (pStreak * 100).toFixed(1) + '%'
       : 'streak pick';
     mlbPromoHighlightPickRow_(
       sh,
       4 + i,
-      [3, 18],
+      [cBat, cStreak],
       '🔥 MLB The Streak — Pick #' + rank + ' · ' + label,
-      3,
+      cBat,
       MLB_BC_INK
     );
   }
 
-  // Hot/Cold batter borders (L5 hits vs season) — after pick highlights.
-  mlbPromoApplyHotColdNameBorders_(sh, 4, rows, 3, 4, null, hotColdFlags);
 }
 
 /**
@@ -217,7 +229,17 @@ function mlbApplyHrPromoFormatting_(sh, rows, headers, slateDate, topPick, hotCo
   mlbPromoApplyHeaderRow_(sh, ncol);
 
   if (!rows || !rows.length) return;
-  mlbPromoApplyBodyBase_(sh, rows.length, ncol);
+  if (typeof mlbApplyPropCardFormatting_ === 'function') {
+    mlbApplyPropCardFormatting_(sh, rows, headers, {
+      hotColdFlags: hotColdFlags,
+      startRow: 4,
+      headerRow: 3,
+      skipHeaderNotes: true,
+      cols: { player: 'batter', team: 'team', proj: ['λ_raw', 'p_calibrated'], batterId: 'batterId' },
+    });
+  } else {
+    mlbPromoApplyBodyBase_(sh, rows.length, ncol);
+  }
 
   sh.getRange(4, 7, rows.length, 1).setNumberFormat('0.0000');
   sh.getRange(4, 8, rows.length, 2).setNumberFormat('0.0%');
@@ -227,8 +249,10 @@ function mlbApplyHrPromoFormatting_(sh, rows, headers, slateDate, topPick, hotCo
   sh.getRange(4, 2, rows.length, 1).setFontColor(MLB_BC_INK_SOFT).setFontFamily(MLB_BC_NUM_FONT).setFontSize(9);
   sh.getRange(4, 5, rows.length, 1).setFontColor(MLB_BC_INK_SOFT).setFontFamily(MLB_BC_NUM_FONT).setFontSize(9);
 
-  mlbPromoApplyProbHeat_(sh, 4, rows.length, 8, rows.map(function (r) { return r[7]; }));
-  mlbPromoApplyProbHeat_(sh, 4, rows.length, 9, rows.map(function (r) { return r[8]; }));
+  const cPois = typeof mlbPropCol_ === 'function' ? mlbPropCol_(headers, 'p_poisson') : 8;
+  const cCal = typeof mlbPropCol_ === 'function' ? mlbPropCol_(headers, 'p_calibrated') : 9;
+  mlbPromoApplyProbHeat_(sh, 4, rows.length, cPois, rows.map(function (r) { return r[cPois - 1]; }));
+  mlbPromoApplyProbHeat_(sh, 4, rows.length, cCal, rows.map(function (r) { return r[cCal - 1]; }));
 
   if (topPick) {
     const noteText =
@@ -237,10 +261,9 @@ function mlbApplyHrPromoFormatting_(sh, rows, headers, slateDate, topPick, hotCo
       ' · p_calibrated=' + (Math.round(topPick.pCalibrated * 1000) / 10) + '%' +
       ' · pitcher_mult=' + (Math.round(topPick.pitcherMult * 1000) / 1000) +
       ' · park_mult=' + (Math.round(topPick.parkMult * 1000) / 1000);
-    mlbPromoHighlightPickRow_(sh, 4, [4, 9, 16], noteText, 4);
+    const cBat = typeof mlbPropCol_ === 'function' ? mlbPropCol_(headers, 'batter') : 4;
+    mlbPromoHighlightPickRow_(sh, 4, [cBat, cCal, 16], noteText, cBat);
   }
-
-  mlbPromoApplyHotColdNameBorders_(sh, 4, rows, 4, 5, null, hotColdFlags);
 }
 
 /**
@@ -256,7 +279,17 @@ function mlbApplyGsPromoFormatting_(sh, rows, headers, slateDate, trioMeta, hotC
   mlbPromoApplyHeaderRow_(sh, ncol);
 
   if (!rows || !rows.length) return;
-  mlbPromoApplyBodyBase_(sh, rows.length, ncol);
+  if (typeof mlbApplyPropCardFormatting_ === 'function') {
+    mlbApplyPropCardFormatting_(sh, rows, headers, {
+      hotColdFlags: hotColdFlags,
+      startRow: 4,
+      headerRow: 3,
+      skipHeaderNotes: true,
+      cols: { player: 'batter', team: 'team', proj: 'λ_GS', batterId: 'batterId' },
+    });
+  } else {
+    mlbPromoApplyBodyBase_(sh, rows.length, ncol);
+  }
 
   sh.getRange(4, 7, rows.length, 2).setNumberFormat('0.0000');
   sh.getRange(4, 9, rows.length, 2).setNumberFormat('0.0000%');
@@ -268,13 +301,14 @@ function mlbApplyGsPromoFormatting_(sh, rows, headers, slateDate, trioMeta, hotC
   mlbPromoApplyProbHeat_(sh, 4, rows.length, 10, rows.map(function (r) { return r[9]; }));
 
   if (trioMeta && trioMeta.rowIdxs && trioMeta.rowIdxs.length) {
-    const anchorTeam = trioMeta.team || '';
+    const teamsLabel = (trioMeta.teams && trioMeta.teams.length)
+      ? trioMeta.teams.join('/')
+      : (trioMeta.team || '');
     const anchorRow = trioMeta.anchorRow || {};
     const noteText =
-      '💎 GS Promo trio · ' + anchorTeam +
-      ' · pick 3 batters from the same team. Top GS candidates on this team' +
-      ' (anchored at #' + (trioMeta.rowIdxs[0] + 1) + ', then next ' +
-      (trioMeta.rowIdxs.length - 1) + ' from same team).' +
+      '💎 GS Promo trio · ' + teamsLabel +
+      ' · pick ANY 3 batters across the slate — these are the top ' +
+      trioMeta.rowIdxs.length + ' by P(GS) (mixed teams OK).' +
       ' Lead bat: ' + (anchorRow.batter || '') + '.';
     trioMeta.rowIdxs.forEach(function (rowIdx, pos) {
       mlbPromoHighlightPickRow_(

@@ -137,3 +137,13 @@ function mlbParkHrLambdaMultForHomeAbbr_(abbr) {
   if (m == null || isNaN(m)) return 1;
   return Math.max(0.80, Math.min(1.25, m));
 }
+
+/** High HR parks → slightly lower K environment (more contact swings). Capped ±8%. */
+function mlbParkHrKContactMultForHomeAbbr_(abbr) {
+  const hr = mlbParkHrLambdaMultForHomeAbbr_(abbr);
+  if (hr >= 1.08) return 0.96;
+  if (hr >= 1.03) return 0.98;
+  if (hr <= 0.88) return 1.03;
+  if (hr <= 0.93) return 1.01;
+  return 1.0;
+}

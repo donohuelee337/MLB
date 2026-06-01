@@ -185,6 +185,27 @@ function mlbPitcherKsFromBoxscore_(payload, pitcherId) {
   return null;
 }
 
+/** @returns {number|null} decimal IP from boxscore pitching line */
+function mlbPitcherIpFromBoxscore_(payload, pitcherId) {
+  const teams = mlbBoxscoreTeams_(payload);
+  if (!teams) return null;
+  const pid = 'ID' + parseInt(pitcherId, 10);
+  const sides = ['away', 'home'];
+  for (let s = 0; s < sides.length; s++) {
+    const t = teams[sides[s]];
+    const pl = t && t.players && t.players[pid];
+    const pit = pl && pl.stats && pl.stats.pitching;
+    if (pit && String(pit.inningsPitched || '').trim() !== '') {
+      const ip =
+        typeof mlbParseInningsString_ === 'function'
+          ? mlbParseInningsString_(pit.inningsPitched)
+          : parseFloat(pit.inningsPitched);
+      return isNaN(ip) ? null : Math.round(ip * 1000) / 1000;
+    }
+  }
+  return null;
+}
+
 /** @returns {number|null} total bases from boxscore batting line */
 function mlbBatterTbFromBoxscore_(payload, batterId) {
   const teams = mlbBoxscoreTeams_(payload);
@@ -199,6 +220,53 @@ function mlbBatterTbFromBoxscore_(payload, batterId) {
     if (bat.totalBases != null) return parseInt(bat.totalBases, 10) || 0;
   }
   return null;
+}
+
+/** @returns {Array|null} innings array from feed/live linescore */
+function mlbLinescoreInningsFromPayload_(payload) {
+  if (!payload) return null;
+  const live = payload.liveData && payload.liveData.linescore;
+  if (live && live.innings && live.innings.length) return live.innings;
+  const teams = mlbBoxscoreTeams_(payload);
+  if (teams && teams.home && teams.home.linescore && teams.home.linescore.innings) {
+    return teams.home.linescore.innings;
+  }
+  return null;
+}
+
+/**
+ * Sum runs through inning `maxInning` (inclusive). Returns null when linescore
+ * is missing or the game did not reach `maxInning`.
+ */
+function mlbLinescoreRunsThroughInning_(payload, maxInning) {
+  const innings = mlbLinescoreInningsFromPayload_(payload);
+  const max = parseInt(maxInning, 10);
+  if (!innings || !innings.length || isNaN(max) || max < 1) return null;
+  let away = 0;
+  let home = 0;
+  let sawMax = false;
+  for (let i = 0; i < innings.length; i++) {
+    const inn = innings[i];
+    const num = parseInt(inn.num, 10);
+    if (isNaN(num) || num > max) continue;
+    if (num === max) sawMax = true;
+    away += parseInt(inn.away && inn.away.runs, 10) || 0;
+    home += parseInt(inn.home && inn.home.runs, 10) || 0;
+  }
+  if (!sawMax) return null;
+  return { away: away, home: home, total: away + home };
+}
+
+/** Combined runs in the 1st inning only (NRFI/YRFI). */
+function mlbFirstInningTotalRunsFromBoxscore_(payload) {
+  const r = mlbLinescoreRunsThroughInning_(payload, 1);
+  return r ? r.total : null;
+}
+
+/** Combined runs innings 1–5 inclusive (F5 totals). */
+function mlbFirstFiveInningsTotalRunsFromBoxscore_(payload) {
+  const r = mlbLinescoreRunsThroughInning_(payload, 5);
+  return r ? r.total : null;
 }
 
 /** @returns {number|null} hits from boxscore batting line */
@@ -414,11 +482,26 @@ function gradeMLBPendingResults_() {
       }
 
       const g = mlbGradePitcherKRow_(line, side, kActual);
+      const ipActual = mlbPitcherIpFromBoxscore_(box, pid);
+      const projIpStored = row[34];
+      const ipErr =
+        ipActual != null && typeof mlbIpError_ === 'function'
+          ? mlbIpError_(ipActual, projIpStored)
+          : '';
       logSh.getRange(4 + i, 14).setValue(gamePk);
       logSh.getRange(4 + i, 15).setValue(pid);
       logSh.getRange(4 + i, 16).setValue(kActual);
       logSh.getRange(4 + i, 17).setValue(g.result);
-      logSh.getRange(4 + i, 18).setValue('statsapi boxscore · ' + g.note);
+      let gradeNote = 'statsapi boxscore · ' + g.note;
+      if (ipActual != null) {
+        gradeNote += ' · IP ' + ipActual;
+        if (ipErr !== '') gradeNote += ' (ΔIP ' + ipErr + ')';
+      }
+      logSh.getRange(4 + i, 18).setValue(gradeNote);
+      if (ipActual != null) {
+        logSh.getRange(4 + i, 37).setValue(ipActual);
+        if (ipErr !== '') logSh.getRange(4 + i, 38).setValue(ipErr);
+      }
       writePnl(g.result);
       graded++;
       continue;

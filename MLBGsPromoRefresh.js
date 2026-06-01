@@ -51,17 +51,44 @@ function mlbGsPromoOrderWeightForSlot_(slot1Based, weights) {
 }
 
 /**
+ * Bases-loaded environment multiplier for a grand slam. A slam needs the bases
+ * loaded, and the single biggest controllable driver of that is how many men
+ * the opposing starter puts on — i.e. his walk rate. High-BB starters load the
+ * bases far more often than the GS/HR league constant assumes; soft-walk aces
+ * the opposite. Uses the SAME shared pitcher cache the HR promo already warmed
+ * (BB/BF), so it's a cache hit, not a new fetch. Neutral 1.0 when unknown.
+ * @returns {number} multiplier in [GS_PROMO_BB_MULT_MIN, GS_PROMO_BB_MULT_MAX]
+ */
+function mlbGsPromoBasesLoadedMult_(spId, season, cfg) {
+  const pid = parseInt(spId, 10);
+  if (!pid || typeof mlbSharedFetchPitcherSeasonPitching_ !== 'function') return 1;
+  const gamma = mlbHrPromoParseConfigNum_(cfg, 'GS_PROMO_BB_STRENGTH', 0.5);
+  if (gamma <= 0) return 1;
+  const league = mlbHrPromoParseConfigNum_(cfg, 'GS_PROMO_LEAGUE_BB_RATE', 0.083);
+  const lo = mlbHrPromoParseConfigNum_(cfg, 'GS_PROMO_BB_MULT_MIN', 0.9);
+  const hi = mlbHrPromoParseConfigNum_(cfg, 'GS_PROMO_BB_MULT_MAX', 1.2);
+  const stat = mlbSharedFetchPitcherSeasonPitching_(pid, season);
+  if (!stat || isNaN(stat.bb) || isNaN(stat.bf) || parseFloat(stat.bf) <= 0) return 1;
+  const rate = parseFloat(stat.bb) / parseFloat(stat.bf);
+  if (!(rate >= 0) || league <= 0) return 1;
+  const excess = (rate - league) / league;
+  return mlbHrPromoClamp_(1 + gamma * excess, lo, hi);
+}
+
+/**
  * @param {Object} hrRow from mlbHrPromoRowForBatter_
  * @param {Object} cfg
+ * @param {number} season
  * @returns {Object} row for GS sheet
  */
-function mlbGsPromoRowFromHrRow_(hrRow, cfg) {
+function mlbGsPromoRowFromHrRow_(hrRow, cfg, season) {
   const k = mlbHrPromoParseConfigNum_(cfg, 'GS_PROMO_LEAGUE_GS_PER_HR', 0.027);
   const orderW = mlbGsPromoOrderWeightForSlot_(
     hrRow.lineupSlot,
     mlbGsPromoOrderWeightsFromConfigJson_(cfg['GS_PROMO_ORDER_WEIGHT_JSON'])
   );
-  const mult = Math.max(0, k) * orderW;
+  const bbMult = mlbGsPromoBasesLoadedMult_(hrRow.opponentSpId, season, cfg);
+  const mult = Math.max(0, k) * orderW * bbMult;
   const lambdaHr = Math.max(0, Number(hrRow.lambdaRaw) || 0);
   const lambdaGs = lambdaHr * mult;
   const pPoisson = mlbHrPromoPoissonPHrGe1_(lambdaGs);
@@ -87,6 +114,7 @@ function mlbGsPromoRowFromHrRow_(hrRow, cfg) {
     sznPa: hrRow.sznPa,
     l14Hr: hrRow.l14Hr,
     gsMult: mult,
+    basesLoadedMult: bbMult,
     hotCold: hrRow.hotCold || '',
   };
 }
@@ -137,6 +165,7 @@ function refreshBatterGsPromoSheet_() {
           matchup: ctx2.matchup,
           teamAbbr: teamAbbr,
           homeAbbr: ctx2.home,
+          firstPitch: ctx2.gameDate,
           batterId: o.batterId,
           nameFallback: o.name,
           lineupSlot: o.order,
@@ -146,7 +175,7 @@ function refreshBatterGsPromoSheet_() {
           teamHitMap: hitMap,
           hotColdMap: hotColdMap,
         });
-        rowsOut.push(mlbGsPromoRowFromHrRow_(hrRow, ctx2.cfg));
+        rowsOut.push(mlbGsPromoRowFromHrRow_(hrRow, ctx2.cfg, ctx2.season));
       }
       return;
     }
@@ -167,6 +196,7 @@ function refreshBatterGsPromoSheet_() {
         matchup: ctx2.matchup,
         teamAbbr: teamAbbr,
         homeAbbr: ctx2.home,
+        firstPitch: ctx2.gameDate,
         batterId: bid,
         nameFallback: h0.name,
         lineupSlot: 0,
@@ -177,13 +207,14 @@ function refreshBatterGsPromoSheet_() {
         teamHitMap: hitMap,
         hotColdMap: hotColdMap,
       });
-      rowsOut.push(mlbGsPromoRowFromHrRow_(hrRow, ctx2.cfg));
+      rowsOut.push(mlbGsPromoRowFromHrRow_(hrRow, ctx2.cfg, ctx2.season));
     }
   }
 
   for (let r = 0; r < schedRows.length; r++) {
     const gamePk = parseInt(schedRows[r][0], 10);
     if (!gamePk) continue;
+    const gameDate = schedRows[r][2];
     const away = String(schedRows[r][3] || '').trim().toUpperCase();
     const home = String(schedRows[r][4] || '').trim().toUpperCase();
     const matchup = String(schedRows[r][5] || '').trim();
@@ -203,6 +234,7 @@ function refreshBatterGsPromoSheet_() {
       matchup: matchup,
       home: home,
       teams: teams,
+      gameDate: gameDate,
     };
 
     processTeam(ctxLoop, away, false, homeSp);
@@ -259,6 +291,7 @@ function refreshBatterGsPromoSheet_() {
   }
   sh.setTabColor('#4a148c');
   sh.getRange(3, 1, 1, headers.length).setValues([headers]);
+  if (typeof mlbApplyHeaderNotes_ === 'function') mlbApplyHeaderNotes_(sh, 3, headers);
 
   var grid = [];
   var hotColdFlags = [];
@@ -297,17 +330,19 @@ function refreshBatterGsPromoSheet_() {
       ss.setNamedRange(MLB_BATTER_GS_PROMO_NAMED_RANGE, sh.getRange(4, 1, grid.length, headers.length));
     } catch (e) {}
 
-    const anchorTeam = String(rowsOut[0].team || '').trim().toUpperCase();
+    // FanDuel GS promo accepts ANY three batters across the slate (not one team),
+    // so the optimal trio is simply the top 3 by P(GS). rowsOut is already sorted
+    // by pPoisson desc. Mixed-team trios are expected and correct.
     const trioRowIdxs = [];
-    for (let i = 0; i < rowsOut.length; i++) {
-      if (String(rowsOut[i].team || '').trim().toUpperCase() === anchorTeam) {
-        trioRowIdxs.push(i);
-        if (trioRowIdxs.length === 3) break;
-      }
+    for (let i = 0; i < rowsOut.length && trioRowIdxs.length < 3; i++) {
+      trioRowIdxs.push(i);
     }
     if (trioRowIdxs.length > 0) {
+      const trioTeams = trioRowIdxs.map(function (i) { return String(rowsOut[i].team || '').trim().toUpperCase(); });
+      const allSame = trioTeams.every(function (t) { return t === trioTeams[0]; });
       trioMeta = {
-        team: anchorTeam,
+        team: allSame ? trioTeams[0] : 'multi',
+        teams: trioTeams,
         rowIdxs: trioRowIdxs,
         anchorRow: rowsOut[trioRowIdxs[0]],
       };

@@ -124,28 +124,19 @@ function refreshPitcherKSimEngine_() {
     const evO = pOver !== '' && fdOver !== '' ? mlbEvPerDollarRisked_(pOver, fdOver) : '';
     const evU = pUnder !== '' && fdUnder !== '' ? mlbEvPerDollarRisked_(pUnder, fdUnder) : '';
 
-    let bestSide = '';
-    let bestEv = '';
-    if (evO !== '' && evU !== '') {
-      if (evO >= evU && evO > 0) {
-        bestSide = 'Over';
-        bestEv = evO;
-      } else if (evU > evO && evU > 0) {
-        bestSide = 'Under';
-        bestEv = evU;
-      } else if (evO >= evU) {
-        bestSide = 'Over';
-        bestEv = evO;
-      } else {
-        bestSide = 'Under';
-        bestEv = evU;
-      }
-    } else if (evO !== '') {
-      bestSide = 'Over';
-      bestEv = evO;
-    } else if (evU !== '') {
-      bestSide = 'Under';
-      bestEv = evU;
+    const pick = (typeof mlbChooseSideOutcomeFirst_ === 'function')
+      ? mlbChooseSideOutcomeFirst_('Over', pOver, evO, 'Under', pUnder, evU, cfg)
+      : { side: '', ev: NaN };
+    const board = typeof mlbKPickOnBoard_ === 'function'
+      ? mlbKPickOnBoard_(lamAnch, lineNum)
+      : { onBoard: true };
+    let pickSide = pick.side;
+    let pickEv = isNaN(pick.ev) ? '' : Math.round(pick.ev * 1000) / 1000;
+    let flags = String(r[18] || '');
+    if (hasModel && !board.onBoard) {
+      pickSide = '';
+      pickEv = '';
+      flags = flags ? flags + '; agree_fd' : 'agree_fd';
     }
 
     out.push([
@@ -165,9 +156,9 @@ function refreshPitcherKSimEngine_() {
       imU,
       evO,
       evU,
-      bestSide,
-      bestEv,
-      r[18],
+      pickSide,
+      pickEv,
+      flags,
       r[19],
       r[20],
       r[21],
@@ -192,9 +183,21 @@ function refreshPitcherKSimEngine_() {
     ]);
   });
 
+  const pickMode = typeof mlbPickBy_ === 'function' ? mlbPickBy_(cfg) : 'outcome';
   out.sort(function (a, b) {
-    const be = parseFloat(b[17], 10);
-    const ae = parseFloat(a[17], 10);
+    let be;
+    let ae;
+    if (pickMode === 'ev') {
+      be = parseFloat(b[17], 10);
+      ae = parseFloat(a[17], 10);
+    } else {
+      be = String(b[16] || '') === 'Over' ? parseFloat(b[10], 10)
+        : String(b[16] || '') === 'Under' ? parseFloat(b[11], 10)
+        : -1e9;
+      ae = String(a[16] || '') === 'Over' ? parseFloat(a[10], 10)
+        : String(a[16] || '') === 'Under' ? parseFloat(a[11], 10)
+        : -1e9;
+    }
     if (isNaN(be) && isNaN(ae)) return 0;
     if (isNaN(be)) return -1;
     if (isNaN(ae)) return 1;
@@ -226,7 +229,7 @@ function refreshPitcherKSimEngine_() {
   sh.getRange(1, 1, 1, NEED_COLS_K_SIM)
     .merge()
     .setValue(
-      '⚡ Sim_Pitcher_K — anchored Poisson (ANCHOR_WEIGHT_K); EV is authoritative for 🃏 K rows. Cols 23..30 = 🧪 k.v2 shadow · Cols 31..38 = 🧪 k.v3.bf shadow (audit only).'
+      '⚡ Sim_Pitcher_K — anchored Poisson (ANCHOR_WEIGHT_K). pick = side we prefer (PICK_BY=outcome). Cols 23..30 = 🧪 k.v2 · 31..38 = 🧪 k.v3.bf.'
     )
     .setFontWeight('bold')
     .setBackground('#0d47a1')
@@ -252,8 +255,8 @@ function refreshPitcherKSimEngine_() {
     'implied_under',
     'ev_over_$1',
     'ev_under_$1',
-    'best_side',
-    'best_ev_$1',
+    'pick',
+    'pick_ev_$1',
     'flags',
     'pitcher_id',
     'hp_umpire',
@@ -283,6 +286,11 @@ function refreshPitcherKSimEngine_() {
 
   if (out.length) {
     sh.getRange(4, 1, out.length, headers.length).setValues(out);
+    for (let i = 0; i < out.length; i++) {
+      if (String(out[i][18] || '').indexOf('agree_fd') !== -1) {
+        sh.getRange(4 + i, 1, 1, headers.length).setBackground('#f0f0f0');
+      }
+    }
     try {
       ss.setNamedRange('MLB_PITCHER_K_SIM', sh.getRange(4, 1, out.length, headers.length));
     } catch (e) {}

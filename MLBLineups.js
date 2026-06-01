@@ -135,3 +135,134 @@ function mlbFetchAndCacheLineups_(ss, cfg) {
 
   Logger.log('mlbFetchAndCacheLineups_: ' + confirmedGames + ' confirmed games cached');
 }
+
+/**
+ * Confirmed lineup batter ids for one side (`away` | `home`).
+ * @returns {number[]}
+ */
+function mlbLineupBatterIdsForSide_(gamePk, side) {
+  if (__mlbLineupsCache === null) {
+    return [];
+  }
+  const wantSide = String(side || '').trim().toLowerCase();
+  if (wantSide !== 'away' && wantSide !== 'home') {
+    return [];
+  }
+  const gKey = String(parseInt(gamePk, 10) || 0);
+  const gameMap = __mlbLineupsCache[gKey];
+  if (!gameMap) {
+    return [];
+  }
+  const out = [];
+  for (const pid in gameMap) {
+    if (!Object.prototype.hasOwnProperty.call(gameMap, pid)) {
+      continue;
+    }
+    const entry = gameMap[pid];
+    const s =
+      entry && typeof entry === 'object'
+        ? String(entry.side || '').trim().toLowerCase()
+        : '';
+    if (s === wantSide) {
+      const id = parseInt(pid, 10);
+      if (id > 0) {
+        out.push(id);
+      }
+    }
+  }
+  return out;
+}
+
+function mlbKPaFromHittingStat_(st) {
+  const pa = parseInt((st && st.plateAppearances) || 0, 10) || 0;
+  const k = parseInt((st && st.strikeOuts) || 0, 10) || 0;
+  if (pa <= 0) {
+    return NaN;
+  }
+  return Math.round((k / pa) * 10000) / 10000;
+}
+
+/**
+ * Average opponent lineup SO/PA when lineups are confirmed; else Savant team
+ * whiff CSV; else NaN. Uses vs-hand split when pitcherThrows is L or R.
+ *
+ * @param {number|string} gamePk
+ * @param {string} oppAbbr batting team abbr (team facing tonight's SP)
+ * @param {string} [pitcherThrows] L | R
+ * @returns {number}
+ */
+function mlbLineupWhiffAvgForGamePk_(gamePk, oppAbbr, pitcherThrows) {
+  const cfg = typeof getConfig === 'function' ? getConfig() || {} : {};
+  const minPa = parseInt(
+    String(cfg['K_LINEUP_WHIFF_MIN_PA'] != null ? cfg['K_LINEUP_WHIFF_MIN_PA'] : '20'),
+    10
+  );
+  const minPaGate = minPa > 0 ? minPa : 20;
+  const season = parseInt(
+    String(cfg['MLB_SEASON'] != null ? cfg['MLB_SEASON'] : new Date().getFullYear()),
+    10
+  );
+
+  let side = '';
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const opp = typeof mlbCanonicalTeamAbbr_ === 'function' ? mlbCanonicalTeamAbbr_(oppAbbr) : String(oppAbbr || '').trim().toUpperCase();
+    const home =
+      typeof mlbScheduleHomeAbbrForGamePk_ === 'function'
+        ? mlbCanonicalTeamAbbr_(mlbScheduleHomeAbbrForGamePk_(ss, gamePk))
+        : '';
+    const away =
+      typeof mlbScheduleAwayAbbrForGamePk_ === 'function'
+        ? mlbCanonicalTeamAbbr_(mlbScheduleAwayAbbrForGamePk_(ss, gamePk))
+        : '';
+    if (opp && opp === home) {
+      side = 'home';
+    } else if (opp && opp === away) {
+      side = 'away';
+    }
+  } catch (e) {
+    Logger.log('mlbLineupWhiffAvgForGamePk_ schedule: ' + e.message);
+  }
+
+  const tw = String(pitcherThrows || '').trim().toUpperCase();
+  const ids =
+    side && typeof mlbLineupBatterIdsForSide_ === 'function'
+      ? mlbLineupBatterIdsForSide_(gamePk, side)
+      : [];
+
+  if (ids.length && typeof mlbSharedFetchBatterHittingSplitsAndSeason_ === 'function') {
+    let sum = 0;
+    let n = 0;
+    ids.forEach(function (bid) {
+      const data = mlbSharedFetchBatterHittingSplitsAndSeason_(bid, season);
+      let st = (data && data.szn) || {};
+      if (tw === 'L' && data && data.vl && data.vl.plateAppearances) {
+        st = data.vl;
+      } else if (tw === 'R' && data && data.vr && data.vr.plateAppearances) {
+        st = data.vr;
+      }
+      const pa = parseInt(st.plateAppearances, 10) || 0;
+      if (pa < minPaGate) {
+        return;
+      }
+      const kpa = mlbKPaFromHittingStat_(st);
+      if (!isNaN(kpa)) {
+        sum += kpa;
+        n++;
+      }
+    });
+    if (n >= 5) {
+      return Math.round((sum / n) * 10000) / 10000;
+    }
+  }
+
+  if (typeof mlbGetSavantTeamWhiffKPa_ === 'function' && typeof mlbTeamIdFromAbbr_ === 'function') {
+    const tid = mlbTeamIdFromAbbr_(oppAbbr);
+    const teamK = mlbGetSavantTeamWhiffKPa_(tid);
+    if (teamK != null && !isNaN(teamK)) {
+      return teamK;
+    }
+  }
+
+  return NaN;
+}

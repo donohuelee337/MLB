@@ -92,33 +92,17 @@ function refreshBatterTbBetCard() {
     const evO = pOver !== '' && fdOver !== '' ? mlbEvPerDollarRisked_(pOver, fdOver) : '';
     const evU = pUnder !== '' && fdUnder !== '' ? mlbEvPerDollarRisked_(pUnder, fdUnder) : '';
 
-    let bestSide = '';
-    let bestEv = '';
-    if (evO !== '' && evU !== '') {
-      if (evO >= evU && evO > 0) {
-        bestSide = 'Over';
-        bestEv = evO;
-      } else if (evU > evO && evU > 0) {
-        bestSide = 'Under';
-        bestEv = evU;
-      } else if (evO >= evU) {
-        bestSide = 'Over';
-        bestEv = evO;
-      } else {
-        bestSide = 'Under';
-        bestEv = evU;
-      }
-    } else if (evO !== '') {
-      bestSide = 'Over';
-      bestEv = evO;
-    } else if (evU !== '') {
-      bestSide = 'Under';
-      bestEv = evU;
-    }
+    // Outcome-first: back the more-likely side (higher win prob), not the
+    // juicier price. EV stays on the card for reference.
+    const sel = mlbChooseSideOutcomeFirst_('Over', pOver, evO, 'Under', pUnder, evU, cfg);
+    const bestSide = sel.side;
+    const bestEv = sel.side ? (isNaN(sel.ev) ? '' : sel.ev) : '';
+    const bestRank = sel.rank;
 
     const flags = mlbFlagsBatterTbCard_(inj, notes, hasModel);
 
     rows.push({
+      sortKey: bestRank,
       data: [
         gamePk,
         matchup,
@@ -145,9 +129,11 @@ function refreshBatterTbBetCard() {
     });
   });
 
+  // Rank by win probability (outcome mode) or EV (legacy) — most-likely
+  // winners on top, not juiciest prices.
   rows.sort(function (a, b) {
-    const be = parseFloat(b.data[15], 10);
-    const ae = parseFloat(a.data[15], 10);
+    const be = typeof b.sortKey === 'number' && !isNaN(b.sortKey) ? b.sortKey : -1e9;
+    const ae = typeof a.sortKey === 'number' && !isNaN(a.sortKey) ? a.sortKey : -1e9;
     if (isNaN(be) && isNaN(ae)) return 0;
     if (isNaN(be)) return -1;
     if (isNaN(ae)) return 1;
@@ -208,6 +194,7 @@ function refreshBatterTbBetCard() {
     .setFontWeight('bold')
     .setBackground('#fb8c00')
     .setFontColor('#ffffff');
+  if (typeof mlbApplyHeaderNotes_ === 'function') mlbApplyHeaderNotes_(sh, 3, headers);
   sh.setFrozenRows(3);
 
   if (out.length) {

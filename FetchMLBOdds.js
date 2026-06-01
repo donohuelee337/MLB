@@ -12,13 +12,22 @@ const MLB_ODDS_CONFIG = {
   bookmaker: 'fanduel',
   tabName: '✅ FanDuel_MLB_Odds',
   tabColor: '#0d47a1',
-  // Only markets consumed downstream (H, K). TB retired 2026-05-21 — skip batter_total_bases
-  // to save Odds API quota. FanDuel posts batter props on main and/or _alternate keys.
+  // Only markets consumed downstream (H, K, Outs, ER, NRFI, ML for Early Win promo). TB retired 2026-05-21
+  // — skip batter_total_bases to save Odds API quota. FanDuel posts batter props on main
+  // and/or _alternate keys. h2h kept in its own batch so a moneyline fail can't suppress
+  // the props batch and vice-versa (existing per-market retry already handles intra-batch).
   marketBatches: [
+    ['h2h'],
+    ['totals_1st_1_innings'],
+    ['h2h_1st_5_innings', 'spreads_1st_5_innings', 'totals_1st_5_innings'],
     [
       'batter_hits',
       'batter_hits_alternate',
       'pitcher_strikeouts',
+      'pitcher_outs',
+      'pitcher_outs_alternate',
+      'pitcher_earned_runs',
+      'pitcher_earned_runs_alternate',
     ],
   ],
 };
@@ -32,7 +41,7 @@ function fetchMLBFanDuelOdds() {
   const slateDate = getSlateDateString_(cfg);
   const eventIds = getMLEventIdsForDate_(apiKey, slateDate);
   if (!eventIds || eventIds.length === 0) {
-    safeAlert_('No MLB events', 'No games for ' + slateDate + ' from The Odds API.');
+    ss.toast('No games for ' + slateDate + ' from The Odds API.', '⚠️ No MLB events', 8);
     return;
   }
 
@@ -59,7 +68,7 @@ function fetchMLBFanDuelOdds() {
   });
 
   if (allRows.length === 0) {
-    safeAlert_('No odds rows', 'FanDuel may not have posted MLB markets yet for this slate.');
+    ss.toast('FanDuel may not have posted MLB markets yet for this slate.', '⚠️ No odds rows', 8);
     return;
   }
 
@@ -75,15 +84,20 @@ function fetchMLBFanDuelOdds() {
   const requiredFamilies = [
     { label: 'batter_hits',        keys: ['batter_hits', 'batter_hits_alternate'] },
     { label: 'pitcher_strikeouts', keys: ['pitcher_strikeouts'] },
+    { label: 'pitcher_outs',       keys: ['pitcher_outs', 'pitcher_outs_alternate'] },
+    { label: 'pitcher_earned_runs', keys: ['pitcher_earned_runs', 'pitcher_earned_runs_alternate'] },
+    { label: 'totals_1st_1_innings', keys: ['totals_1st_1_innings'] },
+    { label: 'totals_1st_5_innings', keys: ['totals_1st_5_innings'] },
   ];
   const missing = requiredFamilies.filter(function (m) {
     return m.keys.every(function (k) { return !counts[k]; });
   }).map(function (m) { return m.label; });
   if (missing.length) {
-    safeAlert_(
-      'MLB Odds — markets missing',
+    ss.toast(
       'FanDuel returned 0 rows for: ' + missing.join(', ') +
-      '. Downstream queues will be empty. See View → Executions in Apps Script for HTTP details.'
+      '. Those queues will be empty until the books post (common early AM).',
+      '⚠️ MLB Odds — markets missing',
+      10
     );
   }
 

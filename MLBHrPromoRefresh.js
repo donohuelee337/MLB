@@ -69,6 +69,30 @@ function mlbHrPromoFetchPitcherSeasonHr9_(pitcherId, season, minIp) {
   return (9 * stat.hr) / stat.ip;
 }
 
+/**
+ * Groundball-tendency multiplier for the batter's HR λ. HR/9 alone is noisy and
+ * small-sample; a starter's groundout/airout ratio is a more stable batted-ball
+ * peripheral. High GO/AO (sinkerballer) → fewer fly balls → suppress HR; low
+ * GO/AO (fly-ball pitcher) → boost. Reads the shared pitcher cache (GO/AO), so
+ * it's a cache hit alongside the HR/9 fetch. Neutral 1.0 when unknown/off.
+ * @returns {number} multiplier in [HR_PROMO_GB_MULT_MIN, HR_PROMO_GB_MULT_MAX]
+ */
+function mlbHrPromoGroundballMult_(spId, season, cfg) {
+  const pid = parseInt(spId, 10);
+  if (!pid) return 1;
+  const beta = mlbHrPromoParseConfigNum_(cfg, 'HR_PROMO_GB_STRENGTH', 0.3);
+  if (beta <= 0) return 1;
+  const leagueGoAo = mlbHrPromoParseConfigNum_(cfg, 'LEAGUE_PITCHING_GO_AO', 1.05);
+  const lo = mlbHrPromoParseConfigNum_(cfg, 'HR_PROMO_GB_MULT_MIN', 0.85);
+  const hi = mlbHrPromoParseConfigNum_(cfg, 'HR_PROMO_GB_MULT_MAX', 1.15);
+  const stat = mlbSharedFetchPitcherSeasonPitching_(pid, season);
+  if (!stat || isNaN(stat.go) || isNaN(stat.ao) || parseFloat(stat.ao) <= 0) return 1;
+  const goAo = parseFloat(stat.go) / parseFloat(stat.ao);
+  if (!(goAo > 0) || leagueGoAo <= 0) return 1;
+  const excess = (goAo - leagueGoAo) / leagueGoAo;
+  return mlbHrPromoClamp_(1 - beta * excess, lo, hi);
+}
+
 function mlbHrPromoL14HrFromSplits_(playerId, season) {
   const splits = mlbStatsApiGetHittingGameSplits_(playerId, season);
   const n = splits.length;
@@ -122,6 +146,7 @@ function mlbHrPromoRowForBatter_(ctx) {
   const hrPerPaEff = mlbHrPromoBlendHrPerPa_(shrunk, recentHrPerPa, wL14);
 
   let pitcherMult = 1;
+  let gbMult = 1;
   let conf = ctx.baseConfidence || 'high';
   let reason = ctx.baseReason || '';
   const spId = parseInt(ctx.opponentSpId, 10);
@@ -136,7 +161,10 @@ function mlbHrPromoRowForBatter_(ctx) {
     } else {
       pitcherMult = mlbHrPromoPitcherMultFromHrPer9_(hr9, lgHr9, pmLo, pmHi);
     }
+    gbMult = mlbHrPromoGroundballMult_(spId, season, cfg);
   }
+  // Combined pitcher HR environment = HR/9 tendency × groundball (batted-ball) tendency.
+  const pitcherEnvMult = pitcherMult * gbMult;
 
   if (sznPa > 0 && sznPa < shrinkMin && conf === 'high') {
     conf = 'medium';
@@ -144,7 +172,16 @@ function mlbHrPromoRowForBatter_(ctx) {
   }
 
   const parkMult = mlbParkHrLambdaMultForHomeAbbr_(ctx.homeAbbr);
-  const lambdaRaw = hrPerPaEff * exPa * parkMult * pitcherMult;
+  let weatherMult = 1;
+  let weatherDetail = '';
+  if (typeof mlbWeatherHrMultForGame_ === 'function') {
+    const wx = mlbWeatherHrMultForGame_(ctx.homeAbbr, ctx.firstPitch, cfg);
+    if (wx) {
+      weatherMult = wx.mult;
+      weatherDetail = wx.detail || '';
+    }
+  }
+  const lambdaRaw = hrPerPaEff * exPa * parkMult * pitcherEnvMult * weatherMult;
   const pPoisson = mlbHrPromoPoissonPHrGe1_(lambdaRaw);
 
   const props = PropertiesService.getScriptProperties();
@@ -177,8 +214,9 @@ function mlbHrPromoRowForBatter_(ctx) {
     lineupSlot: slot,
     opponentSpId: spId || '',
     parkMult: parkMult,
-    pitcherMult: pitcherMult,
-    weatherMult: 1,
+    pitcherMult: pitcherEnvMult,
+    weatherMult: weatherMult,
+    weatherDetail: weatherDetail,
     sznHr: sznHr,
     sznPa: sznPa,
     l14Hr: l14.l14hr,
@@ -235,6 +273,7 @@ function refreshBatterHrPromoSheet_() {
             matchup: ctx2.matchup,
             teamAbbr: teamAbbr,
             homeAbbr: ctx2.home,
+            firstPitch: ctx2.gameDate,
             batterId: o.batterId,
             nameFallback: o.name,
             lineupSlot: o.order,
@@ -266,6 +305,7 @@ function refreshBatterHrPromoSheet_() {
           matchup: ctx2.matchup,
           teamAbbr: teamAbbr,
           homeAbbr: ctx2.home,
+          firstPitch: ctx2.gameDate,
           batterId: bid,
           nameFallback: h0.name,
           lineupSlot: 0,
@@ -283,6 +323,7 @@ function refreshBatterHrPromoSheet_() {
   for (let r = 0; r < schedRows.length; r++) {
     const gamePk = parseInt(schedRows[r][0], 10);
     if (!gamePk) continue;
+    const gameDate = schedRows[r][2];
     const away = String(schedRows[r][3] || '').trim().toUpperCase();
     const home = String(schedRows[r][4] || '').trim().toUpperCase();
     const matchup = String(schedRows[r][5] || '').trim();
@@ -302,6 +343,7 @@ function refreshBatterHrPromoSheet_() {
       matchup: matchup,
       home: home,
       teams: teams,
+      gameDate: gameDate,
     };
 
     processTeam(ctxLoop, away, false, homeSp);
@@ -356,6 +398,7 @@ function refreshBatterHrPromoSheet_() {
   }
   sh.setTabColor('#e65100');
   sh.getRange(3, 1, 1, headers.length).setValues([headers]);
+  if (typeof mlbApplyHeaderNotes_ === 'function') mlbApplyHeaderNotes_(sh, 3, headers);
 
   var topPick = null;
   var grid = [];

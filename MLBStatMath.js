@@ -36,6 +36,32 @@ function mlbAmericanImplied_(odds) {
   return Math.round((Math.abs(o) / (Math.abs(o) + 100)) * 1000) / 1000;
 }
 
+/**
+ * Two-way no-vig (fair) probabilities. Takes the two single-side implied
+ * probabilities (which each include the book's hold) and normalizes them to
+ * sum to 1, removing the vig proportionally (multiplicative method).
+ *
+ * The raw single-side implied is biased HIGH by ~half the hold, so comparing a
+ * model probability to it understates the real edge. fairSide is the honest
+ * "what the market thinks" number to measure edge against.
+ *
+ * @param {number|string} impliedSide  implied prob of the side we're pricing
+ * @param {number|string} impliedOpp   implied prob of the opposite side
+ * @returns {{fairSide:(number|''), fairOpp:(number|''), hold:(number|'')}}
+ */
+function mlbDevigTwoWay_(impliedSide, impliedOpp) {
+  const a = parseFloat(impliedSide, 10);
+  const b = parseFloat(impliedOpp, 10);
+  if (isNaN(a) || isNaN(b) || a <= 0 || b <= 0) return { fairSide: '', fairOpp: '', hold: '' };
+  const s = a + b;
+  if (s <= 0) return { fairSide: '', fairOpp: '', hold: '' };
+  return {
+    fairSide: Math.round((a / s) * 1000) / 1000,
+    fairOpp: Math.round((b / s) * 1000) / 1000,
+    hold: Math.round((s - 1) * 1000) / 1000,
+  };
+}
+
 /** Expected profit per $1 risked at this American price (decimal odds payout style). */
 function mlbEvPerDollarRisked_(p, american) {
   const o = parseFloat(american, 10);
@@ -44,6 +70,121 @@ function mlbEvPerDollarRisked_(p, american) {
   if (o > 0) winUnits = o / 100;
   else winUnits = 100 / Math.abs(o);
   return Math.round((p * winUnits - (1 - p)) * 1000) / 1000;
+}
+
+/**
+ * Global betting philosophy. 'outcome' (default) = back the side we think
+ * actually happens (higher model win probability) and rank by confidence —
+ * bankroll is finite, so being correct beats chasing theoretical value.
+ * 'ev' = legacy: back the higher positive-EV side and rank by EV.
+ */
+function mlbPickBy_(cfg) {
+  const m = String(cfg && cfg['PICK_BY'] != null ? cfg['PICK_BY'] : 'outcome')
+    .trim()
+    .toLowerCase();
+  return m === 'ev' ? 'ev' : 'outcome';
+}
+
+/**
+ * Choose which of two sides (A vs B) to back for any market.
+ * In 'outcome' mode → the side with the higher model probability (EV kept for
+ * reference). In 'ev' mode → the higher EV side (legacy). Empty/'' inputs are
+ * treated as missing.
+ * @param {string} labelA  e.g. 'Over' | 'NRFI'
+ * @param {number|string} pA  model win prob for side A
+ * @param {number|string} evA EV/$1 for side A
+ * @param {string} labelB  e.g. 'Under' | 'YRFI'
+ * @param {number|string} pB
+ * @param {number|string} evB
+ * @param {Object} cfg
+ * @returns {{side:string, p:number, ev:number, rank:number}} rank = sort key
+ *   (win prob in outcome mode, EV in ev mode); side '' when nothing to pick.
+ */
+function mlbChooseSideOutcomeFirst_(labelA, pA, evA, labelB, pB, evB, cfg) {
+  const paN = pA === '' || pA == null ? NaN : parseFloat(pA);
+  const pbN = pB === '' || pB == null ? NaN : parseFloat(pB);
+  const eaN = evA === '' || evA == null ? NaN : parseFloat(evA);
+  const ebN = evB === '' || evB == null ? NaN : parseFloat(evB);
+  const mode = mlbPickBy_(cfg);
+
+  let side = '';
+  let p = NaN;
+  let ev = NaN;
+  if (mode === 'ev') {
+    if (!isNaN(eaN) && !isNaN(ebN)) {
+      if (eaN >= ebN) { side = labelA; p = paN; ev = eaN; }
+      else { side = labelB; p = pbN; ev = ebN; }
+    } else if (!isNaN(eaN)) { side = labelA; p = paN; ev = eaN; }
+    else if (!isNaN(ebN)) { side = labelB; p = pbN; ev = ebN; }
+  } else {
+    if (!isNaN(paN) || !isNaN(pbN)) {
+      if (isNaN(pbN) || (!isNaN(paN) && paN >= pbN)) { side = labelA; p = paN; ev = eaN; }
+      else { side = labelB; p = pbN; ev = ebN; }
+    }
+  }
+  const rank = mode === 'ev' ? (isNaN(ev) ? -1e9 : ev) : (isNaN(p) ? -1e9 : p);
+  return { side: side, p: p, ev: ev, rank: rank };
+}
+
+/** Outcome-mode confidence floor for snapshotting a pick (global default). */
+function mlbPickMinConfidence_(cfg) {
+  const x = parseFloat(String(cfg && cfg['PICK_MIN_CONFIDENCE'] != null ? cfg['PICK_MIN_CONFIDENCE'] : '0.55').trim());
+  return isNaN(x) ? 0.55 : x;
+}
+
+/** Outcome-mode EV price guardrail (negative-tolerant) for snapshotting. */
+function mlbPickMinEvGuard_(cfg) {
+  const x = parseFloat(String(cfg && cfg['PICK_MIN_EV'] != null ? cfg['PICK_MIN_EV'] : '-0.05').trim());
+  return isNaN(x) ? -0.05 : x;
+}
+
+/** Half-strikeout band: |proj_K − line| below this → we agree with FD (no pick). */
+const MLB_K_AGREE_FD_BAND = 0.5;
+
+/** Same half-point bracket for batter H/TB props (0.5 / 1.5 / 2.5 lines). */
+const MLB_H_AGREE_FD_BAND = 0.5;
+
+/** Signed projection minus FanDuel K line (same units as edge_vs_line). */
+function mlbKProjLineEdge_(projK, line) {
+  const p = parseFloat(projK, 10);
+  const l = parseFloat(line, 10);
+  if (isNaN(p) || isNaN(l)) return NaN;
+  return Math.round((p - l) * 100) / 100;
+}
+
+/**
+ * K prop pick eligibility from projection vs line. We only take a side when
+ * proj is at least half a K away from the line (the next half-point bracket).
+ * Inside that band we treat it as agreement with FanDuel — off the board.
+ * @returns {{onBoard:boolean, lean:string, edge:number|string}}
+ */
+function mlbKPickOnBoard_(projK, line, minEdge) {
+  const band = minEdge != null && minEdge > 0 ? minEdge : MLB_K_AGREE_FD_BAND;
+  const edge = mlbKProjLineEdge_(projK, line);
+  if (isNaN(edge)) return { onBoard: false, lean: '', edge: '' };
+  if (Math.abs(edge) < band) return { onBoard: false, lean: '', edge: edge };
+  return {
+    onBoard: true,
+    lean: edge >= band ? 'Over' : 'Under',
+    edge: edge,
+  };
+}
+
+/** Batter hits (and similar half-point props) — same bracket as K. */
+function mlbHitsPickOnBoard_(projH, line, minEdge) {
+  const band = minEdge != null && minEdge > 0 ? minEdge : MLB_H_AGREE_FD_BAND;
+  return mlbKPickOnBoard_(projH, line, band);
+}
+
+/** Light gray background on rows where we have no K pick (agree_fd band). */
+function mlbApplyOffBoardRowShading_(sh, startRow, offBoardFlags, ncol, bgColor) {
+  if (!sh || !offBoardFlags || !offBoardFlags.length) return;
+  const nc = ncol || sh.getLastColumn();
+  const bg = bgColor || '#f0f0f0';
+  for (let i = 0; i < offBoardFlags.length; i++) {
+    if (!offBoardFlags[i]) continue;
+    sh.getRange(startRow + i, 1, 1, nc).setBackground(bg);
+  }
 }
 
 function mlbBinomCoeff_(n, k) {
