@@ -110,24 +110,39 @@ function mlbEarlyWinMaxBet_(cfg) {
 }
 
 /**
- * Reads ✅ FanDuel_MLB_Odds and returns a map of game label → { away: {team,price}, home: {team,price} }
- * for h2h rows. Team names are full ("Toronto Blue Jays") matching outcome.name from the-odds-api.
+ * Reads ✅ FanDuel_MLB_Odds h2h rows. Keyed by normalized game label (same as K/NRFI queues).
  */
 function mlbEarlyWinReadH2HFromFD_(ss) {
   const sh = ss.getSheetByName(MLB_ODDS_CONFIG.tabName);
   if (!sh || sh.getLastRow() < 4) return {};
-  const rows = sh.getRange(4, 1, sh.getLastRow() - 3, 8).getValues();
-  const byGame = {};
+  const nRows = Math.max(0, sh.getLastRow() - 3);
+  if (!nRows) return {};
+  const rows = sh.getRange(4, 1, nRows, 8).getValues();
+  const byGameNorm = {};
   rows.forEach(function (r) {
     if (String(r[2] || '').trim() !== 'h2h') return;
     const gameLabel = String(r[1] || '').trim();
     const teamName = String(r[3] || r[0] || '').trim();
     const price = r[5];
     if (!gameLabel || !teamName) return;
-    if (!byGame[gameLabel]) byGame[gameLabel] = { teams: [] };
-    byGame[gameLabel].teams.push({ name: teamName, price: price });
+    const gNorm = mlbNormalizeGameLabel_(gameLabel);
+    if (!byGameNorm[gNorm]) byGameNorm[gNorm] = { teams: [], label: gameLabel };
+    byGameNorm[gNorm].teams.push({ name: teamName, price: price });
   });
-  return byGame;
+  return byGameNorm;
+}
+
+/** Resolve h2h prices for a schedule row (tries label variants like other queues). */
+function mlbEarlyWinLookupH2H_(h2hByGameNorm, matchup, awayAbbr, homeAbbr) {
+  if (!h2hByGameNorm) return null;
+  const keys =
+    typeof mlbCandidateGameKeys_ === 'function'
+      ? mlbCandidateGameKeys_(matchup, awayAbbr, homeAbbr)
+      : [mlbNormalizeGameLabel_(matchup)];
+  for (let i = 0; i < keys.length; i++) {
+    if (h2hByGameNorm[keys[i]]) return h2hByGameNorm[keys[i]];
+  }
+  return null;
 }
 
 function refreshMLBEarlyWinCard() {
@@ -145,10 +160,11 @@ function refreshMLBEarlyWinCard() {
     return;
   }
   const sched = schedSh.getRange(4, 1, schedSh.getLastRow() - 3, 14).getValues();
-  const h2hByGame = mlbEarlyWinReadH2HFromFD_(ss);
+  const h2hByGameNorm = mlbEarlyWinReadH2HFromFD_(ss);
   const now = new Date();
 
   const out = [];
+  let eligibleGames = 0;
   sched.forEach(function (r) {
     const gamePk = r[0];
     const gameDateRaw = r[2];
@@ -163,11 +179,12 @@ function refreshMLBEarlyWinCard() {
     const startEt = Utilities.formatDate(dt, 'America/New_York', 'HH:mm');
     const startEtMin = parseInt(startEt.slice(0, 2), 10) * 60 + parseInt(startEt.slice(3), 10);
     if (startEtMin > cutoffMin) return;
+    eligibleGames++;
 
     const flagsBase = [];
     if (dt.getTime() < now.getTime()) flagsBase.push('already_started');
 
-    const h2h = h2hByGame[matchup];
+    const h2h = mlbEarlyWinLookupH2H_(h2hByGameNorm, matchup, awayAbbr, homeAbbr);
     let awayPrice = '';
     let homePrice = '';
     if (h2h && h2h.teams && h2h.teams.length) {
@@ -282,9 +299,18 @@ function refreshMLBEarlyWinCard() {
     ];
   });
 
-  mlbEarlyWinWriteTab_(ss, slate, cutoffMin, leadBoost, maxBet, rows, '');
+  let tabNote = '';
+  if (!eligibleGames) {
+    tabNote = 'no games at or before cutoff ET — raise EARLY_WIN_CUTOFF_ET or check slate';
+  } else if (!Object.keys(h2hByGameNorm).length) {
+    tabNote = 'no h2h rows on FanDuel odds tab — run Fetch MLB Odds';
+  } else if (!out.length) {
+    tabNote = 'no team-rows built — check schedule + odds join';
+  }
+
+  mlbEarlyWinWriteTab_(ss, slate, cutoffMin, leadBoost, maxBet, rows, tabNote);
   ss.toast(
-    out.length + ' team-rows · ' + (bestIdx >= 0 ? 'pick=' + out[bestIdx].team + ' ' + out[bestIdx].matchup : 'no +EV pick'),
+    out.length + ' team-rows · ' + (bestIdx >= 0 ? 'pick=' + out[bestIdx].team + ' ' + out[bestIdx].matchup : 'no pick'),
     'Early Win',
     6
   );
@@ -321,7 +347,7 @@ function mlbEarlyWinWriteTab_(ss, slate, cutoffMin, leadBoost, maxBet, rows, not
       ' · lead_boost=' + leadBoost +
       ' · max_bet=$' + maxBet +
       (note ? '  ⚠ ' + note : '') +
-      '   model: p_redeem = p_win + (1−p_win)×lead_boost · EV/$1 = p_redeem×(decimal−1) − (1−p_redeem)'
+      '   h2h join uses normalized game keys (schedule ↔ FanDuel). Sort: p_redeem (outcome) or EV (legacy).'
     )
     .setFontWeight('bold')
     .setBackground('#4a148c')
@@ -357,13 +383,16 @@ function mlbEarlyWinWriteTab_(ss, slate, cutoffMin, leadBoost, maxBet, rows, not
   sh.setFrozenRows(3);
 
   if (rows.length) {
-    sh.getRange(4, 1, rows.length, headers.length).setValues(rows);
-    sh.getRange(4, 9, rows.length, 1).setNumberFormat('0.000');
-    sh.getRange(4, 10, rows.length, 3).setNumberFormat('0.0%');
-    sh.getRange(4, 13, rows.length, 1).setNumberFormat('+0.000;-0.000');
-    sh.getRange(4, 14, rows.length, 1).setNumberFormat('+$0.00;-$0.00');
+    const n = rows.length;
+    sh.getRange(4, 1, n, headers.length).setValues(rows);
+    sh.getRange(4, 9, n, 1).setNumberFormat('0.000');
+    sh.getRange(4, 10, n, 1).setNumberFormat('0.0%');
+    sh.getRange(4, 11, n, 1).setNumberFormat('0.000');
+    sh.getRange(4, 12, n, 1).setNumberFormat('0.0%');
+    sh.getRange(4, 13, n, 1).setNumberFormat('+0.000;-0.000');
+    sh.getRange(4, 14, n, 1).setNumberFormat('+$0.00;-$0.00');
     try {
-      ss.setNamedRange('MLB_EARLY_WIN_CARD', sh.getRange(4, 1, rows.length, headers.length));
+      ss.setNamedRange('MLB_EARLY_WIN_CARD', sh.getRange(4, 1, n, headers.length));
     } catch (e) {}
     if (typeof mlbApplyPropCardFormatting_ === 'function') {
       mlbApplyPropCardFormatting_(sh, rows, headers, {
