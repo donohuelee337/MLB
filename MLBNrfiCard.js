@@ -189,12 +189,14 @@ function refreshNrfiBetCard() {
   }
 
   const last = q.getLastRow();
-  const raw = q.getRange(4, 1, last, 23).getValues();
+  const nRows = Math.max(0, last - 3);
+  const raw = nRows > 0 ? q.getRange(4, 1, nRows, 23).getValues() : [];
   const rows = [];
 
   raw.forEach(function (r) {
     const gamePk = r[0];
     const matchup = r[1];
+    if (!gamePk && !matchup) return;
     const startEt = r[2];
     const awaySp = r[5];
     const homeSp = r[6];
@@ -219,6 +221,7 @@ function refreshNrfiBetCard() {
 
     const lineNum = parseFloat(line, 10);
     const hasModel = probs.pNrfi !== '' && !isNaN(lineNum);
+    // Poisson on λ_total vs fd_line (usually 0.5) — same as direct P(NRFI)=exp(−λ_total).
     const pu = hasModel ? mlbProbOverUnderK_(lineNum, probs.lambdaTotal) : { pOver: '', pUnder: '' };
     const pYrfi = pu.pOver === '' ? probs.pYrfi : Math.round(pu.pOver * 1000) / 1000;
     const pNrfi = pu.pUnder === '' ? probs.pNrfi : Math.round(pu.pUnder * 1000) / 1000;
@@ -230,29 +233,17 @@ function refreshNrfiBetCard() {
 
     // Outcome-first: back the side we think actually happens (higher win prob),
     // not the higher-EV side. EV is kept as a guardrail only (see snapshot).
+    // Do NOT use the K/H agree_fd half-point band here — fd_line is always 0.5 while
+    // λ_total is ~0.5–0.7, so |λ−line| < 0.5 would gray out the entire slate.
     const sel = mlbNrfiChooseSide_(pNrfi, pYrfi, evN, evY, cfg);
-    const board =
-      typeof mlbHitsPickOnBoard_ === 'function'
-        ? mlbHitsPickOnBoard_(probs.lambdaTotal, lineNum)
-        : { onBoard: true, lean: '', edge: '' };
-    let pick = sel.side;
-    let pickEv = sel.side ? (isNaN(sel.ev) ? '' : sel.ev) : '';
-    let offBoard = false;
-    if (hasModel && !board.onBoard) {
-      pick = '';
-      pickEv = '';
-      offBoard = true;
-    }
-    const sortKey = offBoard ? -1e9 : sel.rank;
+    const pick = sel.side;
+    const pickEv = sel.side ? (isNaN(sel.ev) ? '' : Math.round(sel.ev * 1000) / 1000) : '';
+    const sortKey = sel.rank;
 
-    let flags = mlbFlagsNrfiCard_(notes, hasModel, lineupTop3);
-    if (offBoard) {
-      flags = flags ? flags + '; agree_fd' : 'agree_fd';
-    }
+    const flags = mlbFlagsNrfiCard_(notes, hasModel, lineupTop3);
 
     rows.push({
       sortKey: sortKey,
-      offBoard: offBoard,
       data: [
         gamePk,
         matchup,
@@ -293,9 +284,6 @@ function refreshNrfiBetCard() {
   const out = rows.map(function (r) {
     return r.data;
   });
-  const sortedOffBoard = rows.map(function (r) {
-    return r.offBoard;
-  });
 
   let sh = ss.getSheetByName(MLB_NRFI_CARD_TAB);
   if (sh) {
@@ -322,7 +310,7 @@ function refreshNrfiBetCard() {
   sh.getRange(1, 1, 1, NEED_COLS)
     .merge()
     .setValue(
-      '🌅 NRFI card — gray row = agree_fd (|λ_total − fd_line| < 0.5). pick = our side when on board. Sort by win probability.'
+      '🌅 NRFI card — pick = higher win-prob side (NRFI_PICK_BY). Sort by pick confidence. Gray only when no model / missing FD.'
     )
     .setFontWeight('bold')
     .setBackground('#e65100')
@@ -370,7 +358,6 @@ function refreshNrfiBetCard() {
     } catch (e) {}
     if (typeof mlbApplyPropCardFormatting_ === 'function') {
       mlbApplyPropCardFormatting_(sh, out, headers, {
-        offBoardFlags: sortedOffBoard,
         startRow: 4,
         headerRow: 3,
         skipHeaderNotes: true,
