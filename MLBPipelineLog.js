@@ -77,16 +77,20 @@ function addPipelineWarning_(msg) {
 function buildPipelineToast_() {
   if (!pipelineLog_) return '';
   const warnCount = pipelineLog_.warnings.length;
-  let cardStep = null;
-  pipelineLog_.steps.forEach(function (s) {
-    if (s.name === 'MLB Bet Card') cardStep = s;
-  });
-  const playCount = cardStep ? cardStep.outputCount : 0;
-  let gameCount = 0;
-  Object.keys(pipelineLog_.gameCoverage).forEach(function (g) {
-    if (pipelineLog_.gameCoverage[g].cardPicks > 0) gameCount++;
-  });
-  const base = playCount + ' plays across ' + gameCount + ' games';
+  const stats = typeof mlbBetCardPlayStats_ === 'function' ? mlbBetCardPlayStats_() : null;
+  let playCount = stats && stats.picks != null ? stats.picks : 0;
+  let gameCount = stats && stats.games != null ? stats.games : 0;
+  if (!stats || stats.picks == null) {
+    let cardStep = null;
+    pipelineLog_.steps.forEach(function (s) {
+      if (s.name === 'MLB Bet Card') cardStep = s;
+    });
+    if (cardStep && cardStep.outputCount) playCount = cardStep.outputCount;
+    Object.keys(pipelineLog_.gameCoverage).forEach(function (g) {
+      if (pipelineLog_.gameCoverage[g].cardPicks > 0) gameCount++;
+    });
+  }
+  const base = playCount + ' picks across ' + gameCount + ' games';
   if (warnCount > 0) {
     return (
       base +
@@ -321,12 +325,115 @@ function mlbAppendBetCardPipelineCoverage_(ss) {
   if (!pipelineLog_) return;
   const sh = ss.getSheetByName(MLB_BET_CARD_TAB);
   if (!sh || sh.getLastRow() < 4) return;
-  // Bet card 0-indexed: 4=matchup, 5=play. See MLBBetCard.js headers.
-  const data = sh.getRange(4, 1, sh.getLastRow(), 6).getValues();
+  let data = [];
+  try {
+    const nr = ss.getRangeByName('MLB_BET_CARD');
+    if (nr) data = nr.getValues();
+  } catch (e) {}
+  if (!data.length) {
+    const stats = typeof mlbBetCardPlayStats_ === 'function' ? mlbBetCardPlayStats_() : null;
+    const n = stats && stats.cardBlockRows ? stats.cardBlockRows : 0;
+    if (n > 0) data = sh.getRange(4, 1, 4 + n - 1, 5).getValues();
+  }
   data.forEach(function (r) {
-    const matchup = String(r[4] || '').trim();
-    const play = String(r[5] || '');
-    if (!matchup || play.indexOf('No qualifying') !== -1) return;
+    const matchup = String(r[3] || '').trim();
+    const play = String(r[4] || '');
+    const player = String(r[5] || '').trim();
+    if (!matchup || !player || play.indexOf('No qualifying') !== -1) return;
+    if (play.indexOf('Bet Tracker') !== -1) return;
     logGameCoverage_(matchup, undefined, undefined, 0, 1);
   });
+}
+
+// ============================================================
+// 📊 Incremental pipeline-step timing flush
+// ============================================================
+// The end-of-run pipeline log only writes if the whole run completes.
+// When the run times out we get nothing — no way to tell WHICH step ran
+// long. This writer appends one row to 📊 Pipeline_Timings after every
+// step, so a timeout leaves a trail showing exactly where it died.
+// ============================================================
+
+var MLB_PIPELINE_TIMINGS_TAB = '📊 Pipeline_Timings';
+
+/**
+ * Clear the timings tab and write the header. Called at the very start
+ * of a pipeline window so each new run is self-contained.
+ */
+function mlbResetPipelineTimings_(windowTag) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sh = ss.getSheetByName(MLB_PIPELINE_TIMINGS_TAB);
+  if (sh) {
+    sh.clearContents();
+    sh.clearFormats();
+  } else {
+    sh = ss.insertSheet(MLB_PIPELINE_TIMINGS_TAB);
+  }
+  sh.setTabColor('#b71c1c');
+  const tz = Session.getScriptTimeZone() || 'America/New_York';
+  const stamp = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd HH:mm:ss');
+  sh.getRange(1, 1, 1, 5)
+    .merge()
+    .setValue('📊 PIPELINE TIMINGS — ' + (windowTag || 'UNKNOWN') + ' — started ' + stamp + ' (flushed per step; survives timeouts)')
+    .setFontSize(11)
+    .setFontWeight('bold')
+    .setBackground('#b71c1c')
+    .setFontColor('#FFFFFF')
+    .setHorizontalAlignment('center');
+  sh.setRowHeight(1, 32);
+  sh.getRange(3, 1, 1, 5)
+    .setValues([['#', 'Step', 'Seconds', 'OK', 'Error / cumulative s']])
+    .setFontWeight('bold')
+    .setBackground('#1565C0')
+    .setFontColor('#FFFFFF');
+  sh.setFrozenRows(3);
+  [40, 320, 90, 60, 360].forEach(function (w, i) { sh.setColumnWidth(i + 1, w); });
+}
+
+var __mlbPipelineTimingsRow = 0;
+var __mlbPipelineTimingsStartMs = 0;
+
+function mlbBeginPipelineTimings_(windowTag) {
+  mlbResetPipelineTimings_(windowTag);
+  __mlbPipelineTimingsRow = 0;
+  __mlbPipelineTimingsStartMs = Date.now();
+}
+
+/**
+ * Append one row to the timings tab. Call AFTER each step so even if the
+ * NEXT step kills the run, this row is already on disk.
+ */
+function mlbFlushPipelineStepTiming_(stepName, sec, ok, errOrNote) {
+  try {
+    const ss = SpreadsheetApp.getActiveSpreadsheet();
+    const sh = ss.getSheetByName(MLB_PIPELINE_TIMINGS_TAB);
+    if (!sh) return;
+    __mlbPipelineTimingsRow += 1;
+    const cumulative = ((Date.now() - __mlbPipelineTimingsStartMs) / 1000).toFixed(1);
+    const noteCell = ok ? 'cum ' + cumulative + 's' : String(errOrNote || 'failed');
+    const row = Math.max(sh.getLastRow(), 3) + 1;
+    sh.getRange(row, 1, 1, 5).setValues([[
+      __mlbPipelineTimingsRow,
+      stepName,
+      Math.round(sec * 10) / 10,
+      ok ? 'OK' : 'FAIL',
+      noteCell,
+    ]]);
+    if (!ok) sh.getRange(row, 1, 1, 5).setBackground('#FFCDD2');
+    else if (sec >= 60) sh.getRange(row, 3).setBackground('#FFE082').setFontWeight('bold');
+    else if (sec >= 30) sh.getRange(row, 3).setBackground('#FFF9C4');
+    // Force the write to flush to disk now rather than at end of run, so a
+    // timeout in the next step still leaves this row visible.
+    SpreadsheetApp.flush();
+  } catch (e) {
+    // Never let the timing flush itself kill the pipeline.
+    Logger.log('mlbFlushPipelineStepTiming_: ' + e.message);
+  }
+}
+
+function mlbActivatePipelineTimingsTab_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const sh = ss.getSheetByName(MLB_PIPELINE_TIMINGS_TAB);
+  if (sh) sh.activate();
+  else ss.toast('Run a pipeline window once to create ' + MLB_PIPELINE_TIMINGS_TAB, 'MLB-BOIZ', 5);
 }

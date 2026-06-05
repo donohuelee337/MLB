@@ -165,7 +165,7 @@ function refreshHitsModelCompare() {
   sh.getRange(1, 1, 1, 21)
     .merge()
     .setValue(
-      '🔬 Hits Model Compare — v1 vs v2 (shadow) · pairs on (slate, gamePk, batter, line) · summary up top'
+      '🔬 Hits Model Compare — pairs on (slate, gamePk, batter, line) · v1 cols = live log (h.v2-full new, h.v1 historical) · v2 cols = shadow log (h.v1 new, h.v2-full historical)'
     )
     .setFontWeight('bold')
     .setBackground('#1a237e')

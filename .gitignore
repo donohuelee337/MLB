@@ -3,3 +3,8 @@ node_modules/
 *.log
 .env
 .env.*
+
+# Local sheet dumps / scratch exports (not source)
+.tmp_sheet.txt
+.tmp_*
+*.tmp

@@ -6,17 +6,20 @@
 // 🔬 Hits_Model_Compare panel can pivot on it.
 // ============================================================
 // To add a new shadow variant: append its name to .shadow and implement
-// it in MLBBatterHitsV2.js (e.g. h.v2-rates picks up if a separate card
-// tab + snapshot are wired).
+// a separate card tab + snapshot (see h.v3-contact in MLBBatterHitsV3.js).
+//
+// Promote v3 → live only after 🧪 MLB_Results_Log_Hits_v3 shows positive ROI
+// vs v2 on the same slates (MIN_MODEL_PCT_H / MIN_EDGE_H gates). v4 should
+// fork as a new shadow tab — do not replace v2-full until v3 is promoted.
 // ============================================================
 
 const MLB_HITS_MODEL_VERSIONS = {
-  active: 'h.v1',
-  shadow: ['h.v2-full'],
+  active: 'h.v2-full',
+  shadow: ['h.v1', 'h.v3-contact'],
 };
 
 function mlbHitsActiveModelVersion_() {
-  return MLB_HITS_MODEL_VERSIONS.active || 'h.v1';
+  return MLB_HITS_MODEL_VERSIONS.active || 'h.v2-full';
 }
 
 function mlbHitsShadowModelVersions_() {

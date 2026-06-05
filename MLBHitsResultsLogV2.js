@@ -1,10 +1,13 @@
 // ============================================================
-// 🧪 MLB Results Log v2 — shadow log for h.v2 hits variants
+// 🧪 MLB Results Log v2 — shadow hits log
 // ============================================================
-// Separate from 📋 MLB_Results_Log so v1 numbers stay untouched.
-// Same 24 base columns + 6 v2-specific columns (model_version + four
-// feature multipliers + base λ). Graded by extended logic in
-// MLBResultsGrader.js.
+// As of the h.v2-full promotion, v2 picks live on 🃏 MLB_Bet_Card and
+// flow through 📋 MLB_Results_Log. This tab now tracks h.v1 (the prior
+// live model) as the shadow baseline. Historical h.v2-full rows here
+// pre-date the swap and remain readable. Schema: 24 base columns + 6
+// shadow-only columns (model_version + four feature multipliers + base
+// λ). h.v1 rows leave the ablation columns blank. Graded by extended
+// logic in MLBResultsGrader.js.
 // ============================================================
 
 const MLB_RESULTS_LOG_V2_TAB = '🧪 MLB_Results_Log_v2';
@@ -47,7 +50,7 @@ function mlbEnsureResultsLogV2Layout_(logSh) {
   const HEADER_ROW = 3;
   logSh.getRange(1, 1, 1, MLB_RESULTS_LOG_V2_NCOL)
     .merge()
-    .setValue('🧪 MLB-BOIZ RESULTS LOG v2 (shadow) — Hits prototype variants only; never touches live Bet Card')
+    .setValue('🧪 MLB-BOIZ RESULTS LOG (shadow hits) — tracks h.v1 alongside the live h.v2-full Bet Card')
     .setFontWeight('bold')
     .setBackground('#6a1b9a')
     .setFontColor('#ffffff');
@@ -100,16 +103,17 @@ function mlbFindResultsLogV2RowForUpsert_(logSh, slateWant, betKey, gamePk, batt
 }
 
 /**
- * Append v2 hits card plays to MLB_Results_Log_v2.
- * Filters: best_side present, best_ev > 0, no 'injury' flag. Mirrors v1's
- * effective gating (Bet Card EV filter + flag drop).
+ * Append the shadow hits card (now h.v1) to 🧪 MLB_Results_Log_v2.
+ * Filters: best_side present, best_ev > 0, no 'injury' flag. Mirrors the live
+ * Bet Card's effective gating so the shadow tracker stays apples-to-apples.
+ * Function name kept for backward compatibility with the pipeline + menu wiring.
  * @param {string} windowTag MORNING | MIDDAY | FINAL
  */
 function snapshotMLBHitsV2BetCardToLog(windowTag) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const card = ss.getSheetByName(MLB_BATTER_HITS_V2_CARD_TAB);
+  const card = ss.getSheetByName(MLB_BATTER_HITS_CARD_TAB);
   if (!card || card.getLastRow() < 4) {
-    Logger.log('snapshotMLBHitsV2BetCardToLog: no v2 card data');
+    Logger.log('snapshotMLBHitsV2BetCardToLog: no shadow (h.v1) card data');
     return;
   }
 
@@ -131,7 +135,8 @@ function snapshotMLBHitsV2BetCardToLog(windowTag) {
   }
 
   const last = card.getLastRow();
-  const block = card.getRange(4, 1, last, 32).getValues();
+  // v1 card layout — 20 cols, no ablation multipliers.
+  const block = card.getRange(4, 1, last, 20).getValues();
   let appended = 0;
   let updated = 0;
   let rank = 0;
@@ -146,18 +151,17 @@ function snapshotMLBHitsV2BetCardToLog(windowTag) {
     const lambda = row[6];
     const pOver = row[8];
     const pUnder = row[9];
-    const evO = row[12];
-    const evU = row[13];
     const bestSide = String(row[14] || '').trim();
     const bestEv = row[15];
     const flags = String(row[16] || '');
     const batterId = row[17];
-    const baseLam = row[18];
-    const parkMult = row[19];
-    const oppMult = row[20];
-    const handMult = row[21];
-    const abMult = row[22];
-    const modelVer = String(row[31] || 'h.v2-full').trim() || 'h.v2-full';
+    // h.v1 has no per-row ablation multipliers; columns stay blank.
+    const baseLam = '';
+    const parkMult = '';
+    const oppMult = '';
+    const handMult = '';
+    const abMult = '';
+    const modelVer = 'h.v1';
 
     if (!batter) return;
     if (flags.indexOf('injury') !== -1) return;
@@ -172,7 +176,7 @@ function snapshotMLBHitsV2BetCardToLog(windowTag) {
 
     rank += 1;
     const playText =
-      batter + ' — H ' + bestSide + ' ' + String(line) + ' [v2:' + modelVer + ']';
+      batter + ' — H ' + bestSide + ' ' + String(line) + ' [shadow:' + modelVer + ']';
 
     const slate = slateFallback;
     const betKey = mlbBetResultKey_(slate, gamePk, batterId, bestSide, line) + '|' + modelVer;
@@ -259,7 +263,7 @@ function snapshotMLBHitsV2BetCardToLog(windowTag) {
   if (appended === 0 && updated === 0) return;
   try {
     ss.toast(
-      'Results v2 +' + appended + ' new · ' + updated + ' updated · ' + window,
+      'Results shadow +' + appended + ' new · ' + updated + ' updated · ' + window,
       'MLB-BOIZ',
       6
     );

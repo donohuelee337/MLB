@@ -149,7 +149,7 @@ function mlbLoadInjuryLookup_(ss) {
 
 function mlbPitchingLogSummary_(playerId, season) {
   const id = parseInt(playerId, 10);
-  if (!id) return { l3k: '', l3ip: '', k9: '', games: 0 };
+  if (!id) return { l3k: '', l3ip: '', k9: '', games: 0, hotCold: '' };
   const splits = mlbStatsApiGetPitchingGameSplits_(playerId, season);
   let totK = 0;
   let totIp = 0;
@@ -169,15 +169,23 @@ function mlbPitchingLogSummary_(playerId, season) {
       }
     }
     const k9 = totIp > 0 ? Math.round((totK / totIp) * 900) / 100 : '';
+    // Last-3-starts K/9 vs season K/9. Require ≥5 season starts and a full L3 with ≥6 IP
+    // total so a single short outing doesn't flip the flag.
+    let hotCold = '';
+    if (splits.length >= 5 && nL >= 3 && l3ip >= 6) {
+      const k9L3 = (l3k / l3ip) * 9;
+      hotCold = mlbHotColdFlag_(k9L3, k9);
+    }
     return {
       l3k: nL ? l3k : '',
       l3ip: nL ? Math.round(l3ip * 100) / 100 : '',
       k9: k9,
       games: splits.length,
+      hotCold: hotCold,
     };
   } catch (e) {
     Logger.log('mlbPitchingLogSummary_: ' + e.message);
-    return { l3k: '', l3ip: '', k9: '', games: 0 };
+    return { l3k: '', l3ip: '', k9: '', games: 0, hotCold: '' };
   }
 }
 
@@ -260,6 +268,8 @@ function refreshPitcherKSlateQueue() {
           oaMiss,
           '',
           '',
+          '',
+          '',
         ]);
         return;
       }
@@ -276,6 +286,8 @@ function refreshPitcherKSlateQueue() {
       let l3k = '';
       let l3ip = '';
       let k9 = '';
+      let hotCold = '';
+      let games = '';
       const pidNum = parseInt(sp.pid, 10);
       if (pidNum) {
         if (!seenIds[pidNum]) {
@@ -288,6 +300,8 @@ function refreshPitcherKSlateQueue() {
         l3k = lg.l3k;
         l3ip = lg.l3ip;
         k9 = lg.k9;
+        hotCold = lg.hotCold || '';
+        games = lg.games != null && lg.games !== '' ? lg.games : '';
       } else {
         note = note ? note + '; no_pitcher_id' : 'no_pitcher_id';
       }
@@ -335,6 +349,8 @@ function refreshPitcherKSlateQueue() {
         oppAbbr,
         oppKpa,
         oppKpaVs,
+        hotCold,
+        games,
       ]);
     });
   });
@@ -347,14 +363,14 @@ function refreshPitcherKSlateQueue() {
     sh = ss.insertSheet(MLB_PITCHER_K_QUEUE_TAB);
   }
   sh.setTabColor('#6a1b9a');
-  [72, 220, 56, 160, 88, 56, 72, 72, 52, 52, 52, 220, 88, 140, 44, 56, 72, 72].forEach(function (w, i) {
+  [72, 220, 56, 160, 88, 56, 72, 72, 52, 52, 52, 220, 88, 140, 44, 56, 72, 72, 56, 48].forEach(function (w, i) {
     sh.setColumnWidth(i + 1, w);
   });
 
-  sh.getRange(1, 1, 1, 18)
+  sh.getRange(1, 1, 1, 20)
     .merge()
     .setValue(
-      '📋 Pitcher K queue — FD K + L3/season K9 + opp SO/PA + vs-hand SO/PA (statsapi) — season ' + season
+      '📋 Pitcher K queue — FD K + L3/season K9 + opp SO/PA + vs-hand SO/PA + hot/cold + games (statsapi) — season ' + season
     )
     .setFontWeight('bold')
     .setBackground('#4a148c')
@@ -380,6 +396,8 @@ function refreshPitcherKSlateQueue() {
     'opp_abbr',
     'opp_k_pa',
     'opp_k_pa_vs',
+    'hot_cold',
+    'games',
   ];
   sh.getRange(3, 1, 1, headers.length)
     .setValues([headers])

@@ -1,0 +1,3 @@
+as_of_date,game_pk,pitcher_id,pitcher_name,throws,opp_team_id,opp_abbr,pa,k_pct,bb_pct,avg,woba,exit_velo,launch_angle,xba,xslg,xwoba,never_faced,sample_flag
+2026-05-31,824512,669373,Spencer Strider,R,113,CIN,19,0.368,0.053,0.389,0.400,91.6,15.5,0.288,0.531,0.365,0,low_pa
+2026-05-31,824512,666157,Nick Lodolo,L,144,ATL,27,0.370,0.074,0.208,0.254,82.3,17.4,0.179,0.220,0.212,0,low_pa

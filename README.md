@@ -41,7 +41,7 @@ Set **⚙️ Config → `SLATE_DATE`** to `yyyy-MM-dd` for the day you want (e.g
 
 ## ABS (2026)
 
-League uses the **ABS challenge system** (human calls pitches; players may challenge). See `docs/ABS-2026.md` and Savant: [ABS dashboard](https://baseballsavant.mlb.com/abs).
+League uses the **ABS challenge system** (human calls pitches; players may challenge). See `docs/ABS-2026.md`, **`docs/SAVANT-INGEST.md`** (optional CSV ingest + **`savant-etl/`** daily probable-pitchers / team context), and Savant: [ABS dashboard](https://baseballsavant.mlb.com/abs).
 
 ## Repo / backup
 

@@ -1,0 +1,39 @@
+name: Savant daily ETL
+
+on:
+  schedule:
+    - cron: '0 14 * * *'
+  workflow_dispatch:
+    inputs:
+      slate_date:
+        description: 'Slate date YYYY-MM-DD (default today UTC)'
+        required: false
+
+jobs:
+  etl:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install deps
+        run: pip install -r savant-etl/requirements.txt
+
+      - name: Run Savant ETL
+        env:
+          SLATE_DATE: ${{ github.event.inputs.slate_date }}
+        run: |
+          DATE="${SLATE_DATE:-$(date -u +%F)}"
+          python savant-etl/run_daily.py --date "$DATE" || python savant-etl/run_daily.py --date "$DATE" --skip-team
+
+      - name: Upload CSV artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: savant-csv-${{ github.event.inputs.slate_date || 'latest' }}
+          path: |
+            savant-etl/out/savant_matchup_daily.csv
+            savant-etl/out/savant_team_context.csv
+          if-no-files-found: warn

@@ -6,6 +6,148 @@
 
 const MLB_SCHEDULE_TAB = '📅 MLB_Schedule';
 
+// ── schedule block cache ──────────────────────────────────────────────────
+// The schedule tab has ~15-16 rows per slate. Every batter card (TB v2,
+// Hits v2, TB v3, Hits v3) reads this sheet 3+ times per batter, so with
+// 270 batters × 4 cards that's 3000+ GAS I/O calls at ~100 ms each ≈ 5 min
+// of pure sheet-read overhead. Cache the whole block once per execution.
+// ─────────────────────────────────────────────────────────────────────────
+var __mlbScheduleBlockCache = null;
+
+function mlbResetScheduleBlockCache_() {
+  __mlbScheduleBlockCache = null;
+}
+
+/**
+ * Returns the schedule data block (2-D array, row-major, 0-based col indices)
+ * for the current slate. Reads the sheet exactly once per execution; all
+ * subsequent calls return the cached array instantly.
+ *
+ * Column layout (mirrors fetchMLBScheduleForSlate writer):
+ *  [0]  gamePk          [1]  date           [2]  gameDateRaw
+ *  [3]  awayAbbr        [4]  homeAbbr       [5]  matchup
+ *  [6]  awayProbName    [7]  homeProbName   [8]  venue
+ *  [9]  status          [10] series
+ *  [11] awayProbId      [12] homeProbId     [13] homePlateUmpire
+ */
+function mlbGetScheduleBlock_(ss) {
+  if (__mlbScheduleBlockCache !== null) return __mlbScheduleBlockCache;
+  const sh = ss.getSheetByName(MLB_SCHEDULE_TAB);
+  if (!sh || sh.getLastRow() < 4) {
+    __mlbScheduleBlockCache = [];
+    return __mlbScheduleBlockCache;
+  }
+  const dataRows = sh.getLastRow() - 3;
+  __mlbScheduleBlockCache = sh.getRange(4, 1, dataRows, 14).getValues();
+  return __mlbScheduleBlockCache;
+}
+
+/**
+ * Finds the probable SP on the OPPOSITE side from the batter's team for a
+ * given gamePk. Consolidates the identical logic that was duplicated in
+ * mlbTbV2OpposingProbableSp_ and mlbHitsV2OpposingProbableSp_.
+ *
+ * @param {GoogleAppsScript.Spreadsheet.Spreadsheet} ss
+ * @param {number|string} gamePk
+ * @param {string} batterTeamAbbr
+ * @returns {{ id: number, name: string, throws: string }|null}
+ */
+function mlbGetOpposingProbableSp_(ss, gamePk, batterTeamAbbr) {
+  const g = parseInt(gamePk, 10);
+  if (!g) return null;
+  const block = mlbGetScheduleBlock_(ss);
+  if (!block.length) return null;
+  const wantBat = mlbCanonicalTeamAbbr_(batterTeamAbbr);
+  for (let i = 0; i < block.length; i++) {
+    if (parseInt(block[i][0], 10) !== g) continue;
+    const away = mlbCanonicalTeamAbbr_(block[i][3]);
+    const home = mlbCanonicalTeamAbbr_(block[i][4]);
+    const awayProb = String(block[i][6] || '').trim();
+    const homeProb = String(block[i][7] || '').trim();
+    const awayProbId = parseInt(block[i][11], 10);
+    const homeProbId = parseInt(block[i][12], 10);
+    if (wantBat && wantBat === away) {
+      let id = homeProbId;
+      if (!id && homeProb && typeof mlbStatsApiResolvePlayerIdFromName_ === 'function') {
+        id = parseInt(mlbStatsApiResolvePlayerIdFromName_(homeProb), 10) || 0;
+      }
+      return id ? { id: id, name: homeProb, throws: '' } : null;
+    }
+    if (wantBat && wantBat === home) {
+      let id = awayProbId;
+      if (!id && awayProb && typeof mlbStatsApiResolvePlayerIdFromName_ === 'function') {
+        id = parseInt(mlbStatsApiResolvePlayerIdFromName_(awayProb), 10) || 0;
+      }
+      return id ? { id: id, name: awayProb, throws: '' } : null;
+    }
+    return null;
+  }
+  return null;
+}
+
+/**
+ * Opposing team abbreviation for a batter in a game (the team the batter
+ * faces — same side as the probable SP). Uses cached schedule block.
+ */
+function mlbScheduleOppTeamAbbrForBatter_(ss, gamePk, batterTeamAbbr) {
+  const g = parseInt(gamePk, 10);
+  const want = mlbCanonicalTeamAbbr_(batterTeamAbbr);
+  if (!g || !want) return '';
+  const block = mlbGetScheduleBlock_(ss);
+  for (let i = 0; i < block.length; i++) {
+    if (parseInt(block[i][0], 10) !== g) continue;
+    const away = mlbCanonicalTeamAbbr_(block[i][3]);
+    const home = mlbCanonicalTeamAbbr_(block[i][4]);
+    if (want === away) return home;
+    if (want === home) return away;
+    return '';
+  }
+  return '';
+}
+
+/**
+ * Resolve probable SP context from gamePk + SP name (e.g. opp_sp_name off the
+ * v2 hits card). Fallback when batter-team lookup fails but v2 already matched
+ * the opposing starter.
+ *
+ * @returns {{ spId: number, spName: string, oppAbbr: string, batAbbr: string }|null}
+ */
+function mlbScheduleSpContextByName_(ss, gamePk, spName) {
+  const g = parseInt(gamePk, 10);
+  const want = mlbNormalizePersonName_(spName);
+  if (!g || !want) return null;
+  const block = mlbGetScheduleBlock_(ss);
+  for (let i = 0; i < block.length; i++) {
+    if (parseInt(block[i][0], 10) !== g) continue;
+    const awayProb = String(block[i][6] || '').trim();
+    const homeProb = String(block[i][7] || '').trim();
+    const awayProbId = parseInt(block[i][11], 10);
+    const homeProbId = parseInt(block[i][12], 10);
+    const away = mlbCanonicalTeamAbbr_(block[i][3]);
+    const home = mlbCanonicalTeamAbbr_(block[i][4]);
+    if (mlbNormalizePersonName_(awayProb) === want) {
+      let spId = awayProbId;
+      if (!spId && typeof mlbStatsApiResolvePlayerIdFromName_ === 'function') {
+        spId = parseInt(mlbStatsApiResolvePlayerIdFromName_(awayProb), 10) || 0;
+      }
+      if (spId) {
+        return { spId: spId, spName: awayProb, oppAbbr: away, batAbbr: home };
+      }
+    }
+    if (mlbNormalizePersonName_(homeProb) === want) {
+      let spId = homeProbId;
+      if (!spId && typeof mlbStatsApiResolvePlayerIdFromName_ === 'function') {
+        spId = parseInt(mlbStatsApiResolvePlayerIdFromName_(homeProb), 10) || 0;
+      }
+      if (spId) {
+        return { spId: spId, spName: homeProb, oppAbbr: home, batAbbr: away };
+      }
+    }
+    return null;
+  }
+  return null;
+}
+
 /** Home plate official from schedule `officials` hydrate (empty if TBA). */
 function mlbHomePlateFromScheduleGame_(g) {
   const list = (g && g.officials) || [];
@@ -50,14 +192,20 @@ function mlbFetchScheduleJsonForDate_(dateStr) {
 function mlbScheduleHomeAbbrForGamePk_(ss, gamePk) {
   const g = parseInt(gamePk, 10);
   if (!g) return '';
-  const sh = ss.getSheetByName(MLB_SCHEDULE_TAB);
-  if (!sh || sh.getLastRow() < 4) return '';
-  const last = sh.getLastRow();
-  const block = sh.getRange(4, 1, last, 5).getValues();
+  const block = mlbGetScheduleBlock_(ss);
   for (let i = 0; i < block.length; i++) {
-    if (parseInt(block[i][0], 10) === g) {
-      return String(block[i][4] || '').trim();
-    }
+    if (parseInt(block[i][0], 10) === g) return String(block[i][4] || '').trim();
+  }
+  return '';
+}
+
+/** Away team abbreviation from schedule row (col `away`). */
+function mlbScheduleAwayAbbrForGamePk_(ss, gamePk) {
+  const g = parseInt(gamePk, 10);
+  if (!g) return '';
+  const block = mlbGetScheduleBlock_(ss);
+  for (let i = 0; i < block.length; i++) {
+    if (parseInt(block[i][0], 10) === g) return String(block[i][3] || '').trim();
   }
   return '';
 }
@@ -65,14 +213,9 @@ function mlbScheduleHomeAbbrForGamePk_(ss, gamePk) {
 function mlbScheduleMatchupForGamePk_(ss, gamePk) {
   const g = parseInt(gamePk, 10);
   if (!g) return '';
-  const sh = ss.getSheetByName(MLB_SCHEDULE_TAB);
-  if (!sh || sh.getLastRow() < 4) return '';
-  const last = sh.getLastRow();
-  const block = sh.getRange(4, 1, last, 6).getValues();
+  const block = mlbGetScheduleBlock_(ss);
   for (let i = 0; i < block.length; i++) {
-    if (parseInt(block[i][0], 10) === g) {
-      return String(block[i][5] || '').trim();
-    }
+    if (parseInt(block[i][0], 10) === g) return String(block[i][5] || '').trim();
   }
   return '';
 }
@@ -82,10 +225,7 @@ function mlbScheduleMetaForGamePk_(ss, gamePk) {
   const g = parseInt(gamePk, 10);
   const empty = { matchup: '', away: '', home: '', hpUmp: '' };
   if (!g) return empty;
-  const sh = ss.getSheetByName(MLB_SCHEDULE_TAB);
-  if (!sh || sh.getLastRow() < 4) return empty;
-  const last = sh.getLastRow();
-  const block = sh.getRange(4, 1, last, 14).getValues();
+  const block = mlbGetScheduleBlock_(ss);
   for (let i = 0; i < block.length; i++) {
     if (parseInt(block[i][0], 10) === g) {
       return {
@@ -120,12 +260,14 @@ function fetchMLBScheduleForSlate() {
       const venue = g.venue && g.venue.name ? g.venue.name : '';
       const status = g.status && g.status.detailedState ? g.status.detailedState : '';
       const hp = mlbHomePlateFromScheduleGame_(g);
+      const awayAbbr = away.abbreviation || mlbAbbrFromTeamName_(away.name || '') || '';
+      const homeAbbr = home.abbreviation || mlbAbbrFromTeamName_(home.name || '') || '';
       rows.push([
         g.gamePk,
         Utilities.formatDate(new Date(g.gameDate), Session.getScriptTimeZone(), 'yyyy-MM-dd'),
         g.gameDate,
-        away.abbreviation || '',
-        home.abbreviation || '',
+        awayAbbr,
+        homeAbbr,
         (away.name || '') + ' @ ' + (home.name || ''),
         awayProb.fullName || '',
         homeProb.fullName || '',
