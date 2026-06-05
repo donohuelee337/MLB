@@ -32,7 +32,8 @@ function refreshPitcherKSimEngine_() {
   // If the card hasn't been rebuilt with the latest schema yet, fall back to its
   // current width and the new cells will be blank — sim degrades gracefully.
   const colsToRead = Math.min(34, Math.max(22, src.getLastColumn()));
-  const rows = src.getRange(4, 1, last, colsToRead).getValues();
+  // Data is rows 4..last → (last - 3) rows; reading `last` rows over-reads 3.
+  const rows = src.getRange(4, 1, last - 3, colsToRead).getValues();
   const out = [];
 
   rows.forEach(function (r) {
