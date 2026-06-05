@@ -135,7 +135,11 @@ function refreshPitcherKBetCard() {
   }
 
   const last = q.getLastRow();
-  const raw = q.getRange(4, 1, last, 20).getValues();
+  // Data is rows 4..last → (last - 3) rows. Reading `last` rows from row 4
+  // over-reads 3 phantom rows past the data (harmless today since blank-pitcher
+  // rows are skipped below, but it risks an out-of-bounds read if the queue
+  // ever fills to the grid edge).
+  const raw = q.getRange(4, 1, last - 3, 20).getValues();
   const rows = []; // each: { data: [34 cols], hot: 'HOT'|'COLD'|'' }
 
   raw.forEach(function (r) {
@@ -235,6 +239,17 @@ function refreshPitcherKBetCard() {
       umm = Math.max(0.85, Math.min(1.15, umm));
       if (hpUmp && Math.abs(umm - 1) > 1e-6) {
         lamNum = Math.round(lamNum * umm * 100) / 100;
+      }
+      // Re-apply the plausibility cap AFTER the live-only multipliers
+      // (hand / Savant-ABS / ump). The core clamps to K_LAMBDA_MAX, but those
+      // multipliers run here on top of it (up to ~1.39× combined), so without
+      // this a data-error row capped at the max could be pushed back over it.
+      // Same key + semantics as MLBPitcherKLambdaCore.js (0/blank = off).
+      const lamMaxCard = parseFloat(
+        String(cfg['K_LAMBDA_MAX'] != null ? cfg['K_LAMBDA_MAX'] : '13')
+      );
+      if (!isNaN(lamMaxCard) && lamMaxCard > 0 && lamNum > lamMaxCard) {
+        lamNum = lamMaxCard;
       }
       lambdaDisp = lamNum;
       const lv = parseFloat(line, 10);

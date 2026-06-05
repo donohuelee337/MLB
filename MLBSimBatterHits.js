@@ -36,7 +36,9 @@ function refreshBatterHitsSimEngine_() {
 
   const last = src.getLastRow();
   const colsToRead = Math.min(34, Math.max(22, src.getLastColumn()));
-  const rows = src.getRange(4, 1, last, colsToRead).getValues();
+  // Data is rows 4..last → (last - 3) rows. This sim has no blank-row skip, so
+  // reading `last` rows used to append 3 phantom blank rows to the output sheet.
+  const rows = src.getRange(4, 1, last - 3, colsToRead).getValues();
   const pairs = [];
 
   rows.forEach(function (r) {
@@ -64,6 +66,17 @@ function refreshBatterHitsSimEngine_() {
     let evU = '';
     let bestSide = '';
     let bestEv = '';
+    // 🧪 one-sided-shrink shadow (audit cols 37..40; NOT used for live picks).
+    // The live shrink above scales BOTH sides by H_MODEL_P_SHRINK, but the
+    // documented calibration miss is one-sided ("model overestimates P(≥1 hit)").
+    // Correcting a too-high Over should RAISE the Under (its complement), not
+    // shrink it too. This shadow shrinks only the Over and derives the Under as
+    // the complement (exact for half-integer hit lines — no push). Compare its
+    // graded ROI vs the live symmetric shrink before promoting.
+    let pO1s = '';
+    let pU1s = '';
+    let bestSide1s = '';
+    let bestEv1s = '';
 
     if (!isNaN(estPa) && estPa > 0 && !isNaN(lamAnch) && lamAnch > 0 && !isNaN(lineNum)) {
       let baAnch = lamAnch / estPa;
@@ -78,6 +91,19 @@ function refreshBatterHitsSimEngine_() {
       pUnder = Math.round(pUAdj * 1000) / 1000;
       if (fdOver !== '') evO = mlbEvPerDollarRisked_(pOAdj, fdOver);
       if (fdUnder !== '') evU = mlbEvPerDollarRisked_(pUAdj, fdUnder);
+
+      // One-sided shadow: shrink the Over, Under = 1 − Over_adj.
+      const pO1sAdj = (hShrink > 0 && hShrink < 1) ? Math.min(pORaw * hShrink, 0.9999) : pORaw;
+      const pU1sAdj = Math.max(0, Math.min(0.9999, 1 - pO1sAdj));
+      pO1s = Math.round(pO1sAdj * 1000) / 1000;
+      pU1s = Math.round(pU1sAdj * 1000) / 1000;
+      const evO1s = fdOver !== '' ? mlbEvPerDollarRisked_(pO1sAdj, fdOver) : '';
+      const evU1s = fdUnder !== '' ? mlbEvPerDollarRisked_(pU1sAdj, fdUnder) : '';
+      if (evO1s !== '' && evU1s !== '') {
+        if (evO1s >= evU1s) { bestSide1s = 'Over'; bestEv1s = evO1s; }
+        else { bestSide1s = 'Under'; bestEv1s = evU1s; }
+      } else if (evO1s !== '') { bestSide1s = 'Over'; bestEv1s = evO1s; }
+      else if (evU1s !== '') { bestSide1s = 'Under'; bestEv1s = evU1s; }
       if (evO !== '' && evU !== '') {
         if (evO >= evU && evO > 0) {
           bestSide = 'Over';
@@ -119,7 +145,7 @@ function refreshBatterHitsSimEngine_() {
 
     pairs.push({
       row: outRow,
-      aud: [!isNaN(lambdaModel) ? lambdaModel : '', 0],
+      aud: [!isNaN(lambdaModel) ? lambdaModel : '', 0, pO1s, pU1s, bestSide1s, bestEv1s],
     });
   });
 
@@ -144,10 +170,13 @@ function refreshBatterHitsSimEngine_() {
 
 function _mlbWriteBatterHitsSimSheet_(ss, out, audit) {
   const NEED_COLS = 34;
+  // Audit block: 35 lambda_hits_model, 36 context_score,
+  // 37..40 = 🧪 one-sided-shrink shadow (p_over/p_under/best_side/best_ev).
+  const AUDIT_COLS = 6;
   let sh = ss.getSheetByName(MLB_BATTER_HITS_SIM_TAB);
   if (sh) {
     const cr = Math.max(sh.getLastRow(), 3);
-    const cc = Math.max(sh.getLastColumn(), NEED_COLS + 2);
+    const cc = Math.max(sh.getLastColumn(), NEED_COLS + AUDIT_COLS);
     try {
       sh.getRange(1, 1, cr, cc).breakApart();
     } catch (e) {}
@@ -156,15 +185,15 @@ function _mlbWriteBatterHitsSimSheet_(ss, out, audit) {
   } else {
     sh = ss.insertSheet(MLB_BATTER_HITS_SIM_TAB);
   }
-  if (sh.getMaxColumns() < NEED_COLS + 2) {
-    sh.insertColumnsAfter(sh.getMaxColumns(), NEED_COLS + 2 - sh.getMaxColumns());
+  if (sh.getMaxColumns() < NEED_COLS + AUDIT_COLS) {
+    sh.insertColumnsAfter(sh.getMaxColumns(), NEED_COLS + AUDIT_COLS - sh.getMaxColumns());
   }
   sh.setTabColor('#2e7d32');
 
   sh.getRange(1, 1, 1, NEED_COLS)
     .merge()
     .setValue(
-      '⚡ Sim_Batter_Hits — anchored h.v2-full (ANCHOR_WEIGHT_BATTER_HITS); 🃏 H rows use this tab. Cols 35..36 = model λ + context audit.'
+      '⚡ Sim_Batter_Hits — anchored h.v2-full (ANCHOR_WEIGHT_BATTER_HITS); 🃏 H rows use this tab. Cols 35..36 = model λ + context audit; 37..40 = 🧪 one-sided-shrink shadow (audit only).'
     )
     .setFontWeight('bold')
     .setBackground('#1b5e20')
@@ -224,12 +253,19 @@ function _mlbWriteBatterHitsSimSheet_(ss, out, audit) {
     try {
       ss.setNamedRange('MLB_BATTER_HITS_SIM', sh.getRange(4, 1, out.length, NEED_COLS));
     } catch (e) {}
-    sh.getRange(3, NEED_COLS + 1, 1, 2)
-      .setValues([['lambda_hits_model', 'context_score']])
+    sh.getRange(3, NEED_COLS + 1, 1, AUDIT_COLS)
+      .setValues([[
+        'lambda_hits_model',
+        'context_score',
+        'p_over_1side',
+        'p_under_1side',
+        'best_side_1side',
+        'best_ev_1side',
+      ]])
       .setFontWeight('bold')
       .setBackground('#388e3c')
       .setFontColor('#ffffff');
-    sh.getRange(4, NEED_COLS + 1, out.length, 2).setValues(audit);
+    sh.getRange(4, NEED_COLS + 1, out.length, AUDIT_COLS).setValues(audit);
   }
   sh.setFrozenRows(3);
   try {
