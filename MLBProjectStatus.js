@@ -52,12 +52,17 @@ const MLB_PROJECT_STATUS_MANIFEST = [
     id: 'h',
     label: '🎯 Batter Hits',
     category: 'Core',
-    stage: 'live',
+    stage: 'shadow',
     modelVersion: 'h.v2-full',
     mainTab:
       typeof MLB_BATTER_HITS_V2_CARD_TAB !== 'undefined' ? MLB_BATTER_HITS_V2_CARD_TAB : '🧪 Batter_Hits_Card_v2-full',
     logTab: typeof MLB_RESULTS_LOG_TAB !== 'undefined' ? MLB_RESULTS_LOG_TAB : '📋 MLB_Results_Log',
-    notes: 'v2-full promoted to live. h.v1 tracked as shadow below.',
+    notes:
+      'h.v2-full is the promoted hits MODEL, but currently GATED OFF the 🃏 Bet Card ' +
+      '(K_SEGMENT_INCLUDE_H=N → K-only card). Sim computes every window and can snapshot to ' +
+      'the shadow log, but it is NOT a live unified-card bet. Benched after ~-9% ROI. ' +
+      'Re-activate via K_SEGMENT_INCLUDE_H=Y once an edge is proven — candidates: one-sided-shrink ' +
+      'shadow (⚡ Sim_Batter_Hits cols 37-40) or h.v3-contact.',
   },
 
   // ---- Shadow models (running but not bet) ----
