@@ -82,8 +82,10 @@ function _mlbNrfiFindLogRow_(logSh, slate, gamePk, side) {
 }
 
 function mlbNrfiDefaultStake_(cfg) {
-  const raw = parseFloat(String(cfg && cfg['NRFI_DEFAULT_STAKE'] != null ? cfg['NRFI_DEFAULT_STAKE'] : '10').trim());
-  return !isNaN(raw) && raw > 0 ? raw : 10;
+  // Default = the bankroll policy max bet (tier 3, $7.50 of a $500 roll).
+  // The old $10 default silently exceeded the staking policy cap.
+  const raw = parseFloat(String(cfg && cfg['NRFI_DEFAULT_STAKE'] != null ? cfg['NRFI_DEFAULT_STAKE'] : '7.50').trim());
+  return !isNaN(raw) && raw > 0 ? raw : 7.5;
 }
 
 /**
@@ -156,25 +158,19 @@ function snapshotNrfiToLog(windowTag) {
 
     const hit = _mlbNrfiFindLogRow_(logSh, slate, gamePk, side);
     if (hit > 0) {
-      logSh.getRange(hit, 1, 1, 16).setValues([[
-        loggedAt,
-        slate,
-        rank,
-        matchup,
-        gamePk,
-        side,
-        line,
-        odds,
-        pModel,
-        ev,
-        lambdaTotal,
-        lambdaTop,
-        lambdaBot,
-        fdYrfi,
-        fdNrfi,
-        lineupTop3,
+      logSh.getRange(hit, 1, 1, 6).setValues([[loggedAt, slate, rank, matchup, gamePk, side]]);
+      // Line/Odds (cols 7/8) keep their FIRST-logged values — that's the bet
+      // as struck. Refreshing them each window made the grader settle every
+      // bet at closing prices. Latest both-sides prices still refresh in
+      // fd_yrfi/fd_nrfi (cols 14/15) for reference.
+      logSh.getRange(hit, 9, 1, 8).setValues([[
+        pModel, ev, lambdaTotal, lambdaTop, lambdaBot, fdYrfi, fdNrfi, lineupTop3,
       ]]);
-      logSh.getRange(hit, 20).setValue(stake);
+      // Stake: only fill when blank/non-numeric — never overwrite an entry.
+      const prevStake = logSh.getRange(hit, 20).getValue();
+      if (prevStake === '' || prevStake == null || isNaN(parseFloat(prevStake))) {
+        logSh.getRange(hit, 20).setValue(stake);
+      }
       logSh.getRange(hit, 22).setValue(betKey);
       logSh.getRange(hit, 23).setValue(window);
       logSh.getRange(hit, 24).setValue(flags);

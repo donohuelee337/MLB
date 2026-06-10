@@ -334,6 +334,19 @@ function mlbBackfillStakesMenu_() {
  */
 function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+  // One window at a time. Overlapping runs (slow morning run + midday
+  // trigger, two operators, etc.) interleave clearContents()+rebuild on
+  // shared tabs and trample the per-run caches. Wait up to 30s, then bail
+  // loudly rather than corrupt tabs mid-rebuild. GAS auto-releases the lock
+  // when the execution ends, so a crashed run can't wedge the pipeline.
+  const windowLock = LockService.getScriptLock();
+  if (!windowLock.tryLock(30000)) {
+    try {
+      ss.toast('Another pipeline window is still running — skipped ' + windowTag, 'MLB-BOIZ', 10);
+    } catch (eToast) {}
+    Logger.log('runMLBBallWindow_(' + windowTag + '): script lock busy — skipped');
+    return;
+  }
   const start = Date.now();
   resetPipelineLog_(windowTag);
   // Per-step timings flush to 📊 Pipeline_Timings as the pipeline runs,
@@ -375,6 +388,11 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   timedGrader('K (live)',       typeof gradeMLBPendingResults_       === 'function' ? gradeMLBPendingResults_       : null);
   timedGrader('H v2 (shadow)',  typeof gradeMLBHitsV2PendingResults_ === 'function' ? gradeMLBHitsV2PendingResults_ : null);
   timedGrader('H v3 (shadow)',  typeof gradeMLBHitsV3PendingResults_ === 'function' ? gradeMLBHitsV3PendingResults_ : null);
+  // TB graders were never wired in — the TB shadow logs sat PENDING forever,
+  // so the "promote shadow after 100+ graded" bar could never be met. Cheap
+  // once backlog clears: graders skip rows that already hold a final result.
+  timedGrader('TB v2 (shadow)', typeof gradeMLBTBV2PendingResults_   === 'function' ? gradeMLBTBV2PendingResults_   : null);
+  timedGrader('TB v3 (shadow)', typeof gradeMLBTBV3PendingResults_   === 'function' ? gradeMLBTBV3PendingResults_   : null);
   timedGrader('HR promo',       typeof gradeHrPromoPendingResults_   === 'function' ? gradeHrPromoPendingResults_   : null);
   timedGrader('NRFI',         typeof gradeNrfiPendingResults_     === 'function' ? gradeNrfiPendingResults_     : null);
   timedGrader('F5',           typeof gradeF5PendingResults_       === 'function' ? gradeF5PendingResults_       : null);
@@ -443,6 +461,37 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   });
   step('Pitcher game logs (statsapi)', refreshMLBPitcherGameLogs);
   step('FanDuel MLB odds', fetchMLBFanDuelOdds);
+  // Staleness guard: if the odds fetch failed/returned nothing, the ✅ tab
+  // still holds a previous slate — and in a 3-4 game series those matchup
+  // labels join today's queues perfectly, pricing bets against lines that no
+  // longer exist. Clearing is the honest state: no odds → fd_*_miss flags and
+  // zero picks this window; the next successful window repopulates.
+  step('Odds staleness guard', function () {
+    const slate = getSlateDateString_(cfg);
+    if (typeof mlbOddsTabIsForSlate_ === 'function' && !mlbOddsTabIsForSlate_(ss, slate)) {
+      const oddsSh = ss.getSheetByName(MLB_ODDS_CONFIG.tabName);
+      if (oddsSh && oddsSh.getLastRow() >= 4) {
+        oddsSh.clearContents();
+        addPipelineWarning_(
+          '✅ odds tab held a different slate than ' + slate +
+          ' — CLEARED so stale series prices cannot join today\'s queues (no odds = no picks this window)'
+        );
+      } else {
+        addPipelineWarning_('✅ odds tab empty for ' + slate + ' — queues will flag fd_*_miss');
+      }
+    }
+    if (typeof mlbScheduleTabIsForSlate_ === 'function' && !mlbScheduleTabIsForSlate_(ss, slate)) {
+      const schSh = ss.getSheetByName(MLB_SCHEDULE_TAB);
+      if (schSh && schSh.getLastRow() >= 4) {
+        schSh.clearContents();
+        if (typeof mlbResetScheduleBlockCache_ === 'function') mlbResetScheduleBlockCache_();
+        addPipelineWarning_(
+          '📅 schedule tab held a different slate than ' + slate +
+          ' — CLEARED so queues cannot build bets against finished games'
+        );
+      }
+    }
+  });
   step('Savant ingest (optional)', function () {
     savantTeamCount = mlbSavantAbsIngestBestEffort_();
     if (typeof mlbStatcastIngestProfilesBestEffort_ === 'function') {
@@ -472,9 +521,7 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   step('MLB Bet Card', refreshMLBBetCard);
   // Funnel diagnostic must run AFTER the Bet Card so it can compare its own
   // gate tally against mlbBetCardPlayStats_() and surface miscount drift.
-  // Kept inside the fixed-index band as a no-op for outcomes lookup: the
-  // existing oCfg..oBet indices [0..14] are unaffected; later code uses
-  // name-based outcomes.filter (see oHitsV3) so this insertion is safe.
+  // Outcome lookups below are name-based, so step insertions here are safe.
   step('Bet Card funnel diagnostic', diagnoseBetCardFunnel_);
   // Early Win card reads ✅ FanDuel_MLB_Odds (h2h) + 📅 MLB_Schedule, both
   // already built above. Cheap (~1s) and runs daily even when card is empty,
@@ -487,22 +534,30 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   // GS Promo reuses the HR-promo row builder, so it must run AFTER the HR refresh.
   step('Batter GS Promo refresh', refreshBatterGsPromoSheet_);
 
-  // Fixed indices for logStep_ rows below — if you add/remove steps, update these
-  // or switch to name-based lookup (see oHitsV3 below).
-  const oCfg = outcomes[0] || { ok: true };
-  const oInj = outcomes[1] || { ok: true };
-  const oSch = outcomes[2] || { ok: true };
-  const oGameLogs = outcomes[4] || { ok: true };
-  const oOdds = outcomes[5] || { ok: true };
-  const oSavant = outcomes[6] || { ok: true };
-  const oSlate = outcomes[7] || { ok: true };
-  const oPk = outcomes[8] || { ok: true };
-  const oCard = outcomes[9] || { ok: true };
-  const oKSim = outcomes[10] || { ok: true };
-  const oHitsV2 = outcomes[11] || { ok: true };
-  const oHSim = outcomes[12] || { ok: true };
-  const oStreak = outcomes[13] || { ok: true };
-  const oBet = outcomes[14] || { ok: true };
+  // Name-based outcome lookup. The old fixed outcomes[N] indices silently
+  // broke when the Outs/ER/NRFI/F5 steps were inserted (everything ≥11
+  // shifted by 8): four Pipeline_Log rows reported the wrong step's OK/FAIL
+  // and the Results Log snapshot below was gated on the *Pitcher ER card*
+  // instead of the Bet Card. Prefix match so suffixed variants
+  // ("MLB injuries (ESPN)" / "(unchanged)") resolve to one lookup name.
+  function outcomeByName(prefix) {
+    const hit = outcomes.filter(function (o) { return String(o.name).indexOf(prefix) === 0; })[0];
+    return hit || { ok: true };
+  }
+  const oCfg = outcomeByName('Config');
+  const oInj = outcomeByName('MLB injuries');
+  const oSch = outcomeByName('MLB schedule');
+  const oGameLogs = outcomeByName('Pitcher game logs');
+  const oOdds = outcomeByName('FanDuel MLB odds');
+  const oSavant = outcomeByName('Savant ingest');
+  const oSlate = outcomeByName('Slate board');
+  const oPk = outcomeByName('Pitcher K queue');
+  const oCard = outcomeByName('Pitcher K card');
+  const oKSim = outcomeByName('Sim Engine (Pitcher K)');
+  const oHitsV2 = outcomeByName('Batter Hits v2 card');
+  const oHSim = outcomeByName('Sim Engine (Batter Hits)');
+  const oStreak = outcomeByName('Streak picks');
+  const oBet = outcomeByName('MLB Bet Card');
 
   logStep_('Config', 1, oCfg.ok ? 1 : 0, oCfg.ok ? '' : oCfg.err || 'failed');
   logStep_(
@@ -743,5 +798,8 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   }
   try {
     ss.getSheetByName(MLB_BET_CARD_TAB).activate();
+  } catch (e) {}
+  try {
+    windowLock.releaseLock();
   } catch (e) {}
 }

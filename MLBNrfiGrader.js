@@ -27,33 +27,56 @@ function gradeNrfiPendingResults_() {
     const slateStr = mlbReadSlateYmd_(row[1]);
     if (!slateStr || slateStr >= today) continue;
 
+    // Header contract (1-based cols): 17 actual_1st_runs · 18 result ·
+    // 19 grade_notes · 20 stake $ · 21 pnl $ · 22 bet_key. A pre-build-25
+    // version of this grader wrote everything one column right (adapted from
+    // the F5 grader without re-basing for the extra lineup_top3 column),
+    // landing runs in result, WIN/LOSS in notes, notes over stake, and pnl
+    // over bet_key. Writes below use the contract columns; the numeric-result
+    // check regrades rows the old bug corrupted.
     const resCell = String(row[17] || '').trim().toUpperCase();
-    if (resCell && resCell !== 'PENDING') continue;
+    const resIsCorrupt = resCell !== '' && resCell !== 'PENDING' && !isNaN(parseFloat(resCell));
+    if (resCell && resCell !== 'PENDING' && !resIsCorrupt) continue;
 
     const gamePk = parseInt(row[4], 10);
     const side = String(row[5] || '').trim();
     const line = row[6];
     const odds = row[7];
-    const stake = row[19];
+    let stake = row[19];
+    // Self-heal: the old bug overwrote stake $ with grade-note text. Clear the
+    // junk so pnl math can't run against a string; flag it in grade_notes.
+    let stakeLostNote = '';
+    if (stake !== '' && stake != null && isNaN(parseFloat(stake))) {
+      logSh.getRange(4 + i, 20).setValue('');
+      stake = '';
+      stakeLostNote = ' · stake lost to col-shift bug (no pnl)';
+    }
     if (!gamePk) {
-      logSh.getRange(4 + i, 20).setValue('missing gamePk');
+      logSh.getRange(4 + i, 19).setValue('missing gamePk');
       continue;
+    }
+    // Self-heal: the old bug overwrote bet_key (col 22) with a pnl number.
+    if (resIsCorrupt) {
+      const bk = String(row[21] != null ? row[21] : '').trim();
+      if (bk === '' || !isNaN(parseFloat(bk))) {
+        logSh.getRange(4 + i, 22).setValue(mlbNrfiResultKey_(slateStr, gamePk, side));
+      }
     }
 
     const box = mlbFetchBoxscoreJson_(gamePk);
     if (!box) {
-      logSh.getRange(4 + i, 20).setValue('feed/live fetch failed');
+      logSh.getRange(4 + i, 19).setValue('feed/live fetch failed');
       continue;
     }
     if (!mlbBoxscoreIsFinal_(box)) {
       const ageMs = new Date(today + 'T00:00:00').getTime() - new Date(slateStr + 'T00:00:00').getTime();
       const daysOld = Math.floor(ageMs / 86400000);
       if (daysOld >= 2) {
-        logSh.getRange(4 + i, 19).setValue('VOID');
-        logSh.getRange(4 + i, 20).setValue('Game not played on slate');
+        logSh.getRange(4 + i, 18).setValue('VOID');
+        logSh.getRange(4 + i, 19).setValue('Game not played on slate' + stakeLostNote);
         graded++;
       } else {
-        logSh.getRange(4 + i, 20).setValue('NOT_FINAL — will retry later');
+        logSh.getRange(4 + i, 19).setValue('NOT_FINAL — will retry later');
       }
       continue;
     }
@@ -63,26 +86,26 @@ function gradeNrfiPendingResults_() {
         ? mlbFirstInningTotalRunsFromBoxscore_(box)
         : null;
     if (runs1 === null) {
-      logSh.getRange(4 + i, 20).setValue('linescore inning 1 missing');
+      logSh.getRange(4 + i, 19).setValue('linescore inning 1 missing');
       continue;
     }
 
     const ouSide = mlbNrfiSideToOu_(side);
     if (!ouSide) {
-      logSh.getRange(4 + i, 19).setValue('VOID');
-      logSh.getRange(4 + i, 20).setValue('Unknown side: ' + side);
+      logSh.getRange(4 + i, 18).setValue('VOID');
+      logSh.getRange(4 + i, 19).setValue('Unknown side: ' + side + stakeLostNote);
       graded++;
       continue;
     }
 
     const g = mlbGradePitcherKRow_(line != null && line !== '' ? line : 0.5, ouSide, runs1);
-    logSh.getRange(4 + i, 18).setValue(runs1);
-    logSh.getRange(4 + i, 19).setValue(g.result);
-    logSh.getRange(4 + i, 20).setValue('1st-inning runs=' + runs1 + ' · ' + g.note);
+    logSh.getRange(4 + i, 17).setValue(runs1);
+    logSh.getRange(4 + i, 18).setValue(g.result);
+    logSh.getRange(4 + i, 19).setValue('1st-inning runs=' + runs1 + ' · ' + g.note + stakeLostNote);
 
     const pnl = mlbPnlFromResult_(g.result, stake, odds);
     if (stake !== '' && stake != null && !isNaN(parseFloat(stake))) {
-      logSh.getRange(4 + i, 22).setValue(pnl);
+      logSh.getRange(4 + i, 21).setValue(pnl);
     }
     graded++;
   }

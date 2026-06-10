@@ -87,8 +87,10 @@ function _mlbF5FindLogRow_(logSh, slate, gamePk, side, line) {
 }
 
 function mlbF5DefaultStake_(cfg) {
-  const raw = parseFloat(String(cfg && cfg['F5_DEFAULT_STAKE'] != null ? cfg['F5_DEFAULT_STAKE'] : '10').trim());
-  return !isNaN(raw) && raw > 0 ? raw : 10;
+  // Default = the bankroll policy max bet (tier 3, $7.50 of a $500 roll).
+  // The old $10 default silently exceeded the staking policy cap.
+  const raw = parseFloat(String(cfg && cfg['F5_DEFAULT_STAKE'] != null ? cfg['F5_DEFAULT_STAKE'] : '7.50').trim());
+  return !isNaN(raw) && raw > 0 ? raw : 7.5;
 }
 
 function snapshotF5ToLog(windowTag) {
@@ -168,22 +170,16 @@ function snapshotF5ToLog(windowTag) {
 
     const hit = _mlbF5FindLogRow_(logSh, slate, gamePk, side, line);
     if (hit > 0) {
-      logSh.getRange(hit, 1, 1, 13).setValues([[
-        loggedAt,
-        slate,
-        rank,
-        matchup,
-        gamePk,
-        side,
-        line,
-        odds,
-        pModel,
-        ev,
-        lambdaTotal,
-        lambdaAway,
-        lambdaHome,
-      ]]);
-      logSh.getRange(hit, 17).setValue(stake);
+      logSh.getRange(hit, 1, 1, 6).setValues([[loggedAt, slate, rank, matchup, gamePk, side]]);
+      // Line/Odds (cols 7/8) keep their FIRST-logged values — the bet as
+      // struck. Refreshing them every window made the grader settle at
+      // closing prices instead of the entry price.
+      logSh.getRange(hit, 9, 1, 5).setValues([[pModel, ev, lambdaTotal, lambdaAway, lambdaHome]]);
+      // Stake: only fill when blank/non-numeric — never overwrite an entry.
+      const prevStake = logSh.getRange(hit, 17).getValue();
+      if (prevStake === '' || prevStake == null || isNaN(parseFloat(prevStake))) {
+        logSh.getRange(hit, 17).setValue(stake);
+      }
       logSh.getRange(hit, 19).setValue(betKey);
       logSh.getRange(hit, 20).setValue(window);
       logSh.getRange(hit, 21).setValue(flags);

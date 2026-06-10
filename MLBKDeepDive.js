@@ -229,7 +229,7 @@ function runMLBKDeepDiveOnDiscrepancies() {
     const r = t.r;
     const opp = String(r[2] || '');
     const facts = {
-      date: r[0],
+      date: mlbDateCellToYmd_(r[0]),
       pitcher: r[1],
       opp: opp,
       throws: r[3],

@@ -96,6 +96,10 @@ function mlbBackfillPitcherKLogsProjIp_() {
   });
   Object.keys(byPitcher).forEach(function (pid) {
     byPitcher[pid].sort(function (a, b) {
+      // Normalize Date-coerced cells so chronology survives mixed formats.
+      const da = mlbDateCellToYmd_(a.row[0]);
+      const db = mlbDateCellToYmd_(b.row[0]);
+      if (da !== db) return da < db ? -1 : 1;
       return String(a.row[0]).localeCompare(String(b.row[0]));
     });
   });
@@ -385,7 +389,7 @@ function mlbBackfillPitcherKLogsContext_() {
     if (!opp) return;
     if (!teamBattingIndex[opp]) teamBattingIndex[opp] = [];
     teamBattingIndex[opp].push({
-      date: r[0],
+      date: mlbDateCellToYmd_(r[0]),
       bf: r[7],
       kAgainst: r[5],
       pitcherThrows: String(r[4] || '').toUpperCase(),

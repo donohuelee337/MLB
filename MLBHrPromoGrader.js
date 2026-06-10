@@ -7,16 +7,25 @@
 // ============================================================
 
 function _mlbHrCountFromBoxscore_(payload, batterId) {
-  if (!payload || !payload.teams) return null;
+  // Route through mlbBoxscoreTeams_ — mlbFetchBoxscoreJson_ returns the v1.1
+  // /feed/live shape ({gameData, liveData}), not the old v1 /boxscore shape
+  // (top-level .teams). Reading payload.teams directly returned null for every
+  // game since the /feed/live migration, silently VOIDing the whole HR log.
+  const teams = typeof mlbBoxscoreTeams_ === 'function' ? mlbBoxscoreTeams_(payload) : (payload && payload.teams);
+  if (!teams) return null;
   const sides = ['home', 'away'];
   const bid = parseInt(batterId, 10);
   for (let s = 0; s < sides.length; s++) {
-    const tm = payload.teams[sides[s]];
+    const tm = teams[sides[s]];
     if (!tm || !tm.players) continue;
     const pl = tm.players['ID' + bid];
     if (!pl) continue;
     const batting = pl.stats && pl.stats.batting ? pl.stats.batting : null;
     if (!batting) return null;       // listed but DNP
+    // feed/live emits a zeroed batting line for defensive subs / pinch
+    // runners — 0 plate appearances is a DNP (void), not a MISS.
+    const pa = parseInt(batting.plateAppearances, 10);
+    if (!isNaN(pa) && pa === 0) return null;
     const hr = parseInt(batting.homeRuns, 10);
     return isNaN(hr) ? 0 : hr;
   }
@@ -43,7 +52,11 @@ function gradeHrPromoPendingResults_() {
     if (!slate || slate >= today) continue;
 
     const resCell = String(row[19] || '').trim().toUpperCase();
-    if (resCell && resCell !== 'PENDING') continue;
+    // Self-heal: the payload-shape bug VOIDed every row as "DNP / not in
+    // boxscore" — regrade those with the fixed parser (real DNPs re-VOID).
+    const wasBugVoid =
+      resCell === 'VOID' && String(row[20] || '').indexOf('DNP / not in boxscore') !== -1;
+    if (resCell && resCell !== 'PENDING' && !wasBugVoid) continue;
 
     const gamePk = parseInt(row[5], 10);
     const batterId = parseInt(row[7], 10);
@@ -58,7 +71,18 @@ function gradeHrPromoPendingResults_() {
       continue;
     }
     if (!mlbBoxscoreIsFinal_(box)) {
-      logSh.getRange(4 + i, 21).setValue('NOT_FINAL — will retry later');
+      // Postponed/suspended fallback (same policy as the K/NRFI graders):
+      // a game still not final 2+ days after its slate did not happen → VOID.
+      const ageMs = new Date(today + 'T00:00:00').getTime() - new Date(slate + 'T00:00:00').getTime();
+      const daysOld = Math.floor(ageMs / 86400000);
+      if (daysOld >= 2) {
+        logSh.getRange(4 + i, 19).setValue('');
+        logSh.getRange(4 + i, 20).setValue('VOID');
+        logSh.getRange(4 + i, 21).setValue('Game not played on slate (postponed)');
+        graded++;
+      } else {
+        logSh.getRange(4 + i, 21).setValue('NOT_FINAL — will retry later');
+      }
       continue;
     }
 

@@ -75,8 +75,15 @@ function mlbNormalizeGameLabel_(s) {
 }
 
 function mlbNormalizePersonName_(s) {
-  let t = String(s || '')
-    .toLowerCase()
+  let t = String(s || '').toLowerCase();
+  // Fold diacritics: statsapi ships accented fullNames ("josé berríos",
+  // "jesús luzardo") while FanDuel descriptions are plain ASCII — without
+  // this fold the odds join silently misses and the player never reaches a
+  // queue/card. NFD splits base char + combining mark; strip the marks.
+  if (typeof t.normalize === 'function') {
+    t = t.normalize('NFD').replace(/[̀-ͯ]/g, '');
+  }
+  t = t
     .replace(/['’]/g, '')
     .replace(/\./g, '')
     .replace(/[-]/g, ' ')

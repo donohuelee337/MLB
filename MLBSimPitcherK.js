@@ -28,10 +28,30 @@ function refreshPitcherKSimEngine_() {
   }
 
   const last = src.getLastRow();
-  // Read up to 34 cols so we can pick up 🧪 k.v2 (27..30) and k.v3.bf (31..34) audits.
-  // If the card hasn't been rebuilt with the latest schema yet, fall back to its
-  // current width and the new cells will be blank — sim degrades gracefully.
-  const colsToRead = Math.min(34, Math.max(22, src.getLastColumn()));
+  // Resolve card columns BY HEADER NAME (row 3). Build 24 inserted pitch_team
+  // at card col 5 and this reader's hard-coded indices silently shifted: r[4]
+  // became the team abbr → parseFloat=NaN → every sim row lost its model and
+  // the 🃏 card produced zero K picks. Fallback indices = current card layout.
+  const hdr = mlbHeaderIndexMap_(src, 3);
+  const ci = function (name, fb) { return hdr[name] != null ? hdr[name] : fb; };
+  const C_LINE = ci('fd_k_line', 5);
+  const C_OVER = ci('fd_over', 6);
+  const C_UNDER = ci('fd_under', 7);
+  const C_IP = ci('proj_IP', 8);
+  const C_LAMBDA = ci('proj_K', 9);
+  const C_FLAGS = ci('flags', 19);
+  const C_PID = ci('pitcher_id', 20);
+  const C_UMP = ci('hp_umpire', 21);
+  const C_THROWS = ci('throws', 22);
+  const C_L_V2 = ci('lambda_K_v2', 27);
+  const C_GAMES_V2 = ci('games', 28);
+  const C_K9_V2 = ci('k9_eff_v2', 29);
+  const C_IP_V2 = ci('projIP_v2', 30);
+  const C_L_V3 = ci('lambda_K_v3_bf', 31);
+  const C_SBF_V3 = ci('season_bf', 32);
+  const C_KPA_V3 = ci('k_per_pa', 33);
+  const C_PA_V3 = ci('proj_pa_bf', 34);
+  const colsToRead = src.getLastColumn();
   // Data is rows 4..last → (last - 3) rows; reading `last` rows over-reads 3.
   const rows = src.getRange(4, 1, last - 3, colsToRead).getValues();
   const out = [];
@@ -41,22 +61,22 @@ function refreshPitcherKSimEngine_() {
     const matchup = r[1];
     const side = r[2];
     const pitcher = r[3];
-    const line = r[4];
-    const fdOver = r[5];
-    const fdUnder = r[6];
-    const projIp = r[7];
-    const lambdaModel = parseFloat(String(r[8]), 10);
+    const line = r[C_LINE];
+    const fdOver = r[C_OVER];
+    const fdUnder = r[C_UNDER];
+    const projIp = r[C_IP];
+    const lambdaModel = parseFloat(String(r[C_LAMBDA]), 10);
     const lineNum = parseFloat(String(line), 10);
-    // 🧪 v2 audit passthroughs from card (cols 27..30 of card → r[26..29]).
-    const lambdaV2Model = parseFloat(String(r[26] != null ? r[26] : ''), 10);
-    const gamesV2 = r[27] != null ? r[27] : '';
-    const k9EffV2 = r[28] != null ? r[28] : '';
-    const projIpV2 = r[29] != null ? r[29] : '';
-    // 🧪 v3.bf audit passthroughs from card (cols 31..34 of card → r[30..33]).
-    const lambdaV3BfModel = parseFloat(String(r[30] != null ? r[30] : ''), 10);
-    const seasonBfV3 = r[31] != null ? r[31] : '';
-    const kPerPaV3 = r[32] != null ? r[32] : '';
-    const projPaBfV3 = r[33] != null ? r[33] : '';
+    // 🧪 v2 audit passthroughs from card.
+    const lambdaV2Model = parseFloat(String(r[C_L_V2] != null ? r[C_L_V2] : ''), 10);
+    const gamesV2 = r[C_GAMES_V2] != null ? r[C_GAMES_V2] : '';
+    const k9EffV2 = r[C_K9_V2] != null ? r[C_K9_V2] : '';
+    const projIpV2 = r[C_IP_V2] != null ? r[C_IP_V2] : '';
+    // 🧪 v3.bf audit passthroughs from card.
+    const lambdaV3BfModel = parseFloat(String(r[C_L_V3] != null ? r[C_L_V3] : ''), 10);
+    const seasonBfV3 = r[C_SBF_V3] != null ? r[C_SBF_V3] : '';
+    const kPerPaV3 = r[C_KPA_V3] != null ? r[C_KPA_V3] : '';
+    const projPaBfV3 = r[C_PA_V3] != null ? r[C_PA_V3] : '';
 
     let lamAnch = NaN;
     if (!isNaN(lambdaModel) && lambdaModel > 0 && !isNaN(lineNum)) {
@@ -133,7 +153,7 @@ function refreshPitcherKSimEngine_() {
       : { onBoard: true };
     let pickSide = pick.side;
     let pickEv = isNaN(pick.ev) ? '' : Math.round(pick.ev * 1000) / 1000;
-    let flags = String(r[18] || '');
+    let flags = String(r[C_FLAGS] || '');
     if (hasModel && !board.onBoard) {
       pickSide = '';
       pickEv = '';
@@ -160,9 +180,9 @@ function refreshPitcherKSimEngine_() {
       pickSide,
       pickEv,
       flags,
-      r[19],
-      r[20],
-      r[21],
+      r[C_PID],
+      r[C_UMP],
+      r[C_THROWS],
       // 🧪 v2 audit cols 23..30. Cols 1..22 above are live.
       !isNaN(lambdaV2Model) ? lambdaV2Model : '',
       !isNaN(lamAnchV2) ? lamAnchV2 : '',

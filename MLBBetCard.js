@@ -128,6 +128,50 @@ function mlbBetCardSourceSheet_(ss, simTab, cardTab, label) {
   return null;
 }
 
+/**
+ * Normalize 🎰 Pitcher_K_Card rows (39-col layout, pitch_team at idx 4) to the
+ * ⚡ Sim_Pitcher_K row shape every K reader below expects. Sim rows pass
+ * through untouched. Card-only extras the sim lacks (opp_abbr / opp_k_pa /
+ * opp_k_pa_vs / hot_cold) ride at idx 38..41, so they are only ever readable
+ * when the source really was the card — sim v2 audit cols can no longer
+ * masquerade as opponent context. Columns resolve by header name with
+ * current-layout fallbacks (root cause of the build-24 zero-K-picks bug was
+ * hard-coded indices surviving a column insertion).
+ */
+function mlbBetCardKRowsToSimShape_(srcSheet, rows) {
+  if (!srcSheet || srcSheet.getName() !== MLB_PITCHER_K_CARD_TAB) return rows;
+  const hdr = typeof mlbHeaderIndexMap_ === 'function' ? mlbHeaderIndexMap_(srcSheet, 3) : {};
+  const ci = function (name, fb) { return hdr[name] != null ? hdr[name] : fb; };
+  const C = {
+    line: ci('fd_k_line', 5), over: ci('fd_over', 6), under: ci('fd_under', 7),
+    ip: ci('proj_IP', 8), lambda: ci('proj_K', 9), edge: ci('edge_vs_line', 10),
+    pOver: ci('p_over', 11), pUnder: ci('p_under', 12),
+    imO: ci('implied_over', 13), imU: ci('implied_under', 14),
+    evO: ci('ev_over_$1', 15), evU: ci('ev_under_$1', 16),
+    pick: ci('pick', 17), pickEv: ci('pick_ev_$1', 18), flags: ci('flags', 19),
+    pid: ci('pitcher_id', 20), ump: ci('hp_umpire', 21), throws: ci('throws', 22),
+    oppAbbr: ci('opp_abbr', 23), oppKpa: ci('opp_k_pa', 24), oppKpaVs: ci('opp_k_pa_vs', 25),
+    hotCold: ci('hot_cold', 26),
+    lV2: ci('lambda_K_v2', 27), games: ci('games', 28), k9V2: ci('k9_eff_v2', 29), ipV2: ci('projIP_v2', 30),
+    lV3: ci('lambda_K_v3_bf', 31), sBf: ci('season_bf', 32), kPa: ci('k_per_pa', 33), paBf: ci('proj_pa_bf', 34),
+  };
+  return rows.map(function (r) {
+    const g = function (i) { return r[i] != null ? r[i] : ''; };
+    return [
+      g(0), g(1), g(2), g(3),
+      g(C.line), g(C.over), g(C.under), g(C.ip), g(C.lambda), g(C.edge),
+      g(C.pOver), g(C.pUnder), g(C.imO), g(C.imU), g(C.evO), g(C.evU),
+      g(C.pick), g(C.pickEv), g(C.flags), g(C.pid), g(C.ump), g(C.throws),
+      // Sim audit cols 22..29 (k.v2) / 30..37 (k.v3.bf): the card carries the
+      // raw λ + inputs but not the anchored/best-side audit values — blank.
+      g(C.lV2), '', '', '', '', g(C.games), g(C.k9V2), g(C.ipV2),
+      g(C.lV3), '', '', '', '', g(C.sBf), g(C.kPa), g(C.paBf),
+      // Extras 38..41 — card-only opponent context + hot/cold.
+      g(C.oppAbbr), g(C.oppKpa), g(C.oppKpaVs), g(C.hotCold),
+    ];
+  });
+}
+
 /** Injury / side / line / FD price — no pWin or EV gates. */
 function mlbBetCardKBasicOk_(r) {
   const flags = String(r[18] || '');
@@ -145,10 +189,10 @@ function mlbBetCardKBasicOk_(r) {
   return { side: side, american: american, pitcher: pitcher };
 }
 
-/** Matchup tags for segment registry (HOT/COLD from card; flags substring). */
+/** Matchup tags for segment registry (HOT/COLD rides at extras idx 41 on card-sourced rows). */
 function mlbBetCardKTagsFromRow_(r) {
   const tags = [];
-  const hc = String(r[25] || '').toUpperCase();
+  const hc = String((r.length > 41 && r[41] != null ? r[41] : '') || '').toUpperCase();
   if (hc === 'HOT' || hc === 'COLD') tags.push(hc);
   const flags = String(r[18] || '');
   if (flags.indexOf('opp_k_high') !== -1) tags.push('opp_k_high');
@@ -156,10 +200,10 @@ function mlbBetCardKTagsFromRow_(r) {
   return tags;
 }
 
-/** Opp K context from 🎰 card cols when present (sim omits these). */
+/** Opp K context — extras idx 39/40 on card-sourced rows; blank on sim rows (sim omits these). */
 function mlbBetCardKOppContextFromRow_(r) {
-  const vs = parseFloat(String(r[24] != null ? r[24] : ''), 10);
-  const all = parseFloat(String(r[23] != null ? r[23] : ''), 10);
+  const vs = parseFloat(String(r.length > 40 && r[40] != null ? r[40] : ''), 10);
+  const all = parseFloat(String(r.length > 39 && r[39] != null ? r[39] : ''), 10);
   const oppKL14 = !isNaN(vs) && vs > 0 ? vs : !isNaN(all) && all > 0 ? all : '';
   const lambdaRaw = r[8];
   return { oppKL14: oppKL14, lambdaRaw: lambdaRaw };
@@ -223,7 +267,7 @@ function mlbBetCardKRowToPlay_(r, cfg, gameTimeIdx, meta) {
   const pitcherId = r[19];
   const hpUmp = String(r[20] || '').trim();
   const throws = String(r[21] || '').trim();
-  const hotCold = String(r[25] || '').toUpperCase();
+  const hotCold = String((r.length > 41 && r[41] != null ? r[41] : '') || '').toUpperCase();
   const hand =
     throws.toUpperCase() === 'R' ? 'RHP' : throws.toUpperCase() === 'L' ? 'LHP' : throws ? throws : '';
   const pickLabel =
@@ -490,8 +534,12 @@ function refreshMLBBetCard() {
 
   if (srcK && srcK.getLastRow() >= 4) {
     const lastK = srcK.getLastRow();
-    const kCols = Math.min(34, Math.max(26, srcK.getLastColumn()));
-    kRows = srcK.getRange(4, 1, lastK, kCols).getValues();
+    // Full width + sim-shape normalization (card fallback rows get re-mapped).
+    // Data is rows 4..lastK → (lastK - 3) rows.
+    kRows = mlbBetCardKRowsToSimShape_(
+      srcK,
+      srcK.getRange(4, 1, lastK - 3, srcK.getLastColumn()).getValues()
+    );
     kRows.forEach(function (r) {
       const play = mlbBetCardKRowToPlay_(r, cfg, gameTimeIdx);
       if (play) {
@@ -1218,7 +1266,10 @@ function diagnoseBetCardFunnel_() {
   }
 
   const kRows = srcK && srcK.getLastRow() >= 4
-    ? srcK.getRange(4, 1, srcK.getLastRow(), Math.min(26, srcK.getLastColumn())).getValues()
+    ? mlbBetCardKRowsToSimShape_(
+        srcK,
+        srcK.getRange(4, 1, srcK.getLastRow() - 3, srcK.getLastColumn()).getValues()
+      )
     : [];
   const hRows = srcH && srcH.getLastRow() >= 4
     ? srcH.getRange(4, 1, srcH.getLastRow(), Math.min(34, srcH.getLastColumn())).getValues()

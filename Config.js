@@ -8,7 +8,7 @@
 const CONFIG_TAB_NAME = '⚙️ Config';
 
 /** Incremented by scripts/clasp-deploy.ps1 on each Apps Script push (visible on ⚙️ Config). */
-const MLB_APPS_SCRIPT_BUILD = 24;
+const MLB_APPS_SCRIPT_BUILD = 25;
 
 function mlbAppsScriptBuild_() {
   return typeof MLB_APPS_SCRIPT_BUILD !== 'undefined' ? MLB_APPS_SCRIPT_BUILD : '';
@@ -342,10 +342,10 @@ function buildConfigTab() {
   row_('NRFI_PICK_MIN_EV', '-0.05', "Outcome mode only: price guardrail — skip a pick if its EV/$1 is below this even when confidence clears the floor. Negative-tolerant so we'll lay modest juice on strong winners, but won't light money on fire.");
   row_('NRFI_SNAPSHOT_TOP_N', '10', 'Max games snapshotted from 🌅 NRFI_Card to 📋 NRFI_Results_Log per window. Ranked by win probability (outcome mode) or EV (legacy mode).');
   row_('NRFI_SNAPSHOT_MIN_EV', '0.03', 'Legacy ev-mode only: minimum best_ev_$1 on 🌅 NRFI_Card to snapshot into results log. Ignored in outcome mode (NRFI_PICK_MIN_EV guards price there).');
-  row_('NRFI_DEFAULT_STAKE', '10', 'Default $ stake for NRFI results-log PnL column.');
+  row_('NRFI_DEFAULT_STAKE', '7.50', 'Default $ stake for NRFI results-log PnL column. Capped at the tier-3 max bet ($7.50 of $500 roll) — keep ≤ TIER_3_USD.');
   row_('F5_SNAPSHOT_TOP_N', '8', 'Max F5 total picks snapshotted from ⚾ F5_Card to 📋 F5_Results_Log per window.');
   row_('F5_SNAPSHOT_MIN_EV', '0.03', 'Minimum best_ev_$1 on ⚾ F5_Card to snapshot into results log.');
-  row_('F5_DEFAULT_STAKE', '10', 'Default $ stake for F5 results-log PnL column.');
+  row_('F5_DEFAULT_STAKE', '7.50', 'Default $ stake for F5 results-log PnL column. Capped at the tier-3 max bet ($7.50 of $500 roll) — keep ≤ TIER_3_USD.');
   ss.getNamedRanges().forEach(function (nr) {
     if (nr.getName() === 'CONFIG') nr.remove();
   });
@@ -378,9 +378,55 @@ function getOddsApiKey_() {
 
 function getSlateDateString_(cfg) {
   const tz = Session.getScriptTimeZone();
-  const fromCfg = cfg && cfg['SLATE_DATE'] ? String(cfg['SLATE_DATE']).trim() : '';
+  const raw = cfg ? cfg['SLATE_DATE'] : '';
+  // Sheets auto-coerces yyyy-MM-dd cells to Date objects, and String(Date)
+  // fails the regex below — which silently ran TODAY's slate even when a
+  // slate date was explicitly set. Format Dates back to yyyy-MM-dd instead.
+  if (raw instanceof Date && !isNaN(raw.getTime())) {
+    return Utilities.formatDate(raw, tz, 'yyyy-MM-dd');
+  }
+  const fromCfg = raw != null ? String(raw).trim() : '';
   if (fromCfg && /^\d{4}-\d{2}-\d{2}$/.test(fromCfg)) return fromCfg;
+  if (fromCfg && typeof addPipelineWarning_ === 'function') {
+    addPipelineWarning_('⚙️ SLATE_DATE "' + fromCfg + '" unparseable — falling back to today');
+  }
   return Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+}
+
+/**
+ * Header-name → 0-based column index map from a sheet header row.
+ * Lets readers resolve columns by name instead of hard-coded indices, so a
+ * column insertion upstream (e.g. pitch_team on the 🎰 K card, build 24)
+ * can no longer silently shift every downstream read.
+ * Returns {} on any failure; callers should keep index fallbacks.
+ */
+/**
+ * Normalize a sheet date cell to 'yyyy-MM-dd'. Sheets coerces yyyy-MM-dd
+ * strings to Date objects on write; String(Date) = "Tue Jun 09 2026 …",
+ * which makes lexicographic date comparisons sort by DAY-OF-WEEK NAME.
+ * Date objects format back in the script TZ (exactly reverses the coercion);
+ * ISO strings keep their leading date part; everything else passes through.
+ */
+function mlbDateCellToYmd_(v) {
+  if (v instanceof Date && !isNaN(v.getTime())) {
+    return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd');
+  }
+  const s = String(v == null ? '' : v).trim();
+  const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  return m ? m[1] : s;
+}
+
+function mlbHeaderIndexMap_(sh, headerRow) {
+  const map = {};
+  try {
+    const lastCol = sh.getLastColumn();
+    if (!lastCol || sh.getLastRow() < headerRow) return map;
+    sh.getRange(headerRow, 1, 1, lastCol).getValues()[0].forEach(function (n, i) {
+      const key = String(n || '').trim();
+      if (key && map[key] == null) map[key] = i;
+    });
+  } catch (e) {}
+  return map;
 }
 
 /** Soft validation for tuning keys — logs pipeline warnings only (does not block). */
@@ -446,10 +492,10 @@ function validateMlbPipelineConfig_(cfg) {
   warnRange('NRFI_PICK_MIN_EV', c['NRFI_PICK_MIN_EV'], -0.3, 0.3);
   warnRange('NRFI_SNAPSHOT_TOP_N', c['NRFI_SNAPSHOT_TOP_N'], 1, 30);
   warnRange('NRFI_SNAPSHOT_MIN_EV', c['NRFI_SNAPSHOT_MIN_EV'], 0, 0.5);
-  warnRange('NRFI_DEFAULT_STAKE', c['NRFI_DEFAULT_STAKE'], 1, 500);
+  warnRange('NRFI_DEFAULT_STAKE', c['NRFI_DEFAULT_STAKE'], 1, 7.5);
   warnRange('F5_SNAPSHOT_TOP_N', c['F5_SNAPSHOT_TOP_N'], 1, 30);
   warnRange('F5_SNAPSHOT_MIN_EV', c['F5_SNAPSHOT_MIN_EV'], 0, 0.5);
-  warnRange('F5_DEFAULT_STAKE', c['F5_DEFAULT_STAKE'], 1, 500);
+  warnRange('F5_DEFAULT_STAKE', c['F5_DEFAULT_STAKE'], 1, 7.5);
 }
 
 function setConfigValue_(key, value) {

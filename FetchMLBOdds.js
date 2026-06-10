@@ -42,6 +42,9 @@ function fetchMLBFanDuelOdds() {
   const eventIds = getMLEventIdsForDate_(apiKey, slateDate);
   if (!eventIds || eventIds.length === 0) {
     ss.toast('No games for ' + slateDate + ' from The Odds API.', '⚠️ No MLB events', 8);
+    if (typeof addPipelineWarning_ === 'function') {
+      addPipelineWarning_('FanDuel odds: 0 events for ' + slateDate + ' — ✅ tab untouched (staleness guard will clear it if it holds another slate)');
+    }
     return;
   }
 
@@ -69,6 +72,9 @@ function fetchMLBFanDuelOdds() {
 
   if (allRows.length === 0) {
     ss.toast('FanDuel may not have posted MLB markets yet for this slate.', '⚠️ No odds rows', 8);
+    if (typeof addPipelineWarning_ === 'function') {
+      addPipelineWarning_('FanDuel odds: 0 rows for ' + slateDate + ' — ✅ tab untouched (staleness guard will clear it if it holds another slate)');
+    }
     return;
   }
 
@@ -189,6 +195,22 @@ function fetchMLEventMarkets_(apiKey, region, bookmaker, eventId, gameLabel, mar
     Logger.log('fetchMLEventMarkets_: ' + err.message);
   }
   return { rows: rows, status: status };
+}
+
+/**
+ * True when the ✅ odds tab banner says it was built for `slateDate`.
+ * A failed/empty fetch leaves the previous tab in place by design (so a
+ * FINAL-window hiccup can't wipe the morning's odds) — but MLB plays 3-4
+ * game series, so yesterday's matchup labels join today's queues perfectly
+ * and stale prices would be bet as live. The pipeline checks this right
+ * after the odds step and clears the tab on a slate mismatch.
+ */
+function mlbOddsTabIsForSlate_(ss, slateDate) {
+  const sh = ss.getSheetByName(MLB_ODDS_CONFIG.tabName);
+  if (!sh || sh.getLastRow() < 4) return false;
+  const banner = String(sh.getRange(1, 1).getValue() || '');
+  const m = banner.match(/slate (\d{4}-\d{2}-\d{2})/);
+  return !!m && m[1] === slateDate;
 }
 
 function buildMLBFanDuelOddsTab_(ss, allRows, slateDate) {

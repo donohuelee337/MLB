@@ -239,6 +239,20 @@ function mlbScheduleMetaForGamePk_(ss, gamePk) {
   return empty;
 }
 
+/**
+ * True when the 📅 schedule tab's first data row is for `slateDate`.
+ * Same staleness hazard as the odds tab: a failed fetch leaves yesterday's
+ * games (and gamePks) in place, and series matchup labels join perfectly —
+ * queues would build bets against already-finished games.
+ */
+function mlbScheduleTabIsForSlate_(ss, slateDate) {
+  const sh = ss.getSheetByName(MLB_SCHEDULE_TAB);
+  if (!sh || sh.getLastRow() < 4) return false;
+  const v = sh.getRange(4, 2).getValue();
+  const ymd = typeof mlbDateCellToYmd_ === 'function' ? mlbDateCellToYmd_(v) : String(v || '');
+  return ymd === slateDate;
+}
+
 function fetchMLBScheduleForSlate() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const cfg = getConfig();
@@ -246,6 +260,9 @@ function fetchMLBScheduleForSlate() {
   const payload = mlbFetchScheduleJsonForDate_(dateStr);
   if (!payload) {
     safeAlert_('Schedule failed', 'HTTP or parse error for ' + dateStr);
+    if (typeof addPipelineWarning_ === 'function') {
+      addPipelineWarning_('Schedule: fetch failed for ' + dateStr + ' — 📅 tab untouched (staleness guard will clear it if it holds another slate)');
+    }
     return;
   }
 

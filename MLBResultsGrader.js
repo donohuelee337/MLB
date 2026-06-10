@@ -398,7 +398,13 @@ function gradeMLBPendingResults_() {
     let pid = parseInt(row[14], 10);
     const matchup = String(row[4] || '').trim();
     const player = String(row[3] || '').trim();
-    const line = row[6];
+    // Grade the bet AS STRUCK: the snapshot upsert refreshes Line/Odds (cols
+    // 7/9) every window, so by grading time they hold the CLOSING values.
+    // open_line/open_odds (cols 23/24) are frozen at first log — that's the
+    // executed bet. Fall back to current only for legacy rows logged before
+    // the open_* columns existed.
+    const openLine = row[22];
+    const line = openLine !== '' && openLine != null ? openLine : row[6];
     const side = row[7];
 
     if ((!gamePk || isNaN(gamePk)) && slateStr && matchup) {
@@ -461,7 +467,8 @@ function gradeMLBPendingResults_() {
     }
 
     const stake = row[24];
-    const odds = row[8];
+    const openOdds = row[23];
+    const odds = openOdds !== '' && openOdds != null ? openOdds : row[8];
 
     function writePnl(result) {
       const pnl = mlbPnlFromResult_(result, stake, odds);

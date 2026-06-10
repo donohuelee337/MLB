@@ -26,16 +26,18 @@ function mlbTeamKPaFromGameLogRows_(teamRows, throwsFilter) {
  * teamOffenseRows: rows where this team batted (opponent perspective).
  */
 function mlbOppKRatesAsOf_(teamOffenseRows, asOfDate, pitcherThrows, cfg) {
-  const cutoff = String(asOfDate);
+  // Normalize both sides to yyyy-MM-dd — Date-coerced cells otherwise compare
+  // lexicographically by day-of-week name and the no-lookahead filter corrupts.
+  const cutoff = mlbDateCellToYmd_(asOfDate);
   const prior = (teamOffenseRows || []).filter(function (r) {
-    return String(r.date) < cutoff;
+    return mlbDateCellToYmd_(r.date) < cutoff;
   });
   const l14Cut = new Date(cutoff);
   l14Cut.setDate(l14Cut.getDate() - 14);
   const l14Str = Utilities.formatDate(l14Cut, 'America/New_York', 'yyyy-MM-dd');
   const seasonRows = prior;
   const l14Rows = prior.filter(function (r) {
-    return String(r.date) >= l14Str;
+    return mlbDateCellToYmd_(r.date) >= l14Str;
   });
 
   const seasonAll = mlbTeamKPaFromGameLogRows_(seasonRows, null);

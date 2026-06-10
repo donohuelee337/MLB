@@ -37,7 +37,9 @@ function runKWalkForwardBacktest() {
           ? oppVs
           : oppSeason;
     byPitcher[pid].push({
-      date: r[0],
+      // Normalized so the strictly-before-asOf filter and chronological sort
+      // survive Date-coerced cells (lexicographic Date strings sort by weekday).
+      date: mlbDateCellToYmd_(r[0]),
       gamePk: r[1],
       pitcherName: r[3],
       k: parseInt(r[5], 10),

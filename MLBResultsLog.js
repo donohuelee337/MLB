@@ -99,7 +99,7 @@ function mlbBetResultKey_(slate, gamePk, pitcherId, side, line) {
 }
 
 /** Sheet row index (1-based) or -1; prefers latest matching row. */
-function mlbFindResultsLogSheetRowForUpsert_(logSh, slateWant, betKey, gamePk, pitcherId, side, line) {
+function mlbFindResultsLogSheetRowForUpsert_(logSh, slateWant, betKey, gamePk, pitcherId, side, line, market) {
   const last = logSh.getLastRow();
   if (last < 4) return -1;
   const nc = Math.max(MLB_RESULTS_LOG_NCOL, logSh.getLastColumn());
@@ -113,6 +113,7 @@ function mlbFindResultsLogSheetRowForUpsert_(logSh, slateWant, betKey, gamePk, p
     .replace(/\s+/g, '');
   const lineS = String(line != null ? line : '').trim();
   const slateWantS = String(slateWant || '').trim();
+  const marketN = String(market || '').trim().toLowerCase();
   for (let i = data.length - 1; i >= 0; i--) {
     const cellSlate = data[i][1];
     const cellSlateS = cellSlate instanceof Date
@@ -129,14 +130,16 @@ function mlbFindResultsLogSheetRowForUpsert_(logSh, slateWant, betKey, gamePk, p
       .trim()
       .toLowerCase()
       .replace(/\s+/g, '');
-    if (
-      g === wantG &&
-      !isNaN(g) &&
-      p === wantP &&
-      !isNaN(p) &&
-      sd === sideN &&
-      String(data[i][6] != null ? data[i][6] : '').trim() === lineS
-    ) {
+    if (g !== wantG || isNaN(g) || p !== wantP || isNaN(p) || sd !== sideN) continue;
+    if (String(data[i][6] != null ? data[i][6] : '').trim() === lineS) {
+      return 4 + i;
+    }
+    // Same slate+game+player+side+market at a DIFFERENT line: that's the same
+    // logical bet after a line move, not a new bet. Without this pass, FD
+    // moving K 5.5→6.5 between windows appended a second staked row and both
+    // graded into P/L although only one bet exists. Market must match — the
+    // log mixes K/H/TB, and a batter can have H and TB rows on the same side.
+    if (marketN && String(data[i][5] || '').trim().toLowerCase() === marketN) {
       return 4 + i;
     }
   }
@@ -386,7 +389,7 @@ function snapshotMLBBetCardToLog(windowTag) {
         ? row[28]
         : '';
     const betKey = mlbBetResultKey_(slate, gamePk, playerId, side, line);
-    const hitRow = mlbFindResultsLogSheetRowForUpsert_(logSh, slate, betKey, gamePk, playerId, side, line);
+    const hitRow = mlbFindResultsLogSheetRowForUpsert_(logSh, slate, betKey, gamePk, playerId, side, line, market);
 
     if (hitRow > 0) {
       const nc = Math.max(MLB_RESULTS_LOG_NCOL, logSh.getLastColumn());
@@ -399,7 +402,9 @@ function snapshotMLBBetCardToLog(windowTag) {
         logSh.getRange(hitRow, 23).setValue(openL);
         logSh.getRange(hitRow, 24).setValue(openO);
       }
-      if (!String(prev[21] || '').trim()) {
+      // Always refresh bet_key: after a line move (pass-3 match) the stored
+      // key carries the old line and would never exact-match again.
+      if (String(prev[21] || '').trim() !== betKey) {
         logSh.getRange(hitRow, 22).setValue(betKey);
       }
       const clv = mlbClvNoteFromOpenClose_(openL, openO, line, odds, side);
