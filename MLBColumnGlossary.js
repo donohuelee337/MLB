@@ -114,6 +114,10 @@ var MLB_COLUMN_GLOSSARY = {
   'matchup_tags': 'Tags describing the matchup (used by segment rules).',
   'lambda_raw': 'Raw projected strikeouts before anchoring/clamps.',
   'opp_k_l14': 'Opponent lineup\u2019s strikeout rate over the last 14 days.',
+  'sc_ev_allow': 'Statcast season avg exit velocity allowed on contact (mph). Higher = harder contact surrendered.',
+  'sc_la_allow': 'Statcast season avg launch angle allowed (degrees).',
+  'sc_xba_allow': 'Statcast expected batting average against (xBA) — quality of contact allowed.',
+  'savant_link': 'Baseball Savant player page for drill-down charts.',
 
   // — shared promo —
   'rank': 'Rank within the card (1 = strongest play).',

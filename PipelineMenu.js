@@ -64,6 +64,7 @@ function onOpen() {
       .addItem('🎯 Seed segment registry (disabled)', 'mlbSeedKSegmentsFromReport_')
       .addItem('✅ Run K walk-forward self-test', 'mlbKWalkSelfTestMenu_')
       .addItem('✅ Run Savant ingest self-test', 'mlbSavantIngestSelfTestMenu_')
+      .addItem('✅ Run Statcast cache self-test', 'mlbStatcastCacheSelfTestMenu_')
   );
 
   menu.addSeparator();
@@ -385,6 +386,9 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   } else {
     mlbResetSavantAbsCache_();
   }
+  if (typeof mlbResetStatcastCaches_ === 'function') {
+    mlbResetStatcastCaches_();
+  }
   // Shared batter/pitcher fetch cache reset ONCE per slate. Individual
   // model resets must NOT wipe this (Hits v2 → Hits v3 share the cache).
   if (typeof mlbResetV3SharedFetchesCaches_ === 'function') mlbResetV3SharedFetchesCaches_();
@@ -395,6 +399,7 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   if (typeof mlbResetScheduleBlockCache_ === 'function') mlbResetScheduleBlockCache_();
   if (typeof mlbResetLineupsCache_ === 'function') mlbResetLineupsCache_();
   let savantTeamCount = -1;
+  let statcastProfileCounts = { pitchers: 0, batters: 0, skipped: true };
   const outcomes = [];
   const cfg = getConfig();
 
@@ -440,6 +445,9 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   step('FanDuel MLB odds', fetchMLBFanDuelOdds);
   step('Savant ingest (optional)', function () {
     savantTeamCount = mlbSavantAbsIngestBestEffort_();
+    if (typeof mlbStatcastIngestProfilesBestEffort_ === 'function') {
+      statcastProfileCounts = mlbStatcastIngestProfilesBestEffort_();
+    }
   });
   step('Slate board (join)', refreshMLBSlateBoard);
   step('Pitcher K queue', refreshPitcherKSlateQueue);
@@ -533,6 +541,17 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
           ? 'teams=' + savantTeamCount
           : 'no rows parsed — see warnings'
   );
+  if (!statcastProfileCounts.skipped) {
+    logStep_(
+      'Statcast profiles (optional)',
+      1,
+      (statcastProfileCounts.pitchers || 0) + (statcastProfileCounts.batters || 0),
+      'pitchers=' +
+        (statcastProfileCounts.pitchers || 0) +
+        ' batters=' +
+        (statcastProfileCounts.batters || 0)
+    );
+  }
   logStep_(
     'Slate board',
     0,

@@ -6,3 +6,6 @@ node_modules/
 .clasp.preview.json
 .clasp.live.json
 .claude/
+
+.tmp_sheet.txt
+.deployed_truth/

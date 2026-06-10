@@ -255,6 +255,31 @@ function buildConfigTab() {
     '0.012',
     'λ bump per K-flip/game above league mean when parsing Savant ABS leaderboard CSV (~0.012 → ~±3% across teams).'
   );
+  row_(
+    'STATCAST_ENABLED',
+    'false',
+    'true | false — load 📊 Savant profile tabs (EV/LA/xBA) for card context. Phase 1: display only.'
+  );
+  row_(
+    'STATCAST_PITCHER_PROFILE_CSV_URL',
+    '',
+    'Optional HTTPS CSV: Savant custom leaderboard type=pitcher with exit_velocity_avg, launch_angle_avg, xba (&csv=true). Writes 📊 Savant_Pitcher_Profile.'
+  );
+  row_(
+    'STATCAST_BATTER_PROFILE_CSV_URL',
+    '',
+    'Optional HTTPS CSV: Savant custom leaderboard type=batter with exit_velocity_avg, launch_angle_avg, xba (&csv=true). Writes 📊 Savant_Batter_Profile.'
+  );
+  row_(
+    'STATCAST_CACHE_URL',
+    '',
+    'Reserved: single JSON bundle from Python ETL (phase 2). When set, overrides CSV URLs.'
+  );
+  row_(
+    'STATCAST_MAX_AGE_HOURS',
+    '168',
+    'Profile cache stale after this many hours (168 = 1 week). Stale cache still loads; warnings only.'
+  );
   // HR promo tuning (📣 Batter_HR_Promo). Defaults match the in-code fallbacks
   // — edit here to tune from the sheet instead of changing source.
   row_('HR_PROMO_LINEUP_FALLBACK', 'roster', 'When boxscore lineup is missing: "roster" = score every batter w/ ≥HR_PROMO_MIN_PA & ≥1 HR; "skip" = drop the game and warn.');

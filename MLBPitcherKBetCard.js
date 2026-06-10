@@ -128,6 +128,9 @@ function refreshPitcherKBetCard() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const cfg = getConfig();
   const season = typeof mlbSlateSeasonYear_ === 'function' ? mlbSlateSeasonYear_(cfg) : new Date().getFullYear();
+  if (typeof mlbStatcastEnsureLoaded_ === 'function') {
+    mlbStatcastEnsureLoaded_(ss);
+  }
   const q = ss.getSheetByName(MLB_PITCHER_K_QUEUE_TAB);
   if (!q || q.getLastRow() < 4) {
     safeAlert_('Pitcher K card', 'Run Pitcher K queue first.');
@@ -328,9 +331,24 @@ function refreshPitcherKBetCard() {
     }
 
     let pitchTeam = '';
-    const pid = parseInt(pitcherId, 10);
-    if (pid && typeof mlbSharedFetchBatterTeamAbbr_ === 'function') {
-      pitchTeam = mlbCanonicalTeamAbbr_(mlbSharedFetchBatterTeamAbbr_(pid)) || '';
+    if (pidNum && typeof mlbSharedFetchBatterTeamAbbr_ === 'function') {
+      pitchTeam = mlbCanonicalTeamAbbr_(mlbSharedFetchBatterTeamAbbr_(pidNum)) || '';
+    }
+
+    let scEv = '';
+    let scLa = '';
+    let scXba = '';
+    let scLink = '';
+    if (pidNum && typeof mlbStatcastGetPitcherProfile_ === 'function') {
+      const scProf = mlbStatcastGetPitcherProfile_(pidNum);
+      if (scProf) {
+        scEv = mlbStatcastFormatEvLa_(scProf.ev);
+        scLa = mlbStatcastFormatEvLa_(scProf.la);
+        scXba = mlbStatcastFormatRate_(scProf.xba);
+      }
+      if (typeof mlbStatcastSavantPlayerUrl_ === 'function') {
+        scLink = mlbStatcastSavantPlayerUrl_(pidNum, 'pitcher');
+      }
     }
 
     rows.push({
@@ -372,6 +390,10 @@ function refreshPitcherKBetCard() {
         seasonBf,
         kPerPa,
         projPaBf,
+        scEv,
+        scLa,
+        scXba,
+        scLink,
       ],
       hot: hotCold,
       sortKey: sortKey,
@@ -409,11 +431,11 @@ function refreshPitcherKBetCard() {
   // 🧪 k.v2 + k.v3.bf audit cols 27..34 push total width past the default
   // 26-col sheet — expand FIRST or setColumnWidth(27..) throws and the
   // writer leaves the sheet empty (auto-memory: apps_script_column_expansion).
-  const NEED_COLS_K_CARD = 35;
+  const NEED_COLS_K_CARD = 39;
   if (sh.getMaxColumns() < NEED_COLS_K_CARD) {
     sh.insertColumnsAfter(sh.getMaxColumns(), NEED_COLS_K_CARD - sh.getMaxColumns());
   }
-  [72, 200, 52, 150, 44, 56, 64, 64, 52, 52, 52, 52, 52, 52, 52, 52, 52, 64, 52, 140, 88, 140, 44, 56, 72, 72, 56, 64, 44, 56, 56, 64, 56, 56, 64].forEach(
+  [72, 200, 52, 150, 44, 56, 64, 64, 52, 52, 52, 52, 52, 52, 52, 52, 52, 64, 52, 140, 88, 140, 44, 56, 72, 72, 56, 64, 44, 56, 56, 64, 56, 56, 64, 52, 52, 52, 200].forEach(
     function (w, i) {
       sh.setColumnWidth(i + 1, w);
     }
@@ -424,7 +446,7 @@ function refreshPitcherKBetCard() {
     .setValue(
       '🎰 Pitcher K card — proj_K from K9 blend × park × L/R × opp K% × ABS × HP ump. ' +
       'pick = side we prefer when |proj_K − line| ≥ 0.5 (else agree_fd — gray row, no pick). ' +
-      'Cols 27..30 = 🧪 k.v2 · 31..34 = 🧪 k.v3.bf. Sort: pick confidence desc.'
+      'Cols 27..30 = 🧪 k.v2 · 31..34 = 🧪 k.v3.bf · 35..38 = Statcast contact allowed (EV/LA/xBA). Sort: pick confidence desc.'
     )
     .setFontWeight('bold')
     .setBackground('#b71c1c')
@@ -469,6 +491,10 @@ function refreshPitcherKBetCard() {
     'season_bf',
     'k_per_pa',
     'proj_pa_bf',
+    'sc_ev_allow',
+    'sc_la_allow',
+    'sc_xba_allow',
+    'savant_link',
   ];
   sh.getRange(3, 1, 1, headers.length)
     .setValues([headers])
