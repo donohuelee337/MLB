@@ -16,6 +16,7 @@ function gradeNrfiPendingResults_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const logSh = ss.getSheetByName(MLB_NRFI_RESULTS_LOG_TAB);
   if (!logSh || logSh.getLastRow() < 4) return;
+  if (typeof mlbEnsureNrfiCloseCols_ === 'function') mlbEnsureNrfiCloseCols_(logSh);
 
   const today = mlbTodayYmdNY_();
   const last = logSh.getLastRow();

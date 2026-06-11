@@ -318,8 +318,10 @@ function runFinalWindowMLB() {
 function mlbBackfillClosingMenu_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const n = mlbBackfillResultsLogClosingK_(ss);
+  const nN = typeof mlbBackfillNrfiClosing_ === 'function' ? mlbBackfillNrfiClosing_(ss) : 0;
+  const nF = typeof mlbBackfillF5Closing_ === 'function' ? mlbBackfillF5Closing_(ss) : 0;
   try {
-    ss.toast('Results log: updated ' + n + ' row(s) from FanDuel K tab', 'MLB-BOIZ', 7);
+    ss.toast('Close capture: ' + n + ' prop · ' + nN + ' NRFI · ' + nF + ' F5 row(s)', 'MLB-BOIZ', 7);
   } catch (e) {}
 }
 
@@ -729,11 +731,26 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
     addPipelineWarning_('Bet card calibration: ' + (e.message || e));
   }
 
-  if (windowTag === 'FINAL' && oOdds.ok) {
+  // Closing-line capture runs EVERY window with fresh odds (was FINAL-only):
+  // each successful lookup overwrites toward the truest close, and misses
+  // never clobber a prior capture — so the last odds refresh before first
+  // pitch is what stands as the close. FINAL-only meant night games were
+  // "closed" at mid-afternoon prices.
+  if (oOdds.ok) {
     try {
       mlbBackfillResultsLogClosingK_(ss);
     } catch (e) {
-      addPipelineWarning_('Closing K backfill: ' + (e.message || e));
+      addPipelineWarning_('Closing backfill (K/H): ' + (e.message || e));
+    }
+    try {
+      if (typeof mlbBackfillNrfiClosing_ === 'function') mlbBackfillNrfiClosing_(ss);
+    } catch (e) {
+      addPipelineWarning_('Closing backfill (NRFI): ' + (e.message || e));
+    }
+    try {
+      if (typeof mlbBackfillF5Closing_ === 'function') mlbBackfillF5Closing_(ss);
+    } catch (e) {
+      addPipelineWarning_('Closing backfill (F5): ' + (e.message || e));
     }
   }
 

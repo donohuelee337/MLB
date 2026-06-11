@@ -112,7 +112,7 @@ function runKWalkForwardBacktest() {
     const sides = mlbWalkForwardBothSides_(g, cfg, null);
     if (!sides.length) return;
     sides.forEach(function (b) {
-      calSamples.push({ side: b.side, pRaw: b.pRaw, hit: b.hit });
+      calSamples.push({ side: b.side, pRaw: b.pRaw, hit: b.hit, date: g.date });
     });
     const best = sides[0].pRaw >= sides[1].pRaw ? sides[0] : sides[1];
     samples.push({
@@ -126,10 +126,34 @@ function runKWalkForwardBacktest() {
     });
   });
 
+  // Honest reporting: the per-band hit rates used to judge calibration are
+  // computed on a HOLDOUT (newest 30% of sample dates) with a table fit only
+  // on the older 70% — a table can't look well-calibrated on samples it was
+  // fit to. The PERSISTED table (live path) is still fit on ALL samples:
+  // more data makes the live table better; only the report must be split.
+  const wfDates = {};
+  gameSamples.forEach(function (g) {
+    const d = String(g.date || '');
+    if (d) wfDates[d] = true;
+  });
+  const wfDateList = Object.keys(wfDates).sort();
+  const wfCanSplit = wfDateList.length >= 10;
+  const wfCutoff = wfCanSplit ? wfDateList[Math.max(0, Math.floor(wfDateList.length * 0.7) - 1)] : '';
+  const calTuneSamples = wfCanSplit
+    ? calSamples.filter(function (s) { return String(s.date) <= wfCutoff; })
+    : calSamples;
+  const reportSamples = wfCanSplit
+    ? samples.filter(function (s) { return String(s.date) > wfCutoff; })
+    : samples;
+
   const calTable = mlbFitKCalibration_(calSamples);
   mlbWriteKCalibrationTab_(ss, calTable);
 
-  const report = mlbBuildKWalkForwardReport_(samples, calTable, cfg);
+  const calTableTune = wfCanSplit ? mlbFitKCalibration_(calTuneSamples) : calTable;
+  const report = mlbBuildKWalkForwardReport_(reportSamples, calTableTune, cfg);
+  report.holdoutNote = wfCanSplit
+    ? 'OUT-OF-SAMPLE: bands = slates after ' + wfCutoff + ' scored with a table fit on slates ≤ ' + wfCutoff
+    : 'IN-SAMPLE (fewer than 10 distinct dates — no split)';
   mlbWriteKWalkForwardReport_(ss, report);
   const disc = mlbWriteKWalkDiscrepancyReport_(ss, gameSamples, calTable, cfg);
   const flaggedOnly = mlbFilterDiscrepancyGameSamples_(gameSamples, cfg, calTable);
@@ -198,6 +222,9 @@ function mlbWriteKWalkForwardReport_(ss, report) {
   }
   let foot = 4 + segRows.length + 1;
   sh.getRange(foot++, 1).setValue('total_samples: ' + report.n);
+  if (report.holdoutNote) {
+    sh.getRange(foot++, 1).setValue(report.holdoutNote).setFontWeight('bold');
+  }
   sh.getRange(foot++, 1).setValue(
     'Coarse = higher-raw-P side. See 🧪 K_Discrepancy_Report (model vs FD ladder) → 🧠 Claude deep dive on flag=Y.'
   );

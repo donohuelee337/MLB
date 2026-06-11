@@ -6,6 +6,7 @@ function gradeF5PendingResults_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const logSh = ss.getSheetByName(MLB_F5_RESULTS_LOG_TAB);
   if (!logSh || logSh.getLastRow() < 4) return;
+  if (typeof mlbEnsureF5CloseCols_ === 'function') mlbEnsureF5CloseCols_(logSh);
 
   const today = mlbTodayYmdNY_();
   const last = logSh.getLastRow();

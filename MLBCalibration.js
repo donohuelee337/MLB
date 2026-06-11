@@ -97,6 +97,7 @@ function mlbCalibrationCollectRows_(ss, tab, ncol, marketCol, lineCol, oddsCol, 
       odds: odds,
       result: result,
       edge: edge,
+      slate: typeof mlbDateCellToYmd_ === 'function' ? mlbDateCellToYmd_(r[1]) : String(r[1] || ''),
     });
   }
   return out;
@@ -192,6 +193,23 @@ function refreshBetCardCalibration() {
 
   // Group: byMarket -> byProb -> byEdge -> cell. Also overall byMarket.
   const allRows = liveRows.concat(shadowRows);
+
+  // ---- Time split for floor recommendations ----
+  // A floor picked from the same rows it is judged on is optimistic by
+  // construction (it lands wherever history happened to win). Recommend from
+  // the TUNE set (older 70% of slates) and report how that floor performed
+  // on the HOLDOUT (newest 30%) — proposals downstream require the holdout
+  // to agree. Needs ≥10 distinct slates to split.
+  const calSlates = {};
+  allRows.forEach(function (r) {
+    if (r.slate) calSlates[r.slate] = true;
+  });
+  const calSlateList = Object.keys(calSlates).sort();
+  const calCanSplit = calSlateList.length >= 10;
+  const calCutoff = calCanSplit
+    ? calSlateList[Math.max(0, Math.floor(calSlateList.length * 0.7) - 1)]
+    : '';
+
   const grouped = {};
   const totals = {};
   allRows.forEach(function (row) {
@@ -240,8 +258,8 @@ function refreshBetCardCalibration() {
 
   // -------- Per-market summary (top) --------
   let row = 3;
-  sh.getRange(row, 1, 1, 11)
-    .setValues([['market', 'n', 'wins', 'losses', 'pushes', 'voids', 'hit_rate', 'avg_implied_be', 'hit_minus_be', 'pnl_per_$1', 'recommended_min_model_pct']])
+  sh.getRange(row, 1, 1, 12)
+    .setValues([['market', 'n', 'wins', 'losses', 'pushes', 'voids', 'hit_rate', 'avg_implied_be', 'hit_minus_be', 'pnl_per_$1', 'recommended_min_model_pct', 'holdout_check']])
     .setFontWeight('bold')
     .setBackground('#1565c0')
     .setFontColor('#ffffff');
@@ -250,17 +268,43 @@ function refreshBetCardCalibration() {
   MLB_CALIBRATION_MARKETS.forEach(function (mk) {
     const cell = totals[mk.key];
     if (!cell) {
-      sh.getRange(row, 1, 1, 11).setValues([[mk.label, 0, 0, 0, 0, 0, '', '', '', '', '']]);
+      sh.getRange(row, 1, 1, 12).setValues([[mk.label, 0, 0, 0, 0, 0, '', '', '', '', '', '']]);
       row++;
       return;
     }
     const s = mlbCalibrationCellSummary_(cell);
-    const byProb = grouped[mk.key] || {};
-    const probTotals = MLB_CALIBRATION_PROB_BUCKETS.map(function (_, i) {
-      return byProb[i] ? byProb[i].total : null;
+    // Recommend the floor from TUNE slates only; check it on the holdout.
+    const tuneBuckets = MLB_CALIBRATION_PROB_BUCKETS.map(function () { return null; });
+    const holdRows = [];
+    allRows.forEach(function (r) {
+      if (r.market !== mk.key) return;
+      if (!calCanSplit || (r.slate && r.slate <= calCutoff)) {
+        const pi = mlbCalibrationBucketFor_(r.prob, MLB_CALIBRATION_PROB_BUCKETS);
+        if (pi >= 0) {
+          if (!tuneBuckets[pi]) tuneBuckets[pi] = mlbCalibrationCellInit_();
+          mlbCalibrationAddRow_(tuneBuckets[pi], r);
+        }
+      } else {
+        holdRows.push(r);
+      }
     });
-    const rec = mlbCalibrationRecommendFloor_(probTotals, MLB_CALIBRATION_PROB_BUCKETS);
-    sh.getRange(row, 1, 1, 11).setValues([[
+    const rec = mlbCalibrationRecommendFloor_(tuneBuckets, MLB_CALIBRATION_PROB_BUCKETS);
+    let holdoutText = calCanSplit ? '(no holdout rows ≥ floor)' : '(too few slates to split)';
+    if (rec !== '' && calCanSplit) {
+      const hc = mlbCalibrationCellInit_();
+      holdRows.forEach(function (r) {
+        if (r.prob >= rec) mlbCalibrationAddRow_(hc, r);
+      });
+      if (hc.n > 0) {
+        const hs = mlbCalibrationCellSummary_(hc);
+        holdoutText = isNaN(hs.edgeVsBe)
+          ? '(n=' + hc.n + ')'
+          : (hs.edgeVsBe >= 0 ? '+' : '') + Math.round(hs.edgeVsBe * 1000) / 10 + 'pp (n=' + hc.n + ')';
+      }
+    } else if (rec === '') {
+      holdoutText = '';
+    }
+    sh.getRange(row, 1, 1, 12).setValues([[
       mk.label,
       s.n, s.wins, s.losses, s.pushes, s.voids,
       isNaN(s.hitRate)   ? '' : Math.round(s.hitRate * 1000) / 10 + '%',
@@ -268,6 +312,7 @@ function refreshBetCardCalibration() {
       isNaN(s.edgeVsBe)  ? '' : (s.edgeVsBe >= 0 ? '+' : '') + (Math.round(s.edgeVsBe * 1000) / 10) + 'pp',
       isNaN(s.pnlPerDollar) ? '' : (s.pnlPerDollar >= 0 ? '+$' : '-$') + Math.abs(Math.round(s.pnlPerDollar * 100) / 100),
       rec === '' ? '— (no qualifying bucket)' : rec,
+      holdoutText,
     ]]);
     row++;
   });
@@ -398,9 +443,14 @@ function mlbWriteCalibrationProposals_(ss, cfg) {
   const sh = ss.getSheetByName(MLB_CALIBRATION_TAB);
   if (!sh || sh.getLastRow() < 4) return;
 
-  // Read summary rows (rows 4–7): market name in col 1, recommended floor in col 11.
-  const summaryData = sh.getRange(4, 1, 4, 11).getValues();
+  // Read summary rows (rows 4–7): market in col 1, recommended floor in
+  // col 11, holdout check in col 12. A proposal only qualifies when the
+  // tune-recommended floor ALSO showed non-negative edge on holdout slates
+  // with n≥10 — floors that only work on the data that picked them are
+  // exactly the overfitting this gate exists to stop.
+  const summaryData = sh.getRange(4, 1, 4, 12).getValues();
   const proposals = [];
+  const skipped = [];
   const MARKET_TO_CONFIG_KEY = {
     'STRIKEOUTS': 'MIN_MODEL_PCT_K',
     'HITS': 'MIN_MODEL_PCT_H',
@@ -414,6 +464,14 @@ function mlbWriteCalibrationProposals_(ss, cfg) {
     if (rec === '' || rec === null || String(rec).indexOf('no qualifying') !== -1) return;
     const recNum = parseFloat(String(rec));
     if (isNaN(recNum)) return;
+    const holdout = String(row[11] || '').trim();
+    const hm = holdout.match(/^([+-]?[\d.]+)pp \(n=(\d+)\)/);
+    const holdoutEdge = hm ? parseFloat(hm[1]) : NaN;
+    const holdoutN = hm ? parseInt(hm[2], 10) : 0;
+    if (isNaN(holdoutEdge) || holdoutN < 10 || holdoutEdge < 0) {
+      skipped.push(configKey + ' → ' + recNum + ' (holdout: ' + (holdout || 'n/a') + ')');
+      return;
+    }
     const current = parseFloat(String(cfg[configKey] || '0')) || 0;
     proposals.push({
       key: configKey,
@@ -440,7 +498,12 @@ function mlbWriteCalibrationProposals_(ss, cfg) {
     .setFontColor('#ffffff');
 
   if (proposals.length === 0) {
-    sh.getRange(startRow + 2, 1).setValue('No qualifying buckets — need n≥10 with positive edge to recommend a floor.');
+    sh.getRange(startRow + 2, 1).setValue(
+      'No qualifying proposals — a floor must beat break-even on TUNE slates AND hold up on the HOLDOUT (n≥10, edge ≥ 0).'
+    );
+    if (skipped.length) {
+      sh.getRange(startRow + 3, 1).setValue('Rejected by holdout: ' + skipped.join(' · '));
+    }
     return;
   }
 
@@ -448,6 +511,9 @@ function mlbWriteCalibrationProposals_(ss, cfg) {
     return [p.key, p.current, p.recommended, p.direction];
   });
   sh.getRange(startRow + 2, 1, rows.length, 4).setValues(rows);
+  if (skipped.length) {
+    sh.getRange(startRow + 2 + rows.length, 1).setValue('Rejected by holdout: ' + skipped.join(' · '));
+  }
 }
 
 /**

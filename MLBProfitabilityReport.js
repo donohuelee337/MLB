@@ -48,6 +48,14 @@ function mlbBuildProfitabilityReport_(ss) {
   const byMarket = {};
   const byProb = {};
   const byEdge = {};
+  const byVersion = {};
+  // CLV — the leading indicator. Outcomes need ~1000 bets to separate skill
+  // from noise; average closing-line value shows in ~50. Positive avg CLV
+  // with negative P/L = variance (keep going). Negative CLV = the market
+  // moves against your bets after you make them — the model is late/wrong.
+  const clvAgg = { n: 0, sum: 0, pos: 0 };
+  const clvByMarket = {};
+  const pnlBySlate = {};
   let gradedN = 0;
   let wins = 0;
   let losses = 0;
@@ -69,6 +77,19 @@ function mlbBuildProfitabilityReport_(ss) {
   }
 
   data.forEach(function (r) {
+    // CLV counts for every row that has a capture, graded or not.
+    const clv = parseFloat(String(r[33]));
+    if (!isNaN(clv)) {
+      const mkC = mlbCalibrationMarketKey_(r[5]) || 'other';
+      clvAgg.n++;
+      clvAgg.sum += clv;
+      if (clv > 0) clvAgg.pos++;
+      if (!clvByMarket[mkC]) clvByMarket[mkC] = { n: 0, sum: 0, pos: 0 };
+      clvByMarket[mkC].n++;
+      clvByMarket[mkC].sum += clv;
+      if (clv > 0) clvByMarket[mkC].pos++;
+    }
+
     const result = String(r[16] || '').trim().toUpperCase();
     if (result !== 'WIN' && result !== 'LOSS') return;
     gradedN++;
@@ -81,11 +102,20 @@ function mlbBuildProfitabilityReport_(ss) {
       stakeRows++;
       totalStake += stake;
       if (!isNaN(pnl)) totalPnl += pnl;
+      // Per-slate P/L for the bankroll curve / drawdown.
+      const slateYmd = typeof mlbDateCellToYmd_ === 'function' ? mlbDateCellToYmd_(r[1]) : String(r[1] || '');
+      if (slateYmd && !isNaN(pnl)) {
+        pnlBySlate[slateYmd] = (pnlBySlate[slateYmd] || 0) + pnl;
+      }
     }
 
     const mk = mlbCalibrationMarketKey_(r[5]) || 'other';
     if (!byMarket[mk]) byMarket[mk] = segInit_();
     segAdd_(byMarket[mk], result, stake, pnl);
+
+    const mv = String(r.length > 38 && r[38] != null ? r[38] : '').trim() || '(unstamped)';
+    if (!byVersion[mv]) byVersion[mv] = segInit_();
+    segAdd_(byVersion[mv], result, stake, pnl);
 
     const prob = parseFloat(String(r[9]));
     if (!isNaN(prob) && prob > 0 && prob < 1) {
@@ -130,12 +160,53 @@ function mlbBuildProfitabilityReport_(ss) {
   Object.keys(byMarket).sort().forEach(function (k) {
     pushSeg_('market', k, byMarket[k]);
   });
+  Object.keys(byVersion).sort().forEach(function (k) {
+    pushSeg_('model_version', k, byVersion[k]);
+  });
   Object.keys(byProb).sort().forEach(function (k) {
     pushSeg_('model%', k, byProb[k]);
   });
   Object.keys(byEdge).sort().forEach(function (k) {
     pushSeg_('|proj−line|', k, byEdge[k]);
   });
+
+  // Bankroll curve from per-slate P/L (chronological): running balance,
+  // peak, and max drawdown — risk-of-ruin visibility for the $500 roll.
+  const cfgBr = typeof getConfig === 'function' ? getConfig() : {};
+  const startBankroll =
+    parseFloat(String(cfgBr['BANKROLL'] != null ? cfgBr['BANKROLL'] : '500')) || 500;
+  let runBal = startBankroll;
+  let peakBal = startBankroll;
+  let maxDdUsd = 0;
+  Object.keys(pnlBySlate).sort().forEach(function (s) {
+    runBal += pnlBySlate[s];
+    if (runBal > peakBal) peakBal = runBal;
+    const dd = peakBal - runBal;
+    if (dd > maxDdUsd) maxDdUsd = dd;
+  });
+  const bankroll = {
+    start: startBankroll,
+    current: Math.round(runBal * 100) / 100,
+    peak: Math.round(peakBal * 100) / 100,
+    maxDrawdownUsd: Math.round(maxDdUsd * 100) / 100,
+    maxDrawdownPct: peakBal > 0 ? Math.round((maxDdUsd / peakBal) * 1000) / 10 : 0,
+    slates: Object.keys(pnlBySlate).length,
+  };
+
+  const clv = {
+    n: clvAgg.n,
+    avgPp: clvAgg.n > 0 ? Math.round((clvAgg.sum / clvAgg.n) * 100) / 100 : null,
+    beatClosePct: clvAgg.n > 0 ? Math.round((clvAgg.pos / clvAgg.n) * 1000) / 10 : null,
+    byMarket: Object.keys(clvByMarket).sort().map(function (k) {
+      const c = clvByMarket[k];
+      return {
+        market: k,
+        n: c.n,
+        avgPp: Math.round((c.sum / c.n) * 100) / 100,
+        beatClosePct: Math.round((c.pos / c.n) * 1000) / 10,
+      };
+    }),
+  };
 
   const traps = [];
   segments.forEach(function (s) {
@@ -150,6 +221,17 @@ function mlbBuildProfitabilityReport_(ss) {
   });
 
   const recommendations = [];
+  if (clv.n >= 50 && clv.avgPp != null) {
+    if (clv.avgPp > 0.5 && roiPct != null && roiPct < 0) {
+      recommendations.push(
+        'CLV +' + clv.avgPp + 'pp avg (n=' + clv.n + ') with negative P/L — that is variance, not a broken model. Stay the course; do not loosen gates to chase.'
+      );
+    } else if (clv.avgPp < -0.5) {
+      recommendations.push(
+        'CLV ' + clv.avgPp + 'pp avg (n=' + clv.n + ') — the market moves AGAINST your bets after entry. The model is late or wrong; tighten gates / increase market anchoring before adding volume.'
+      );
+    }
+  }
   if (gradedN < 30) {
     recommendations.push('Need 30+ graded live plays before tightening gates — keep logging snapshots.');
   } else {
@@ -176,6 +258,8 @@ function mlbBuildProfitabilityReport_(ss) {
     segments: segments,
     traps: traps,
     recommendations: recommendations,
+    clv: clv,
+    bankroll: bankroll,
   };
 }
 
@@ -192,6 +276,8 @@ function mlbWriteProfitabilityReportTab_(ss, report) {
     .setFontWeight('bold');
 
   let row = 3;
+  const clv = report.clv || { n: 0 };
+  const br = report.bankroll || {};
   const summary = [
     ['Graded plays', report.gradedN],
     ['Rows with stake $', report.stakeRows],
@@ -202,9 +288,33 @@ function mlbWriteProfitabilityReportTab_(ss, report) {
       'Hit rate',
       report.hitRate != null ? Math.round(report.hitRate * 1000) / 10 + '%' : '',
     ],
+    ['— CLV (north star) —', ''],
+    ['Avg CLV (pp)', clv.avgPp != null ? clv.avgPp : '(no captures yet)'],
+    ['Beat-close %', clv.beatClosePct != null ? clv.beatClosePct + '%  (n=' + clv.n + ')' : ''],
+    ['— Bankroll —', ''],
+    ['Start / Current', br.start != null ? '$' + br.start + ' → $' + br.current : ''],
+    ['Peak', br.peak != null ? '$' + br.peak : ''],
+    [
+      'Max drawdown',
+      br.maxDrawdownUsd != null
+        ? '$' + br.maxDrawdownUsd + ' (' + br.maxDrawdownPct + '% off peak, ' + br.slates + ' slates)'
+        : '',
+    ],
   ];
   sh.getRange(row, 1, summary.length, 2).setValues(summary);
   row += summary.length + 1;
+
+  if (clv.byMarket && clv.byMarket.length) {
+    sh.getRange(row, 1).setValue('CLV by market (avg pp · beat-close % · n) — positive avg = real edge signal').setFontWeight('bold');
+    row++;
+    clv.byMarket.forEach(function (c) {
+      sh.getRange(row, 1).setValue(
+        '• ' + c.market + ': ' + (c.avgPp >= 0 ? '+' : '') + c.avgPp + 'pp · ' + c.beatClosePct + '% · n=' + c.n
+      );
+      row++;
+    });
+    row++;
+  }
 
   sh.getRange(row, 1).setValue('Recommendations').setFontWeight('bold');
   row++;

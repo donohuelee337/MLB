@@ -7,7 +7,7 @@
 // ============================================================
 
 const MLB_RESULTS_LOG_TAB = '📋 MLB_Results_Log';
-const MLB_RESULTS_LOG_NCOL = 38;
+const MLB_RESULTS_LOG_NCOL = 39;
 
 const MLB_RESULTS_HEADERS = [
   'Logged At',
@@ -48,7 +48,37 @@ const MLB_RESULTS_HEADERS = [
   'projIP_v2',
   'actual_IP',
   'ip_error',
+  'model_version',
 ];
+
+/**
+ * Col 39 model_version — attributes every live bet to the producing model so
+ * post-bump performance is separable (MLB_MODEL_VERSIONS policy). Ensures
+ * the grid is wide enough BEFORE any NCOL-wide read (grader runs before the
+ * snapshot each window, so both call this).
+ */
+function mlbEnsureResultsLogModelVersionCol_(logSh) {
+  if (logSh.getMaxColumns() < MLB_RESULTS_LOG_NCOL) {
+    logSh.insertColumnsAfter(logSh.getMaxColumns(), MLB_RESULTS_LOG_NCOL - logSh.getMaxColumns());
+  }
+  if (String(logSh.getRange(3, 39).getValue() || '').trim() !== 'model_version') {
+    logSh.getRange(3, 39).setValue('model_version');
+  }
+}
+
+/** Model-version stamp per market for live-log attribution. */
+function mlbLiveModelVersionForMarket_(market, cfg) {
+  const m = String(market || '').toLowerCase();
+  if (m.indexOf('strikeout') !== -1) {
+    const cal =
+      String(cfg && cfg['K_BET_CARD_USE_CALIBRATION'] != null ? cfg['K_BET_CARD_USE_CALIBRATION'] : 'Y')
+        .toUpperCase() === 'Y';
+    return 'k.v1-anch' + (cal ? '+cal' : '');
+  }
+  if (m.indexOf('total base') !== -1) return 'tb.v1';
+  if (m.indexOf('hit') !== -1) return 'h.v2-full-sim';
+  return '';
+}
 
 /** Extend results log headers for IP audit cols (cols 35–38). */
 function mlbEnsureResultsLogIpHeaders_(logSh) {
@@ -225,25 +255,38 @@ function mlbLookupClosingPitcherK_(ss, gameStr, playerStr, betSide, gamePk) {
 }
 
 /**
- * After FINAL odds refresh: fill close_line / close_odds / clv_note for this slate’s K rows.
- * Overwrites prior close columns when re-run (latest tab = “close” proxy).
+ * After an odds refresh: fill close_line / close_odds / clv_note / clv_pp for
+ * this slate's rows — ALL fetched player-prop markets, not just K. Rules:
+ * - clv_pp compares prices at the SAME line we bet (price-vs-price across
+ *   different lines is not apples-to-apples); when the book has moved off our
+ *   line, K falls back to the main posted line for the note but clv_pp stays.
+ * - A successful lookup overwrites (latest odds tab = best close proxy).
+ * - A miss NEVER clobbers a previously captured close: when FD pulls the
+ *   market at first pitch, the last capture stands as the closing record.
+ * Re-runnable any time after the odds tab refreshes (windows + on-demand).
  */
 function mlbBackfillResultsLogClosingK_(ss) {
   const logSh = ss.getSheetByName(MLB_RESULTS_LOG_TAB);
   if (!logSh || logSh.getLastRow() < 4) return 0;
+  mlbEnsureResultsLogModelVersionCol_(logSh);
 
   const cfg = getConfig();
   const slateWant = getSlateDateString_(cfg);
   const last = logSh.getLastRow();
-  const data = logSh.getRange(4, 1, last, MLB_RESULTS_LOG_NCOL).getValues();
+  const data = logSh.getRange(4, 1, Math.max(0, last - 3), MLB_RESULTS_LOG_NCOL).getValues();
+  // One index per market family, built once per call.
+  const idxK = mlbBuildPersonPropOddsIndex_(ss, 'pitcher_strikeouts');
+  const idxH = mlbBuildPersonPropOddsIndexMerged_(ss, 'batter_hits', 'batter_hits_alternate');
   let n = 0;
 
   for (let i = 0; i < data.length; i++) {
     const row = data[i];
-    const slateStr = String(row[1] || '').trim();
+    const slateStr = mlbDateCellToYmd_(row[1]);
     if (slateStr !== slateWant) continue;
     const market = String(row[5] || '').toLowerCase();
-    if (market.indexOf('strikeout') === -1) continue;
+    const isK = market.indexOf('strikeout') !== -1;
+    const isH = !isK && market.indexOf('hit') !== -1;
+    if (!isK && !isH) continue; // TB markets are no longer fetched — no close data.
     const player = String(row[3] || '').trim();
     const game = String(row[4] || '').trim();
     const side = String(row[7] || '').trim();
@@ -253,15 +296,48 @@ function mlbBackfillResultsLogClosingK_(ss) {
     if (!player) continue;
     if (!String(game || '').trim() && !parseInt(gamePkLog, 10)) continue;
 
-    const cl = mlbLookupClosingPitcherK_(ss, game, player, side, gamePkLog);
+    const pNorm = mlbNormalizePersonName_(player);
+    const labels = [];
+    if (game) labels.push(game);
+    const fromSch = mlbScheduleMatchupForGamePk_(ss, gamePkLog);
+    if (fromSch && labels.indexOf(fromSch) === -1) labels.push(fromSch);
+    const sl = String(side || '').toLowerCase();
+    const wantPt = parseFloat(String(openLine));
+
+    let pm = null;
+    for (let t = 0; t < labels.length && !pm; t++) {
+      pm = mlbOddsPointMapForPerson_(isK ? idxK : idxH, mlbCandidateGameKeys_(labels[t], '', ''), pNorm);
+    }
+
+    let cl = null;
+    if (pm && !isNaN(wantPt) && pm[wantPt]) {
+      const px = sl.indexOf('over') !== -1 ? pm[wantPt].Over : sl.indexOf('under') !== -1 ? pm[wantPt].Under : '';
+      if (px !== '' && px != null) cl = { line: wantPt, american: px };
+    }
+    if (!cl && pm && isK) {
+      // Book moved off our line — record the main K line for the note.
+      const mainPt = mlbPickMainKPoint_(pm);
+      if (mainPt != null) {
+        const px = mlbMainKPrices_(pm, mainPt);
+        const american = sl.indexOf('over') !== -1 ? px.over : sl.indexOf('under') !== -1 ? px.under : '';
+        if (american !== '' && american != null) cl = { line: mainPt, american: american };
+      }
+    }
+
     if (!cl) {
-      logSh.getRange(4 + i, 19, 1, 3).setValues([['', '', 'no FD K match at close']]);
+      // Only annotate a miss when nothing was ever captured.
+      if (String(row[18] || '') === '' && String(row[19] || '') === '') {
+        logSh.getRange(4 + i, 21).setValue('no FD match at close');
+      }
       continue;
     }
     const note = mlbClvNoteFromOpenClose_(openLine, openOdds, cl.line, cl.american, side);
     logSh.getRange(4 + i, 19, 1, 3).setValues([[cl.line, cl.american, note]]);
-    const clvPp = mlbClvPpFromOpenClose_(openOdds, cl.american);
-    if (clvPp !== '') logSh.getRange(4 + i, 34).setValue(clvPp);
+    // clv_pp only when the close is at the line we bet.
+    if (!isNaN(wantPt) && parseFloat(String(cl.line)) === wantPt) {
+      const clvPp = mlbClvPpFromOpenClose_(openOdds, cl.american);
+      if (clvPp !== '') logSh.getRange(4 + i, 34).setValue(clvPp);
+    }
     n++;
   }
   return n;
@@ -347,6 +423,7 @@ function snapshotMLBBetCardToLog(windowTag) {
     ]]);
   }
   mlbEnsureResultsLogIpHeaders_(logSh);
+  mlbEnsureResultsLogModelVersionCol_(logSh);
 
   let appended = 0;
   let updated = 0;
@@ -442,6 +519,12 @@ function snapshotMLBBetCardToLog(windowTag) {
       ]]);
       if (projIp !== '' && projIp != null) logSh.getRange(hitRow, 35).setValue(projIp);
       if (projIpV2 !== '' && projIpV2 != null) logSh.getRange(hitRow, 36).setValue(projIpV2);
+      // model_version: fill only when blank — the bet belongs to the model
+      // that produced it, not whatever is live at a later window.
+      if (!String(prev.length > 38 && prev[38] != null ? prev[38] : '').trim()) {
+        const mv = mlbLiveModelVersionForMarket_(market, cfg);
+        if (mv) logSh.getRange(hitRow, 39).setValue(mv);
+      }
       updated++;
       return;
     }
@@ -489,6 +572,7 @@ function snapshotMLBBetCardToLog(windowTag) {
           projIpV2,
           '',
           '',
+          mlbLiveModelVersionForMarket_(market, cfg),
         ],
       ]);
     appended++;

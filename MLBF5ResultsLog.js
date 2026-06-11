@@ -3,7 +3,7 @@
 // ============================================================
 
 const MLB_F5_RESULTS_LOG_TAB = '📋 F5_Results_Log';
-const MLB_F5_RESULTS_LOG_NCOL = 23;
+const MLB_F5_RESULTS_LOG_NCOL = 25;
 
 const MLB_F5_RESULTS_HEADERS = [
   'Logged At',
@@ -29,7 +29,56 @@ const MLB_F5_RESULTS_HEADERS = [
   'flags',
   'away_SP',
   'home_SP',
+  'close_odds',
+  'clv_pp',
 ];
+
+/** Cols 24/25 close_odds + clv_pp — CLV capture for the F5 market. */
+function mlbEnsureF5CloseCols_(sh) {
+  if (sh.getMaxColumns() < MLB_F5_RESULTS_LOG_NCOL) {
+    sh.insertColumnsAfter(sh.getMaxColumns(), MLB_F5_RESULTS_LOG_NCOL - sh.getMaxColumns());
+  }
+  if (String(sh.getRange(3, 24).getValue() || '').trim() !== 'close_odds') {
+    sh.getRange(3, 24, 1, 2).setValues([['close_odds', 'clv_pp']]);
+  }
+}
+
+/**
+ * Capture the closing FD price for this slate's F5 rows (same line only —
+ * price CLV across different totals isn't apples-to-apples). A miss never
+ * clobbers a previous capture: when FD pulls the market at first pitch, the
+ * last capture stands as the close. Re-runnable after any odds refresh.
+ */
+function mlbBackfillF5Closing_(ss) {
+  const logSh = ss.getSheetByName(MLB_F5_RESULTS_LOG_TAB);
+  if (!logSh || logSh.getLastRow() < 4) return 0;
+  mlbEnsureF5CloseCols_(logSh);
+  const cfg = getConfig();
+  const slateWant = getSlateDateString_(cfg);
+  const idx = mlbBuildF5OddsIndex_(ss);
+  const data = logSh.getRange(4, 1, logSh.getLastRow() - 3, MLB_F5_RESULTS_LOG_NCOL).getValues();
+  let n = 0;
+  for (let i = 0; i < data.length; i++) {
+    const row = data[i];
+    if (mlbDateCellToYmd_(row[1]) !== slateWant) continue;
+    const matchup = String(row[3] || '').trim();
+    const side = String(row[5] || '').trim().toLowerCase();
+    const line = parseFloat(String(row[6]));
+    const openOdds = row[7];
+    if (!matchup) continue;
+    const hit = mlbLookupF5Odds_(idx, mlbCandidateGameKeys_(matchup, '', ''));
+    if (!hit) continue;
+    const closeLine = parseFloat(String(hit.f5Line));
+    if (isNaN(line) || isNaN(closeLine) || closeLine !== line) continue;
+    const american = side === 'over' ? hit.f5Over : side === 'under' ? hit.f5Under : '';
+    if (american === '' || american == null) continue;
+    logSh.getRange(4 + i, 24).setValue(american);
+    const clvPp = mlbClvPpFromOpenClose_(openOdds, american);
+    if (clvPp !== '') logSh.getRange(4 + i, 25).setValue(clvPp);
+    n++;
+  }
+  return n;
+}
 
 function mlbEnsureF5ResultsLogLayout_(sh) {
   sh.getRange(1, 1, 1, MLB_F5_RESULTS_LOG_NCOL)
@@ -146,6 +195,7 @@ function snapshotF5ToLog(windowTag) {
   if (logSh.getLastRow() < 3 || !String(logSh.getRange(3, 1).getValue() || '').trim()) {
     mlbEnsureF5ResultsLogLayout_(logSh);
   }
+  mlbEnsureF5CloseCols_(logSh);
 
   let appended = 0;
   let updated = 0;

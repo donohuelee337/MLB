@@ -377,6 +377,11 @@ function gradeMLBPendingResults_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const logSh = ss.getSheetByName(MLB_RESULTS_LOG_TAB);
   if (!logSh || logSh.getLastRow() < 4) return;
+  // Grader runs before the snapshot each window — make sure the grid is wide
+  // enough for the NCOL-wide read after the model_version column (39) landed.
+  if (typeof mlbEnsureResultsLogModelVersionCol_ === 'function') {
+    mlbEnsureResultsLogModelVersionCol_(logSh);
+  }
 
   const today = mlbTodayYmdNY_();
   const last = logSh.getLastRow();

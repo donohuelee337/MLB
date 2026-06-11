@@ -6,7 +6,7 @@
 // ============================================================
 
 const MLB_NRFI_RESULTS_LOG_TAB = '📋 NRFI_Results_Log';
-const MLB_NRFI_RESULTS_LOG_NCOL = 24;
+const MLB_NRFI_RESULTS_LOG_NCOL = 26;
 
 const MLB_NRFI_RESULTS_HEADERS = [
   'Logged At',
@@ -33,7 +33,51 @@ const MLB_NRFI_RESULTS_HEADERS = [
   'bet_key',
   'Window',
   'flags',
+  'close_odds',
+  'clv_pp',
 ];
+
+/** Cols 25/26 close_odds + clv_pp — CLV capture for the NRFI market. */
+function mlbEnsureNrfiCloseCols_(sh) {
+  if (sh.getMaxColumns() < MLB_NRFI_RESULTS_LOG_NCOL) {
+    sh.insertColumnsAfter(sh.getMaxColumns(), MLB_NRFI_RESULTS_LOG_NCOL - sh.getMaxColumns());
+  }
+  if (String(sh.getRange(3, 25).getValue() || '').trim() !== 'close_odds') {
+    sh.getRange(3, 25, 1, 2).setValues([['close_odds', 'clv_pp']]);
+  }
+}
+
+/**
+ * Capture the closing FD price for this slate's NRFI rows (same 0.5 line).
+ * Misses never clobber a previous capture — the last capture is the close.
+ */
+function mlbBackfillNrfiClosing_(ss) {
+  const logSh = ss.getSheetByName(MLB_NRFI_RESULTS_LOG_TAB);
+  if (!logSh || logSh.getLastRow() < 4) return 0;
+  mlbEnsureNrfiCloseCols_(logSh);
+  const cfg = getConfig();
+  const slateWant = getSlateDateString_(cfg);
+  const idx = mlbBuildFirstInningTotalsIndex_(ss);
+  const data = logSh.getRange(4, 1, logSh.getLastRow() - 3, MLB_NRFI_RESULTS_LOG_NCOL).getValues();
+  let n = 0;
+  for (let i = 0; i < data.length; i++) {
+    const row = data[i];
+    if (mlbDateCellToYmd_(row[1]) !== slateWant) continue;
+    const matchup = String(row[3] || '').trim();
+    const side = String(row[5] || '').trim().toUpperCase();
+    const openOdds = row[7];
+    if (!matchup) continue;
+    const hit = mlbLookupFirstInningOdds_(idx, mlbCandidateGameKeys_(matchup, '', ''));
+    if (!hit) continue;
+    const american = side === 'NRFI' ? hit.nrfi : side === 'YRFI' ? hit.yrfi : '';
+    if (american === '' || american == null) continue;
+    logSh.getRange(4 + i, 25).setValue(american);
+    const clvPp = mlbClvPpFromOpenClose_(openOdds, american);
+    if (clvPp !== '') logSh.getRange(4 + i, 26).setValue(clvPp);
+    n++;
+  }
+  return n;
+}
 
 function mlbEnsureNrfiResultsLogLayout_(sh) {
   sh.getRange(1, 1, 1, MLB_NRFI_RESULTS_LOG_NCOL)
@@ -133,6 +177,7 @@ function snapshotNrfiToLog(windowTag) {
   if (logSh.getLastRow() < 3 || !String(logSh.getRange(3, 1).getValue() || '').trim()) {
     mlbEnsureNrfiResultsLogLayout_(logSh);
   }
+  mlbEnsureNrfiCloseCols_(logSh);
 
   let appended = 0;
   let updated = 0;
