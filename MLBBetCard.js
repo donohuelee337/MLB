@@ -114,6 +114,74 @@ function mlbBetCardKProbContext_(r, side, cfg) {
   return { pRaw: pRaw, pCal: pCal, implied: implied, pGap: pGap, useCal: useCal };
 }
 
+/**
+ * Plain-English rationale for one card pick — what the math is SIGNALING,
+ * not just the numbers. Attached as a hover note on the play cell so the
+ * operator can manually audit the process behind every pick. Every line is
+ * computed from the same fields the gates used; nothing is editorialized
+ * that the model didn't actually do.
+ */
+function mlbWhyForPlay_(p, stake, cfg) {
+  const lines = [];
+  const num = function (v) { const x = parseFloat(String(v)); return isFinite(x) ? x : NaN; };
+  const pct = function (x) { return Math.round(x * 1000) / 10 + '%'; };
+  const pw = num(p.pWin);
+  const imp = num(p.implied);
+  const ev = num(p.ev);
+  const lam = num(p.lambda);
+  const line = num(p.line);
+  const gap = isFinite(pw) && isFinite(imp) ? pw - imp : NaN;
+
+  lines.push('WHY: ' + String(p.market || '') + ' ' + String(p.side || '') + ' ' + String(p.line) +
+    ' @ ' + String(p.american));
+
+  if (p.kind === 'K') {
+    if (isFinite(lam) && isFinite(line)) {
+      lines.push(
+        '• Projection: anchored λ ' + lam + ' K vs the ' + line + ' line (Δ ' +
+        (Math.round((lam - line) * 100) / 100) +
+        ')' + (p.projIp !== '' && p.projIp != null ? ' over ~' + p.projIp + ' proj IP' : '') +
+        '. λ is 65% market line / 35% our K9×IP model — the gap shown is AFTER leaning toward the book.'
+      );
+    }
+    if (p.oppKL14 !== '' && p.oppKL14 != null) {
+      lines.push('• Matchup: opponent K/PA (L14-weighted) ' + p.oppKL14 +
+        (p.hotCold ? ' · pitcher ' + p.hotCold : ''));
+    } else if (p.hotCold) {
+      lines.push('• Matchup: pitcher ' + p.hotCold);
+    }
+  }
+
+  if (isFinite(pw) && isFinite(imp)) {
+    const rawBit = p.pWinRaw !== '' && p.pWinRaw != null && num(p.pWinRaw) !== pw
+      ? ' [raw ' + pct(num(p.pWinRaw)) + ' → calibrated ' + pct(pw) + ']'
+      : '';
+    lines.push('• Win prob: ' + pct(pw) + rawBit + ' vs ' + pct(imp) +
+      ' break-even at ' + p.american + ' → ' + (gap >= 0 ? '+' : '') + Math.round(gap * 1000) / 10 + 'pp claimed edge.');
+  }
+  if (isFinite(ev)) {
+    lines.push('• EV: ' + (ev >= 0 ? '+' : '') + '$' + ev + ' per $1 · stake $' + stake +
+      ' (quarter-Kelly tier' + (stake === 0 ? ' 0 / exposure-capped' : '') + ').');
+  }
+
+  // What the size of the disagreement historically MEANS — the honesty line.
+  if (isFinite(gap)) {
+    if (gap > 0.12) {
+      lines.push('• Read: a ' + Math.round(gap * 1000) / 10 + 'pp gap is a SUSPICIOUSLY large disagreement — ' +
+        'historically our biggest claimed edges were our biggest misses (0.80+ bucket hit 42%). ' +
+        'Treat as model error until CLV says otherwise.');
+    } else if (gap > 0.04) {
+      lines.push('• Read: ' + Math.round(gap * 1000) / 10 + 'pp is the healthy-disagreement zone — ' +
+        'big enough to bet, small enough to be believable. This is the bucket where we have actually been profitable.');
+    } else {
+      lines.push('• Read: thin edge (' + Math.round(gap * 1000) / 10 + 'pp) — pick is mostly price-driven; ' +
+        'one tick of line movement erases it. Fine at this stake, not worth chasing.');
+    }
+  }
+  if (p.flags) lines.push('• Flags: ' + p.flags);
+  return lines.join('\n');
+}
+
 /** Prefer sim tab; fall back to stat card with optional pipeline warning. */
 function mlbBetCardSourceSheet_(ss, simTab, cardTab, label) {
   const sim = ss.getSheetByName(simTab);
@@ -717,6 +785,7 @@ function refreshMLBBetCard() {
   // Build rows; insert a blank spacer row between game groups for visual separation.
   const rows = [];
   const hotColdByRow = []; // parallel to rows, '' for spacers
+  const whyByRow = [];     // parallel to rows — plain-English pick rationale
   let lastGamePk = null;
   let visibleIdx = 0;
   selected.forEach(function (p) {
@@ -724,6 +793,7 @@ function refreshMLBBetCard() {
     if (lastGamePk !== null && gKey !== lastGamePk) {
       rows.push(new Array(betCardNcol).fill(''));  // spacer row
       hotColdByRow.push('');
+      whyByRow.push('');
     }
     lastGamePk = gKey;
     visibleIdx++;
@@ -776,6 +846,7 @@ function refreshMLBBetCard() {
     }
     rows.push(rowOut);
     hotColdByRow.push(p.hotCold || '');
+    whyByRow.push(mlbWhyForPlay_(p, stake, cfg));
   });
 
   if (rows.length === 0) {
@@ -796,6 +867,9 @@ function refreshMLBBetCard() {
     } catch (e) {}
     sh.clearContents();
     sh.clearFormats();
+    // Notes survive clearContents — without this, why-notes and 🚑 notes
+    // from the previous build would stick to shifted rows.
+    sh.clearNotes();
   } else {
     sh = ss.insertSheet(MLB_BET_CARD_TAB);
   }
@@ -854,6 +928,11 @@ function refreshMLBBetCard() {
       sh.getRange(4 + i, playerCol).setBorder(
         true, true, true, true, false, false, color, hotStyle
       );
+    }
+    // WHY notes: hover the play cell (col 5) for the plain-English rationale
+    // behind each pick — the operator's manual process check.
+    for (let i = 0; i < whyByRow.length; i++) {
+      if (whyByRow[i]) sh.getRange(4 + i, 5).setNote(whyByRow[i]);
     }
   }
 

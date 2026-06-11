@@ -146,6 +146,7 @@ function refreshHitMachine_() {
     pool.push({
       batter: batter, batterId: batterId, gamePk: gamePk,
       matchup: String(r[1] || ''), odds: odds, p: p,
+      lam: parseFloat(String(r[6])), estPa: parseFloat(String(r[25])),
       oppSpName: String(r[27] || ''), lineupNote: lineupNote, flags: '',
     });
   });
@@ -206,6 +207,41 @@ function refreshHitMachine_() {
   if (parlay) mlbHmUpsertLog_(ss, parlay);
 }
 
+/**
+ * Plain-English rationale per candidate — what the math is signaling, for
+ * the operator's manual process check. Computed strictly from the fields
+ * the gates/ranking actually used.
+ */
+function mlbHmWhyForCandidate_(c) {
+  const lines = [];
+  if (isFinite(c.lam) && isFinite(c.estPa)) {
+    lines.push('λ ' + c.lam + ' expected hits over ~' + c.estPa + ' PA (' + c.lineupNote + ')');
+  }
+  const imp = mlbAmericanImplied_(c.odds);
+  const impN = parseFloat(String(imp));
+  if (isFinite(impN) && isFinite(c.p)) {
+    const gap = Math.round((c.p - impN) * 1000) / 10;
+    lines.push(
+      'P(1+H) ' + Math.round(c.p * 1000) / 10 + '% vs ' + Math.round(impN * 1000) / 10 +
+      '% implied at ' + c.odds + ' → ' + (gap >= 0 ? '+' : '') + gap + 'pp'
+    );
+  }
+  if (c.arsRv != null) {
+    lines.push(
+      'arsenal ' + (c.arsRv >= 0 ? '+' : '') + c.arsRv + ' RV/100 vs ' + (c.oppSpName || 'SP') + '’s mix' +
+      (c.arsCover != null
+        ? ' (cover ' + Math.round(c.arsCover * 100) + '%' + (c.arsCover < 0.4 ? ' — mostly prior, weak signal' : '') + ')'
+        : '')
+    );
+  } else {
+    lines.push('arsenal: no data — ranked on P alone');
+  }
+  if (c.bvp) {
+    lines.push('BvP ' + c.bvp + (c.bvpCold ? ' → STAY-AWAY (cold at sample, one-way veto)' : ' career vs this SP'));
+  }
+  return lines.join('  ·  ');
+}
+
 /** Render the 🎯 board. */
 function mlbHmWriteBoard_(ss, cands, parlay, hint) {
   let sh = ss.getSheetByName(MLB_HIT_MACHINE_TAB);
@@ -217,7 +253,7 @@ function mlbHmWriteBoard_(ss, cands, parlay, hint) {
     sh = ss.insertSheet(MLB_HIT_MACHINE_TAB);
   }
   sh.setTabColor('#f9a825');
-  sh.getRange(1, 1, 1, 11)
+  sh.getRange(1, 1, 1, 12)
     .merge()
     .setValue(
       '🎯 Hit Machine — 2-leg 1+H parlay · SHADOW (paper $) · legs = top-2 cross-game by P(1+H), arsenal rv tiebreak, BvP-cold vetoed · promote only after graded ROI > 0'
@@ -235,13 +271,26 @@ function mlbHmWriteBoard_(ss, cands, parlay, hint) {
   const parlayLine = parlay
     ? '🎟️ ' + parlay.legs[0].batter + ' + ' + parlay.legs[1].batter + '  ·  ' +
       (parlay.american > 0 ? '+' : '') + parlay.american + '  ·  P(both) ' +
-      Math.round(parlay.p * 1000) / 10 + '%  ·  EV $' + parlay.ev + '/$1  ·  paper stake $' + parlay.stake
+      Math.round(parlay.p * 1000) / 10 + '%  ·  EV $' + parlay.ev + '/$1  ·  paper stake $' + parlay.stake +
+      '  ·  hover for why'
     : '🎟️ No qualifying parlay (need 2 cross-game legs past the gates)';
-  sh.getRange(2, 1, 1, 11).merge().setValue(parlayLine).setFontWeight('bold')
+  const banner = sh.getRange(2, 1, 1, 12).merge().setValue(parlayLine).setFontWeight('bold')
     .setBackground(parlay ? '#fff8e1' : '#fbe9e7');
+  if (parlay) {
+    banner.setNote(
+      'WHY THIS PARLAY\n' +
+      'Two juiced singles multiply into a near-even price; the edge (if real) compounds, and so does the variance. ' +
+      'Cross-game legs only, so the multiplication is honest (no same-game correlation the book reprices).\n\n' +
+      'LEG 1 — ' + parlay.legs[0].batter + ':\n' + mlbHmWhyForCandidate_(parlay.legs[0]) + '\n\n' +
+      'LEG 2 — ' + parlay.legs[1].batter + ':\n' + mlbHmWhyForCandidate_(parlay.legs[1]) + '\n\n' +
+      'P(both) = p1 × p2 = ' + Math.round(parlay.p * 1000) / 10 + '% vs ' +
+      Math.round((1 / parlay.decimal) * 1000) / 10 + '% break-even at the multiplied price → EV $' + parlay.ev + '/$1. ' +
+      'SHADOW: paper $' + parlay.stake + ' until graded ROI earns promotion.'
+    );
+  }
 
-  sh.getRange(3, 1, 1, 11)
-    .setValues([['rank', 'batter', 'matchup', 'opp SP', 'odds', 'p_1H', 'arsenal_rv', 'arsenal_cover', 'bvp (H-PA)', 'lineup', 'flags']])
+  sh.getRange(3, 1, 1, 12)
+    .setValues([['rank', 'batter', 'matchup', 'opp SP', 'odds', 'p_1H', 'arsenal_rv', 'arsenal_cover', 'bvp (H-PA)', 'lineup', 'flags', 'why (what the math is signaling)']])
     .setFontWeight('bold')
     .setBackground('#f9a825')
     .setFontColor('#000000');
@@ -249,17 +298,19 @@ function mlbHmWriteBoard_(ss, cands, parlay, hint) {
     return [
       i + 1, c.batter, c.matchup, c.oppSpName, c.odds, c.p,
       c.arsRv != null ? c.arsRv : '', c.arsCover != null ? c.arsCover : '',
-      c.bvp, c.lineupNote, c.flags,
+      c.bvp, c.lineupNote, c.flags, mlbHmWhyForCandidate_(c),
     ];
   });
   if (out.length) {
-    sh.getRange(4, 1, out.length, 11).setValues(out);
+    sh.getRange(4, 1, out.length, 12).setValues(out);
+    sh.getRange(4, 12, out.length, 1).setWrap(true).setFontSize(9);
     for (let i = 0; i < out.length; i++) {
       if (String(out[i][10]).indexOf('bvp_cold') !== -1) {
-        sh.getRange(4 + i, 1, 1, 11).setBackground('#eceff1').setFontColor('#90a4ae');
+        sh.getRange(4 + i, 1, 1, 12).setBackground('#eceff1').setFontColor('#90a4ae');
       }
     }
   }
+  sh.setColumnWidth(12, 460);
   sh.setFrozenRows(3);
 }
 
