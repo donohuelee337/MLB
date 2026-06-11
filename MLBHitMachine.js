@@ -121,7 +121,7 @@ function refreshHitMachine_() {
 
   // Pass 1 — cheap gates, build candidate pool sorted by p. Every rejection
   // is TALLIED so an empty board can always explain itself on the tab.
-  const tally = { scanned: 0, not05: 0, noP: 0, pBelow: 0, juiced: 0, injury: 0, noIds: 0, scratched: 0, slot6plus: 0 };
+  const tally = { scanned: 0, not05: 0, noP: 0, pBelow: 0, noOdds: 0, juiced: 0, injury: 0, noIds: 0, scratched: 0, slot6plus: 0 };
   let bestP = NaN;
   const pool = [];
   rows.forEach(function (r) {
@@ -135,7 +135,8 @@ function refreshHitMachine_() {
     if (isNaN(bestP) || p > bestP) bestP = p;
     if (p < minP) { tally.pBelow++; return; }
     const odds = parseFloat(String(r[4]));
-    if (isNaN(odds) || odds < oddsFloor) { tally.juiced++; return; }
+    if (isNaN(odds)) { tally.noOdds++; return; } // FD pulls markets at first pitch
+    if (odds < oddsFloor) { tally.juiced++; return; }
     const flags = String(r[16] || '');
     if (flags.indexOf('injury') !== -1) { tally.injury++; return; }
     const gamePk = parseInt(r[0], 10);
@@ -185,13 +186,28 @@ function refreshHitMachine_() {
     return (b.arsRv != null ? b.arsRv : -99) - (a.arsRv != null ? a.arsRv : -99);
   });
 
-  // Top 2 eligible from different games = the parlay.
-  const legs = [];
-  for (let i = 0; i < cands.length && legs.length < 2; i++) {
-    const c = cands[i];
-    if (c.bvpCold) continue;
-    if (legs.length === 1 && legs[0].gamePk === c.gamePk) continue; // cross-game only
-    legs.push(c);
+  // Top 2 eligible = the parlay. Cross-game pairs are preferred (honest
+  // multiplication); same-game pairs (SGP) are allowed when HM_ALLOW_SGP=Y —
+  // e.g. only one game left on the slate. SGP legs are positively
+  // correlated (same lineup turnover, same opposing pitcher), so:
+  //   P(both) = p1·p2 + ρ·σ1·σ2  (correlation bump, HM_SGP_RHO)
+  //   payout  = multiplied price × (1 − HM_SGP_HAIRCUT) — FD's SGP engine
+  //   quotes LESS than straight multiplication for correlated legs; we log
+  //   the haircut price so shadow P/L can't flatter itself.
+  const allowSgp = String(cfg['HM_ALLOW_SGP'] != null ? cfg['HM_ALLOW_SGP'] : 'Y').toUpperCase() === 'Y';
+  const sgpRho = parseFloat(String(cfg['HM_SGP_RHO'] != null ? cfg['HM_SGP_RHO'] : '0.08')) || 0.08;
+  const sgpHaircut = parseFloat(String(cfg['HM_SGP_HAIRCUT'] != null ? cfg['HM_SGP_HAIRCUT'] : '0.10')) || 0.10;
+
+  const eligible = cands.filter(function (c) { return !c.bvpCold; });
+  let legs = [];
+  // Pass A: best cross-game pair (anchored on the top candidate).
+  for (let i = 0; i < eligible.length && legs.length < 2; i++) {
+    if (legs.length === 1 && legs[0].gamePk === eligible[i].gamePk) continue;
+    legs.push(eligible[i]);
+  }
+  // Pass B: no cross-game pair possible → best same-game pair (SGP).
+  if (legs.length < 2 && allowSgp && eligible.length >= 2) {
+    legs = [eligible[0], eligible[1]];
   }
 
   let parlay = null;
@@ -199,10 +215,18 @@ function refreshHitMachine_() {
     const d1 = mlbHmDecimalFromAmerican_(legs[0].odds);
     const d2 = mlbHmDecimalFromAmerican_(legs[1].odds);
     if (isFinite(d1) && isFinite(d2)) {
-      const dec = d1 * d2;
-      const pBoth = legs[0].p * legs[1].p;
+      const sgp = legs[0].gamePk === legs[1].gamePk;
+      const p1 = legs[0].p;
+      const p2 = legs[1].p;
+      let dec = d1 * d2;
+      let pBoth = p1 * p2;
+      if (sgp) {
+        pBoth = Math.min(0.999, p1 * p2 + sgpRho * Math.sqrt(p1 * (1 - p1) * p2 * (1 - p2)));
+        dec = 1 + (dec - 1) * (1 - sgpHaircut);
+      }
       parlay = {
         legs: legs,
+        sgp: sgp,
         decimal: Math.round(dec * 1000) / 1000,
         american: mlbHmAmericanFromDecimal_(dec),
         p: Math.round(pBoth * 1000) / 1000,
@@ -217,6 +241,7 @@ function refreshHitMachine_() {
     ' · line≠0.5 ' + tally.not05 +
     ' · no model p ' + tally.noP +
     ' · p<' + minP + ' ' + tally.pBelow + (isFinite(bestP) ? ' (best p seen ' + Math.round(bestP * 1000) / 10 + '%)' : '') +
+    ' · no live odds ' + tally.noOdds +
     ' · odds<' + oddsFloor + ' ' + tally.juiced +
     ' · injury ' + tally.injury +
     ' · scratched ' + tally.scratched +
@@ -224,6 +249,7 @@ function refreshHitMachine_() {
     ' · no ids ' + tally.noIds +
     '  →  pool ' + pool.length + ' / list ' + cands.length;
   mlbHmWriteBoard_(ss, cands, parlay, null, diag);
+  mlbHmMarkSourceTabs_(ss, cands, parlay);
   if (parlay) mlbHmUpsertLog_(ss, parlay);
 }
 
@@ -289,18 +315,23 @@ function mlbHmWriteBoard_(ss, cands, parlay, hint, diag) {
     return;
   }
   const parlayLine = parlay
-    ? '🎟️ ' + parlay.legs[0].batter + ' + ' + parlay.legs[1].batter + '  ·  ' +
+    ? '🎟️ ' + parlay.legs[0].batter + ' + ' + parlay.legs[1].batter +
+      (parlay.sgp ? '  ·  SGP (same game — verify FD quote)' : '') + '  ·  ' +
       (parlay.american > 0 ? '+' : '') + parlay.american + '  ·  P(both) ' +
       Math.round(parlay.p * 1000) / 10 + '%  ·  EV $' + parlay.ev + '/$1  ·  paper stake $' + parlay.stake +
       '  ·  hover for why'
-    : '🎟️ No qualifying parlay (need 2 cross-game legs past the gates)';
+    : '🎟️ No qualifying parlay (need 2 eligible legs past the gates)';
   const banner = sh.getRange(2, 1, 1, 12).merge().setValue(parlayLine).setFontWeight('bold')
     .setBackground(parlay ? '#fff8e1' : '#fbe9e7');
   if (parlay) {
     banner.setNote(
       'WHY THIS PARLAY\n' +
       'Two juiced singles multiply into a near-even price; the edge (if real) compounds, and so does the variance. ' +
-      'Cross-game legs only, so the multiplication is honest (no same-game correlation the book reprices).\n\n' +
+      (parlay.sgp
+        ? 'SAME-GAME pair: the legs are positively correlated (shared lineup turnover / opposing pitcher), so P(both) ' +
+          'includes a correlation bump, and the logged price takes a haircut because FD\'s SGP engine quotes less than ' +
+          'straight multiplication — CHECK THE ACTUAL FD SGP QUOTE before any real bet.'
+        : 'Cross-game legs, so the multiplication is honest (no same-game correlation the book reprices).') + '\n\n' +
       'LEG 1 — ' + parlay.legs[0].batter + ':\n' + mlbHmWhyForCandidate_(parlay.legs[0]) + '\n\n' +
       'LEG 2 — ' + parlay.legs[1].batter + ':\n' + mlbHmWhyForCandidate_(parlay.legs[1]) + '\n\n' +
       'P(both) = p1 × p2 = ' + Math.round(parlay.p * 1000) / 10 + '% vs ' +
@@ -341,6 +372,47 @@ function mlbHmWriteBoard_(ss, cands, parlay, hint, diag) {
   sh.setFrozenRows(4);
 }
 
+/**
+ * 🎯 cross-reference on the hits tabs: amber border + tint on the batter
+ * cell for every Hit Machine candidate (thick border = actual parlay leg).
+ * FORMATS ONLY — each tab rebuild clears formats, so this can never go
+ * stale on shifted rows (the trap notes fell into in v0.6.0).
+ */
+function mlbHmMarkSourceTabs_(ss, cands, parlay) {
+  if (!cands || !cands.length) return;
+  const rankById = {};
+  cands.forEach(function (c, i) { rankById[String(c.batterId)] = i + 1; });
+  const legIds = {};
+  if (parlay) {
+    legIds[String(parlay.legs[0].batterId)] = true;
+    legIds[String(parlay.legs[1].batterId)] = true;
+  }
+  const tabs = [
+    MLB_BATTER_HITS_SIM_TAB,
+    typeof MLB_BATTER_HITS_V2_CARD_TAB !== 'undefined' ? MLB_BATTER_HITS_V2_CARD_TAB : '🧪 Batter_Hits_Card_v2-full',
+  ];
+  tabs.forEach(function (tabName) {
+    try {
+      const sh = ss.getSheetByName(tabName);
+      if (!sh || sh.getLastRow() < 4) return;
+      const ids = sh.getRange(4, 18, sh.getLastRow() - 3, 1).getValues(); // batter_id col 18
+      for (let i = 0; i < ids.length; i++) {
+        const key = String(parseInt(ids[i][0], 10) || 0);
+        if (!rankById[key]) continue;
+        const cell = sh.getRange(4 + i, 3); // batter name col 3
+        cell.setBackground('#fff3cd');
+        cell.setBorder(
+          true, true, true, true, false, false,
+          '#f9a825',
+          legIds[key] ? SpreadsheetApp.BorderStyle.SOLID_THICK : SpreadsheetApp.BorderStyle.SOLID_MEDIUM
+        );
+      }
+    } catch (e) {
+      Logger.log('mlbHmMarkSourceTabs_(' + tabName + '): ' + (e.message || e));
+    }
+  });
+}
+
 /** One parlay row per slate, upserted until graded. */
 function mlbHmUpsertLog_(ss, parlay) {
   const cfg = getConfig();
@@ -370,7 +442,7 @@ function mlbHmUpsertLog_(ss, parlay) {
     l1.batter, l1.batterId, l1.gamePk, l1.odds, l1.p, l1.arsRv != null ? l1.arsRv : '', l1.bvp,
     l2.batter, l2.batterId, l2.gamePk, l2.odds, l2.p, l2.arsRv != null ? l2.arsRv : '', l2.bvp,
     parlay.american, parlay.p, parlay.ev, parlay.stake,
-    '', 'PENDING', '', '', betKey, '', 'SHADOW(paper)',
+    '', 'PENDING', '', '', betKey, '', 'SHADOW(paper)' + (parlay.sgp ? '·SGP' : ''),
   ];
 
   // Find today's row (PENDING only — never disturb a graded parlay).
@@ -441,7 +513,13 @@ function gradeHitMachinePendingResults_() {
       pnl = Math.round(stake * mlbAmericanToB_(liveOdds) * 100) / 100;
     } else {
       result = 'WIN';
-      const dec = mlbHmDecimalFromAmerican_(row[5]) * mlbHmDecimalFromAmerican_(row[12]);
+      // Settle at the LOGGED parlay price (col 17) — for SGP rows that price
+      // already carries the repricing haircut; recomputing from leg odds
+      // would overpay the shadow book. Leg-product fallback for legacy rows.
+      const decLogged = mlbHmDecimalFromAmerican_(row[16]);
+      const dec = isFinite(decLogged) && decLogged > 1
+        ? decLogged
+        : mlbHmDecimalFromAmerican_(row[5]) * mlbHmDecimalFromAmerican_(row[12]);
       pnl = Math.round(stake * (dec - 1) * 100) / 100;
     }
     logSh.getRange(4 + i, 21).setValue(g1.r + '/' + g2.r);

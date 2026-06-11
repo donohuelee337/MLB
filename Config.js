@@ -8,7 +8,7 @@
 const CONFIG_TAB_NAME = '⚙️ Config';
 
 /** Incremented by scripts/clasp-deploy.ps1 on each Apps Script push (visible on ⚙️ Config). */
-const MLB_APPS_SCRIPT_BUILD = 33;
+const MLB_APPS_SCRIPT_BUILD = 34;
 
 function mlbAppsScriptBuild_() {
   return typeof MLB_APPS_SCRIPT_BUILD !== 'undefined' ? MLB_APPS_SCRIPT_BUILD : '';
@@ -241,6 +241,9 @@ function buildConfigTab() {
   row_('HM_BVP_MIN_PA', '12', '🎯 Career PA vs tonight\'s SP before the BvP stay-away veto can fire. One-way prune, never a boost.');
   row_('HM_BVP_MAX_AVG', '0.10', '🎯 BvP veto: career avg below this (with PA ≥ min) = stay away.');
   row_('HM_PAPER_STAKE', '2.50', '🎯 Paper stake $ for shadow parlay P/L tracking.');
+  row_('HM_ALLOW_SGP', 'Y', '🎯 Y/N — allow a same-game pair when no cross-game pair exists (e.g. one game left). SGP P(both) gets a correlation bump and the logged price a repricing haircut — always verify the actual FD SGP quote.');
+  row_('HM_SGP_RHO', '0.08', '🎯 Correlation between same-game 1+H legs: P(both)=p1·p2+ρ·σ1·σ2.');
+  row_('HM_SGP_HAIRCUT', '0.10', '🎯 Payout haircut on SGP multiplied price (FD quotes less than straight multiplication for correlated legs).');
   row_('K_PROB_BLEND_MARKET_W', '0.65', '🧪 Shadow only (⚡ Sim_Pitcher_K cols 39-41): weight on de-vigged market prob vs raw model prob. Audit data for market-prior blending; does NOT affect live picks.');
   row_('LEGACY_UNIT_USD', '2.50', 'Flat $ assumed for pre-tier historical bets when running "Backfill historical stakes". Set to what you were actually averaging before the Kelly system.');
   row_('HP_UMP_LAMBDA_MULT', '1', 'Multiply 🎰 λ when hp_umpire listed (1=no change; try 1.02–1.05 cautiously)');
@@ -500,6 +503,8 @@ function validateMlbPipelineConfig_(cfg) {
   warnRange('HM_BVP_MIN_PA', c['HM_BVP_MIN_PA'], 6, 60);
   warnRange('HM_BVP_MAX_AVG', c['HM_BVP_MAX_AVG'], 0.02, 0.2);
   warnRange('HM_PAPER_STAKE', c['HM_PAPER_STAKE'], 1, 7.5);
+  warnRange('HM_SGP_RHO', c['HM_SGP_RHO'], 0, 0.3);
+  warnRange('HM_SGP_HAIRCUT', c['HM_SGP_HAIRCUT'], 0, 0.3);
   warnRange('K_PROB_BLEND_MARKET_W', c['K_PROB_BLEND_MARKET_W'], 0, 1);
   warnRange('ANCHOR_WEIGHT_BATTER_HITS', c['ANCHOR_WEIGHT_BATTER_HITS'], 0, 1);
   warnRange('K_OPP_L14_BLEND', c['K_OPP_L14_BLEND'], 0, 1);
