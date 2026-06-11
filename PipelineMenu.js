@@ -475,7 +475,11 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   // longer exist. Clearing is the honest state: no odds → fd_*_miss flags and
   // zero picks this window; the next successful window repopulates.
   step('Odds staleness guard', function () {
-    const slate = getSlateDateString_(cfg);
+    // FRESH config read — the window-start `cfg` snapshot predates the
+    // Config step, which can rewrite SLATE_DATE (it reset a stale Date cell
+    // to today on 6/11 while this guard still held the 6/10 snapshot and
+    // cleared the morning's perfectly fresh tabs).
+    const slate = getSlateDateString_(getConfig());
     if (typeof mlbOddsTabIsForSlate_ === 'function' && !mlbOddsTabIsForSlate_(ss, slate)) {
       const oddsSh = ss.getSheetByName(MLB_ODDS_CONFIG.tabName);
       if (oddsSh && oddsSh.getLastRow() >= 4) {

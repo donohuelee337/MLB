@@ -170,8 +170,13 @@ function refreshPitcherKSimEngine_() {
     const pick = (typeof mlbChooseSideOutcomeFirst_ === 'function')
       ? mlbChooseSideOutcomeFirst_('Over', pOver, evO, 'Under', pUnder, evU, cfg)
       : { side: '', ev: NaN };
+    // Board check on the RAW model λ — the documented semantics ("pick when
+    // |proj_K − line| ≥ 0.5") and what the 🎰 card does. Checking the
+    // ANCHORED λ (line·0.65 + model·0.35) silently demanded a 1.43-K raw
+    // gap (0.5 ÷ 0.35) and agree_fd-blocked 29 of 30 plays on 6/11; the
+    // pWin/EV/odds gates downstream are the real protection.
     const board = typeof mlbKPickOnBoard_ === 'function'
-      ? mlbKPickOnBoard_(lamAnch, lineNum)
+      ? mlbKPickOnBoard_(lambdaModel, lineNum)
       : { onBoard: true };
     let pickSide = pick.side;
     let pickEv = isNaN(pick.ev) ? '' : Math.round(pick.ev * 1000) / 1000;

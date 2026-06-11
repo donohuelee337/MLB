@@ -264,6 +264,8 @@ function snapshotF5ToLog(windowTag) {
       flags,
       awaySp,
       homeSp,
+      '',  // close_odds — filled by mlbBackfillF5Closing_
+      '',  // clv_pp
     ]]);
     appended++;
   }

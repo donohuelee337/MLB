@@ -249,6 +249,8 @@ function snapshotNrfiToLog(windowTag) {
       betKey,
       window,
       flags,
+      '',  // close_odds — filled by mlbBackfillNrfiClosing_
+      '',  // clv_pp
     ]]);
     appended++;
   }

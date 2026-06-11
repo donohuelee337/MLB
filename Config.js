@@ -8,7 +8,7 @@
 const CONFIG_TAB_NAME = '⚙️ Config';
 
 /** Incremented by scripts/clasp-deploy.ps1 on each Apps Script push (visible on ⚙️ Config). */
-const MLB_APPS_SCRIPT_BUILD = 28;
+const MLB_APPS_SCRIPT_BUILD = 29;
 
 function mlbAppsScriptBuild_() {
   return typeof MLB_APPS_SCRIPT_BUILD !== 'undefined' ? MLB_APPS_SCRIPT_BUILD : '';
@@ -389,16 +389,29 @@ function getSlateDateString_(cfg) {
   const raw = cfg ? cfg['SLATE_DATE'] : '';
   // Sheets auto-coerces yyyy-MM-dd cells to Date objects, and String(Date)
   // fails the regex below — which silently ran TODAY's slate even when a
-  // slate date was explicitly set. Format Dates back to yyyy-MM-dd instead.
-  if (raw instanceof Date && !isNaN(raw.getTime())) {
-    return Utilities.formatDate(raw, tz, 'yyyy-MM-dd');
+  // slate date was explicitly set. Format Dates back to yyyy-MM-dd instead
+  // (no early return: Dates must flow through the past-date guard below).
+  const fromCfg = raw instanceof Date && !isNaN(raw.getTime())
+    ? Utilities.formatDate(raw, tz, 'yyyy-MM-dd')
+    : raw != null ? String(raw).trim() : '';
+  const today = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+  if (fromCfg && /^\d{4}-\d{2}-\d{2}$/.test(fromCfg)) {
+    // A PAST slate date is always stale residue, never an intent — a
+    // leftover cell (readable again since build 25) made the 6/11 morning
+    // window compare today's fresh tabs against 6/10 and clear them.
+    // Tomorrow (the menu helper) and today pass through; the past does not.
+    if (fromCfg < today) {
+      if (typeof addPipelineWarning_ === 'function') {
+        addPipelineWarning_('⚙️ SLATE_DATE ' + fromCfg + ' is in the past — ignored, using today ' + today);
+      }
+      return today;
+    }
+    return fromCfg;
   }
-  const fromCfg = raw != null ? String(raw).trim() : '';
-  if (fromCfg && /^\d{4}-\d{2}-\d{2}$/.test(fromCfg)) return fromCfg;
   if (fromCfg && typeof addPipelineWarning_ === 'function') {
     addPipelineWarning_('⚙️ SLATE_DATE "' + fromCfg + '" unparseable — falling back to today');
   }
-  return Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+  return today;
 }
 
 /**
