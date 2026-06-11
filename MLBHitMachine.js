@@ -102,7 +102,10 @@ function refreshHitMachine_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const cfg = getConfig();
   if (String(cfg['HM_ENABLED'] != null ? cfg['HM_ENABLED'] : 'Y').toUpperCase() !== 'Y') return;
-  const minP = parseFloat(String(cfg['HM_MIN_P'] != null ? cfg['HM_MIN_P'] : '0.75')) || 0.75;
+  // NOTE: HM_MIN_P is on the POST-SHRINK scale (sim p = raw × H_MODEL_P_SHRINK
+  // 0.82). 0.65 here ≈ 0.79 raw. The original 0.75 default demanded a ~91%
+  // raw hitter — mathematically empty board every slate.
+  const minP = parseFloat(String(cfg['HM_MIN_P'] != null ? cfg['HM_MIN_P'] : '0.65')) || 0.65;
   const listN = parseInt(String(cfg['HM_LIST_N'] != null ? cfg['HM_LIST_N'] : '8'), 10) || 8;
   const oddsFloor = parseFloat(String(cfg['HM_LEG_ODDS_FLOOR'] != null ? cfg['HM_LEG_ODDS_FLOOR'] : '-350')) || -350;
   const bvpMinPa = parseInt(String(cfg['HM_BVP_MIN_PA'] != null ? cfg['HM_BVP_MIN_PA'] : '12'), 10) || 12;
@@ -111,34 +114,40 @@ function refreshHitMachine_() {
 
   const src = ss.getSheetByName(MLB_BATTER_HITS_SIM_TAB);
   if (!src || src.getLastRow() < 4) {
-    mlbHmWriteBoard_(ss, [], null, 'Run the Hits sim first (Morning pipeline builds it).');
+    mlbHmWriteBoard_(ss, [], null, 'Run the Hits sim first (Morning pipeline builds it).', '');
     return;
   }
   const rows = src.getRange(4, 1, src.getLastRow() - 3, 34).getValues();
 
-  // Pass 1 — cheap gates, build candidate pool sorted by p.
+  // Pass 1 — cheap gates, build candidate pool sorted by p. Every rejection
+  // is TALLIED so an empty board can always explain itself on the tab.
+  const tally = { scanned: 0, not05: 0, noP: 0, pBelow: 0, juiced: 0, injury: 0, noIds: 0, scratched: 0, slot6plus: 0 };
+  let bestP = NaN;
   const pool = [];
   rows.forEach(function (r) {
     const batter = String(r[2] || '').trim();
     if (!batter) return;
+    tally.scanned++;
     const line = parseFloat(String(r[3]));
-    if (isNaN(line) || Math.abs(line - 0.5) > 1e-9) return; // 1+ hit only
+    if (isNaN(line) || Math.abs(line - 0.5) > 1e-9) { tally.not05++; return; } // 1+ hit only
     const p = parseFloat(String(r[8]));
-    if (isNaN(p) || p < minP) return;
+    if (isNaN(p)) { tally.noP++; return; }
+    if (isNaN(bestP) || p > bestP) bestP = p;
+    if (p < minP) { tally.pBelow++; return; }
     const odds = parseFloat(String(r[4]));
-    if (isNaN(odds) || odds < oddsFloor) return;
+    if (isNaN(odds) || odds < oddsFloor) { tally.juiced++; return; }
     const flags = String(r[16] || '');
-    if (flags.indexOf('injury') !== -1) return;
+    if (flags.indexOf('injury') !== -1) { tally.injury++; return; }
     const gamePk = parseInt(r[0], 10);
     const batterId = parseInt(r[17], 10);
-    if (!gamePk || !batterId) return;
+    if (!gamePk || !batterId) { tally.noIds++; return; }
     // Lineup: confirmed-absent = scratch (skip); confirmed slot 6+ = skip
     // (PA count is half the battle for 1+H); unconfirmed = flag only.
     let lineupNote = '';
     if (typeof mlbInjuryLineupConfirmed_ === 'function' && mlbInjuryLineupConfirmed_(gamePk)) {
       const slot = typeof mlbLineupSlotForBatter_ === 'function' ? mlbLineupSlotForBatter_(gamePk, batterId) : null;
-      if (slot == null) return;
-      if (slot > 5) return;
+      if (slot == null) { tally.scratched++; return; }
+      if (slot > 5) { tally.slot6plus++; return; }
       lineupNote = 'slot ' + slot;
     } else {
       lineupNote = 'lineup_unconfirmed';
@@ -203,7 +212,18 @@ function refreshHitMachine_() {
     }
   }
 
-  mlbHmWriteBoard_(ss, cands, parlay, null);
+  const diag =
+    'Gate tally: scanned ' + tally.scanned +
+    ' · line≠0.5 ' + tally.not05 +
+    ' · no model p ' + tally.noP +
+    ' · p<' + minP + ' ' + tally.pBelow + (isFinite(bestP) ? ' (best p seen ' + Math.round(bestP * 1000) / 10 + '%)' : '') +
+    ' · odds<' + oddsFloor + ' ' + tally.juiced +
+    ' · injury ' + tally.injury +
+    ' · scratched ' + tally.scratched +
+    ' · slot 6+ ' + tally.slot6plus +
+    ' · no ids ' + tally.noIds +
+    '  →  pool ' + pool.length + ' / list ' + cands.length;
+  mlbHmWriteBoard_(ss, cands, parlay, null, diag);
   if (parlay) mlbHmUpsertLog_(ss, parlay);
 }
 
@@ -243,7 +263,7 @@ function mlbHmWhyForCandidate_(c) {
 }
 
 /** Render the 🎯 board. */
-function mlbHmWriteBoard_(ss, cands, parlay, hint) {
+function mlbHmWriteBoard_(ss, cands, parlay, hint, diag) {
   let sh = ss.getSheetByName(MLB_HIT_MACHINE_TAB);
   if (sh) {
     sh.clearContents();
@@ -289,7 +309,14 @@ function mlbHmWriteBoard_(ss, cands, parlay, hint) {
     );
   }
 
-  sh.getRange(3, 1, 1, 12)
+  // Diag row: the board can never be silently blank — the gate tally always
+  // says what was scanned and where every row fell out.
+  sh.getRange(3, 1, 1, 12).merge()
+    .setValue(diag || '')
+    .setFontSize(9)
+    .setFontColor('#616161');
+
+  sh.getRange(4, 1, 1, 12)
     .setValues([['rank', 'batter', 'matchup', 'opp SP', 'odds', 'p_1H', 'arsenal_rv', 'arsenal_cover', 'bvp (H-PA)', 'lineup', 'flags', 'why (what the math is signaling)']])
     .setFontWeight('bold')
     .setBackground('#f9a825')
@@ -302,16 +329,16 @@ function mlbHmWriteBoard_(ss, cands, parlay, hint) {
     ];
   });
   if (out.length) {
-    sh.getRange(4, 1, out.length, 12).setValues(out);
-    sh.getRange(4, 12, out.length, 1).setWrap(true).setFontSize(9);
+    sh.getRange(5, 1, out.length, 12).setValues(out);
+    sh.getRange(5, 12, out.length, 1).setWrap(true).setFontSize(9);
     for (let i = 0; i < out.length; i++) {
       if (String(out[i][10]).indexOf('bvp_cold') !== -1) {
-        sh.getRange(4 + i, 1, 1, 12).setBackground('#eceff1').setFontColor('#90a4ae');
+        sh.getRange(5 + i, 1, 1, 12).setBackground('#eceff1').setFontColor('#90a4ae');
       }
     }
   }
   sh.setColumnWidth(12, 460);
-  sh.setFrozenRows(3);
+  sh.setFrozenRows(4);
 }
 
 /** One parlay row per slate, upserted until graded. */

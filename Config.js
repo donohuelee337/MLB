@@ -8,7 +8,7 @@
 const CONFIG_TAB_NAME = '⚙️ Config';
 
 /** Incremented by scripts/clasp-deploy.ps1 on each Apps Script push (visible on ⚙️ Config). */
-const MLB_APPS_SCRIPT_BUILD = 32;
+const MLB_APPS_SCRIPT_BUILD = 33;
 
 function mlbAppsScriptBuild_() {
   return typeof MLB_APPS_SCRIPT_BUILD !== 'undefined' ? MLB_APPS_SCRIPT_BUILD : '';
@@ -235,7 +235,7 @@ function buildConfigTab() {
   row_('ARSENAL_P_CSV_URL', '', '📊 Override URL for the pitcher arsenal CSV. Blank = built-in Savant leaderboard export URL.');
   row_('ARSENAL_B_CSV_URL', '', '📊 Override URL for the batter arsenal CSV. Blank = built-in Savant leaderboard export URL.');
   row_('HM_ENABLED', 'Y', '🎯 Y/N — Hit Machine 2-leg 1+H parlay board + SHADOW paper log. No real stakes until promoted.');
-  row_('HM_MIN_P', '0.75', '🎯 Min model P(1+ hit) per leg. Raw sim p — known overconfident, so start high.');
+  row_('HM_MIN_P', '0.65', '🎯 Min model P(1+ hit) per leg, on the POST-SHRINK scale (sim p = raw × H_MODEL_P_SHRINK 0.82, so 0.65 ≈ 0.79 raw). The old 0.75 default demanded a ~91% raw hitter — empty board every slate.');
   row_('HM_LIST_N', '8', '🎯 Candidate list size (BvP/arsenal context fetched for these only).');
   row_('HM_LEG_ODDS_FLOOR', '-350', '🎯 Worst (most negative) acceptable leg price.');
   row_('HM_BVP_MIN_PA', '12', '🎯 Career PA vs tonight\'s SP before the BvP stay-away veto can fire. One-way prune, never a boost.');
