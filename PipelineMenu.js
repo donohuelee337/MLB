@@ -18,6 +18,7 @@ function onOpen() {
     .addItem('🔒 Run Final  (full refresh + snapshot)', 'runFinalWindowMLB')
     .addItem('🚑 Re-check health signals (card players)', 'mlbFlagBetCardHealthSignals_')
     .addItem('🎯 Refresh Hit Machine (shadow parlay)', 'refreshHitMachine_')
+    .addItem('🌙 Night Audit (grade + close-out — no rebuilds)', 'runNightAuditMLB')
     .addSeparator();
 
   // ---- Calibration & profitability (analytics on graded logs) ----
@@ -314,6 +315,95 @@ function runMiddayWindowMLB() {
 
 function runFinalWindowMLB() {
   runMLBBallWindow_('FINAL', false);
+}
+
+/**
+ * 🌙 Night Audit — POST-LOCK rules: grade and close out the day; never build.
+ * - NO ingestion, NO card/queue rebuilds, NO tab clears — late-night markets
+ *   are pulled, so a rebuild can only produce ghost boards.
+ * - All graders (incl. Hit Machine) under a LARGE budget
+ *   (NIGHT_GRADER_BUDGET_SEC, default 1200s): nothing competes for runtime
+ *   at night, so this is when the regrade backlog drains fastest.
+ * - Closing backfills are no-clobber by design — with markets pulled they
+ *   simply leave the last pre-pitch capture standing as the close.
+ * - Ends with profitability + calibration + proposals + Project Status and
+ *   a day-summary toast.
+ * Run from the menu late evening, or attach a time-driven trigger
+ * (~11:30 PM NY) to runNightAuditMLB in the Apps Script UI.
+ */
+function runNightAuditMLB() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const nightLock = LockService.getScriptLock();
+  if (!nightLock.tryLock(30000)) {
+    try { ss.toast('Another pipeline run is still active — night audit skipped', 'MLB-BOIZ', 8); } catch (e) {}
+    return;
+  }
+  const start = Date.now();
+  resetPipelineLog_('NIGHT');
+  if (typeof mlbBeginPipelineTimings_ === 'function') mlbBeginPipelineTimings_('NIGHT');
+  try {
+    const selfTest = mlbGraderSelfTest_();
+    if (!selfTest.ok) addPipelineWarning_('GRADER SELF-TEST FAILED — ' + selfTest.note);
+  } catch (e) {
+    addPipelineWarning_('Grader self-test threw: ' + (e.message || e));
+  }
+  if (typeof mlbResetBoxscoreJsonCache_ === 'function') mlbResetBoxscoreJsonCache_();
+
+  function timedNight(name, fn) {
+    const t0 = Date.now();
+    let okFlag = true;
+    let errMsg = '';
+    try {
+      if (typeof fn === 'function') fn();
+    } catch (e) {
+      okFlag = false;
+      errMsg = String(e.message || e);
+      addPipelineWarning_('🌙 ' + name + ': ' + errMsg);
+    }
+    if (typeof mlbFlushPipelineStepTiming_ === 'function') {
+      mlbFlushPipelineStepTiming_('night: ' + name, (Date.now() - t0) / 1000, okFlag, errMsg);
+    }
+  }
+
+  const cfg = getConfig();
+  const budget = parseFloat(String(cfg['NIGHT_GRADER_BUDGET_SEC'] != null ? cfg['NIGHT_GRADER_BUDGET_SEC'] : '1200')) || 1200;
+  if (typeof mlbArmGraderBandDeadline_ === 'function') mlbArmGraderBandDeadline_(budget);
+  timedNight('K (live)',       typeof gradeMLBPendingResults_       === 'function' ? gradeMLBPendingResults_       : null);
+  timedNight('H v2 (shadow)',  typeof gradeMLBHitsV2PendingResults_ === 'function' ? gradeMLBHitsV2PendingResults_ : null);
+  timedNight('H v3 (shadow)',  typeof gradeMLBHitsV3PendingResults_ === 'function' ? gradeMLBHitsV3PendingResults_ : null);
+  timedNight('TB v2 (shadow)', typeof gradeMLBTBV2PendingResults_   === 'function' ? gradeMLBTBV2PendingResults_   : null);
+  timedNight('TB v3 (shadow)', typeof gradeMLBTBV3PendingResults_   === 'function' ? gradeMLBTBV3PendingResults_   : null);
+  timedNight('HR promo',       typeof gradeHrPromoPendingResults_   === 'function' ? gradeHrPromoPendingResults_   : null);
+  timedNight('NRFI',           typeof gradeNrfiPendingResults_      === 'function' ? gradeNrfiPendingResults_      : null);
+  timedNight('F5',             typeof gradeF5PendingResults_        === 'function' ? gradeF5PendingResults_        : null);
+  timedNight('Hit Machine',    typeof gradeHitMachinePendingResults_ === 'function' ? gradeHitMachinePendingResults_ : null);
+  if (typeof mlbDisarmGraderBandDeadline_ === 'function') mlbDisarmGraderBandDeadline_();
+
+  timedNight('Closing backfills', function () {
+    mlbBackfillResultsLogClosingK_(ss);
+    if (typeof mlbBackfillNrfiClosing_ === 'function') mlbBackfillNrfiClosing_(ss);
+    if (typeof mlbBackfillF5Closing_ === 'function') mlbBackfillF5Closing_(ss);
+  });
+  timedNight('Profitability report', typeof refreshMLBProfitabilityReport === 'function' ? refreshMLBProfitabilityReport : null);
+  timedNight('Bet card calibration', typeof refreshBetCardCalibration === 'function' ? refreshBetCardCalibration : null);
+  timedNight('Calibration proposals', function () {
+    if (typeof mlbWriteCalibrationProposals_ === 'function') mlbWriteCalibrationProposals_(ss, getConfig());
+  });
+  timedNight('Project status', typeof refreshProjectStatus === 'function' ? refreshProjectStatus : null);
+
+  writePipelineLogTab_(ss);
+  try {
+    const build = typeof mlbAppsScriptBuild_ === 'function' ? mlbAppsScriptBuild_() : '';
+    ss.toast(
+      '🌙 Night audit done in ' + ((Date.now() - start) / 1000).toFixed(1) +
+      's — day graded + closed out. See 💰 Profitability_Report.' + (build !== '' ? ' · build ' + build : ''),
+      'MLB-BOIZ',
+      10
+    );
+  } catch (e) {}
+  try {
+    nightLock.releaseLock();
+  } catch (e) {}
 }
 
 /** Menu: fill close_line / close_odds / clv_note from current ✅ tab for this slate’s log rows. */

@@ -8,7 +8,7 @@
 const CONFIG_TAB_NAME = '⚙️ Config';
 
 /** Incremented by scripts/clasp-deploy.ps1 on each Apps Script push (visible on ⚙️ Config). */
-const MLB_APPS_SCRIPT_BUILD = 34;
+const MLB_APPS_SCRIPT_BUILD = 35;
 
 function mlbAppsScriptBuild_() {
   return typeof MLB_APPS_SCRIPT_BUILD !== 'undefined' ? MLB_APPS_SCRIPT_BUILD : '';
@@ -228,6 +228,7 @@ function buildConfigTab() {
   row_('STAKE_TIER_3_KELLY_PCT', '1.5', 'Kelly% of bankroll → 3u tier. Default 1.5%: any Kelly recommendation ≥1.5% of roll is a max-bet conviction play.');
   row_('MAX_SLATE_EXPOSURE_PCT', '10', 'Max % of bankroll staked across one slate (simultaneous bets). Plays beyond the cap stay on 🃏 at $0 with an exposure_cap flag. Kelly assumes sequential bets — uncapped slates risked 30%+ of roll at once.');
   row_('GRADER_BAND_BUDGET_SEC', '300', 'Time budget (sec) for the grading band at the start of each window. Backlogged regrades beyond the budget stay PENDING and drain over the next windows. Fetch pacing/throttles unchanged.');
+  row_('NIGHT_GRADER_BUDGET_SEC', '1200', '🌙 Grader budget (sec) for the Night Audit — post-lock there is nothing competing for runtime, so the backlog drains here. No rebuilds, no clears, ever.');
   row_('INJURY_NEWS_ENABLED', 'Y', '🚑 Y/N — soft-injury news sweep + scratch detection for 🃏 card players. Signal-only (red cell + hover note); never auto-gates stakes.');
   row_('INJURY_NEWS_MAX_FETCH', '15', '🚑 Max Google News RSS fetches per run (one per card player, 250ms pacing).');
   row_('INJURY_NEWS_LOOKBACK_H', '48', '🚑 Headline freshness window in hours for the injury-news sweep.');
@@ -495,6 +496,7 @@ function validateMlbPipelineConfig_(cfg) {
   warnRange('ANCHOR_WEIGHT_K', c['ANCHOR_WEIGHT_K'], 0, 1);
   warnRange('MAX_SLATE_EXPOSURE_PCT', c['MAX_SLATE_EXPOSURE_PCT'], 2, 50);
   warnRange('GRADER_BAND_BUDGET_SEC', c['GRADER_BAND_BUDGET_SEC'], 60, 1500);
+  warnRange('NIGHT_GRADER_BUDGET_SEC', c['NIGHT_GRADER_BUDGET_SEC'], 300, 1650);
   warnRange('INJURY_NEWS_MAX_FETCH', c['INJURY_NEWS_MAX_FETCH'], 1, 40);
   warnRange('INJURY_NEWS_LOOKBACK_H', c['INJURY_NEWS_LOOKBACK_H'], 6, 168);
   warnRange('HM_MIN_P', c['HM_MIN_P'], 0.55, 0.95);
