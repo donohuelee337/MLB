@@ -96,8 +96,11 @@ function refreshPitcherOutsSlateQueue() {
 
     sides.forEach(function (sp) {
       if (!sp.name) {
+        // 17 cells to match the header contract — an 18-cell row here crashed
+        // the whole queue write the first time a slate had a TBD probable
+        // (6/11). Note belongs in `notes` (col 12), not injury_status.
         out.push([
-          gamePk, matchup, sp.side, '', '', '', '', '', '', '', '', '', 'no_probable_pitcher', '', hpUmp, '', '', '',
+          gamePk, matchup, sp.side, '', '', '', '', '', '', '', '', 'no_probable_pitcher', '', hpUmp, '', '', '',
         ]);
         return;
       }

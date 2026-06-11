@@ -17,6 +17,7 @@ function onOpen() {
     .addItem('🌤 Run Midday  (odds + pipeline, injuries unchanged)', 'runMiddayWindowMLB')
     .addItem('🔒 Run Final  (full refresh + snapshot)', 'runFinalWindowMLB')
     .addItem('🚑 Re-check health signals (card players)', 'mlbFlagBetCardHealthSignals_')
+    .addItem('🎯 Refresh Hit Machine (shadow parlay)', 'refreshHitMachine_')
     .addSeparator();
 
   // ---- Calibration & profitability (analytics on graded logs) ----
@@ -404,6 +405,7 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   timedGrader('HR promo',       typeof gradeHrPromoPendingResults_   === 'function' ? gradeHrPromoPendingResults_   : null);
   timedGrader('NRFI',         typeof gradeNrfiPendingResults_     === 'function' ? gradeNrfiPendingResults_     : null);
   timedGrader('F5',           typeof gradeF5PendingResults_       === 'function' ? gradeF5PendingResults_       : null);
+  timedGrader('Hit Machine (shadow)', typeof gradeHitMachinePendingResults_ === 'function' ? gradeHitMachinePendingResults_ : null);
   if (typeof mlbDisarmGraderBandDeadline_ === 'function') mlbDisarmGraderBandDeadline_();
   mlbResetPitchGameLogFetchCache_();
   mlbResetPitchHandCache_();
@@ -425,6 +427,8 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   // this in-memory array instead of re-reading the sheet hundreds of times.
   if (typeof mlbResetScheduleBlockCache_ === 'function') mlbResetScheduleBlockCache_();
   if (typeof mlbResetLineupsCache_ === 'function') mlbResetLineupsCache_();
+  if (typeof mlbResetArsenalCaches_ === 'function') mlbResetArsenalCaches_();
+  if (typeof mlbResetHitMachineCaches_ === 'function') mlbResetHitMachineCaches_();
   let savantTeamCount = -1;
   let statcastProfileCounts = { pitchers: 0, batters: 0, skipped: true };
   const outcomes = [];
@@ -511,6 +515,15 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
       statcastProfileCounts = mlbStatcastIngestProfilesBestEffort_();
     }
   });
+  // Arsenal CSVs (2 fetches, best-effort) — feeds 🎯 Hit Machine matchup
+  // scores. Failure degrades to blank scores; never blocks the window.
+  step('Arsenal ingest (Savant)', function () {
+    if (typeof mlbArsenalIngestBestEffort_ !== 'function') return;
+    const res = mlbArsenalIngestBestEffort_();
+    if (res.p === 0 || res.b === 0) {
+      addPipelineWarning_('Arsenal ingest: pitcher=' + res.p + ' batter=' + res.b + ' rows — 🎯 matchup scores will be blank');
+    }
+  });
   step('Slate board (join)', refreshMLBSlateBoard);
   step('Pitcher K queue', refreshPitcherKSlateQueue);
   step('Pitcher K card', refreshPitcherKBetCard);
@@ -541,6 +554,11 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   // players. Signal-only — red cell + 🚑 flag + hover note; never auto-gates.
   step('Health signals (🚑)', function () {
     if (typeof mlbFlagBetCardHealthSignals_ === 'function') mlbFlagBetCardHealthSignals_();
+  });
+  // 🎯 Hit Machine (SHADOW): 2-leg 1+H parlay board + paper log. Runs after
+  // health signals so lineup-confirmed state is as fresh as possible.
+  step('Hit Machine (shadow)', function () {
+    if (typeof refreshHitMachine_ === 'function') refreshHitMachine_();
   });
   // Early Win card reads ✅ FanDuel_MLB_Odds (h2h) + 📅 MLB_Schedule, both
   // already built above. Cheap (~1s) and runs daily even when card is empty,

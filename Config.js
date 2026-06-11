@@ -8,7 +8,7 @@
 const CONFIG_TAB_NAME = '⚙️ Config';
 
 /** Incremented by scripts/clasp-deploy.ps1 on each Apps Script push (visible on ⚙️ Config). */
-const MLB_APPS_SCRIPT_BUILD = 30;
+const MLB_APPS_SCRIPT_BUILD = 31;
 
 function mlbAppsScriptBuild_() {
   return typeof MLB_APPS_SCRIPT_BUILD !== 'undefined' ? MLB_APPS_SCRIPT_BUILD : '';
@@ -231,6 +231,16 @@ function buildConfigTab() {
   row_('INJURY_NEWS_ENABLED', 'Y', '🚑 Y/N — soft-injury news sweep + scratch detection for 🃏 card players. Signal-only (red cell + hover note); never auto-gates stakes.');
   row_('INJURY_NEWS_MAX_FETCH', '15', '🚑 Max Google News RSS fetches per run (one per card player, 250ms pacing).');
   row_('INJURY_NEWS_LOOKBACK_H', '48', '🚑 Headline freshness window in hours for the injury-news sweep.');
+  row_('ARSENAL_INGEST_ENABLED', 'Y', '📊 Y/N — fetch Savant pitch-arsenal-stats CSVs (pitcher + batter, 2 fetches/run) for 🎯 matchup scores. Shadow only.');
+  row_('ARSENAL_P_CSV_URL', '', '📊 Override URL for the pitcher arsenal CSV. Blank = built-in Savant leaderboard export URL.');
+  row_('ARSENAL_B_CSV_URL', '', '📊 Override URL for the batter arsenal CSV. Blank = built-in Savant leaderboard export URL.');
+  row_('HM_ENABLED', 'Y', '🎯 Y/N — Hit Machine 2-leg 1+H parlay board + SHADOW paper log. No real stakes until promoted.');
+  row_('HM_MIN_P', '0.75', '🎯 Min model P(1+ hit) per leg. Raw sim p — known overconfident, so start high.');
+  row_('HM_LIST_N', '8', '🎯 Candidate list size (BvP/arsenal context fetched for these only).');
+  row_('HM_LEG_ODDS_FLOOR', '-350', '🎯 Worst (most negative) acceptable leg price.');
+  row_('HM_BVP_MIN_PA', '12', '🎯 Career PA vs tonight\'s SP before the BvP stay-away veto can fire. One-way prune, never a boost.');
+  row_('HM_BVP_MAX_AVG', '0.10', '🎯 BvP veto: career avg below this (with PA ≥ min) = stay away.');
+  row_('HM_PAPER_STAKE', '2.50', '🎯 Paper stake $ for shadow parlay P/L tracking.');
   row_('K_PROB_BLEND_MARKET_W', '0.65', '🧪 Shadow only (⚡ Sim_Pitcher_K cols 39-41): weight on de-vigged market prob vs raw model prob. Audit data for market-prior blending; does NOT affect live picks.');
   row_('LEGACY_UNIT_USD', '2.50', 'Flat $ assumed for pre-tier historical bets when running "Backfill historical stakes". Set to what you were actually averaging before the Kelly system.');
   row_('HP_UMP_LAMBDA_MULT', '1', 'Multiply 🎰 λ when hp_umpire listed (1=no change; try 1.02–1.05 cautiously)');
@@ -484,6 +494,12 @@ function validateMlbPipelineConfig_(cfg) {
   warnRange('GRADER_BAND_BUDGET_SEC', c['GRADER_BAND_BUDGET_SEC'], 60, 1500);
   warnRange('INJURY_NEWS_MAX_FETCH', c['INJURY_NEWS_MAX_FETCH'], 1, 40);
   warnRange('INJURY_NEWS_LOOKBACK_H', c['INJURY_NEWS_LOOKBACK_H'], 6, 168);
+  warnRange('HM_MIN_P', c['HM_MIN_P'], 0.55, 0.95);
+  warnRange('HM_LIST_N', c['HM_LIST_N'], 2, 20);
+  warnRange('HM_LEG_ODDS_FLOOR', c['HM_LEG_ODDS_FLOOR'], -500, 0);
+  warnRange('HM_BVP_MIN_PA', c['HM_BVP_MIN_PA'], 6, 60);
+  warnRange('HM_BVP_MAX_AVG', c['HM_BVP_MAX_AVG'], 0.02, 0.2);
+  warnRange('HM_PAPER_STAKE', c['HM_PAPER_STAKE'], 1, 7.5);
   warnRange('K_PROB_BLEND_MARKET_W', c['K_PROB_BLEND_MARKET_W'], 0, 1);
   warnRange('ANCHOR_WEIGHT_BATTER_HITS', c['ANCHOR_WEIGHT_BATTER_HITS'], 0, 1);
   warnRange('K_OPP_L14_BLEND', c['K_OPP_L14_BLEND'], 0, 1);
