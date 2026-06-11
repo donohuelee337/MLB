@@ -24,6 +24,10 @@ function gradeNrfiPendingResults_() {
 
   let graded = 0;
   for (let i = 0; i < data.length; i++) {
+    if (typeof mlbGraderBandExpired_ === 'function' && mlbGraderBandExpired_()) {
+      Logger.log('gradeNrfiPendingResults_: grader band budget hit — resuming next window');
+      break;
+    }
     const row = data[i];
     const slateStr = mlbReadSlateYmd_(row[1]);
     if (!slateStr || slateStr >= today) continue;

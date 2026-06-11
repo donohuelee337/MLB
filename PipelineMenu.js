@@ -387,6 +387,11 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
       mlbFlushPipelineStepTiming_('grader: ' + name, s, okFlag, errMsg);
     }
   }
+  // Band-wide time budget — K (live) runs first so the live market always
+  // grades before shadow backlogs; whatever doesn't fit resumes next window.
+  if (typeof mlbArmGraderBandDeadline_ === 'function') {
+    mlbArmGraderBandDeadline_(getConfig()['GRADER_BAND_BUDGET_SEC']);
+  }
   timedGrader('K (live)',       typeof gradeMLBPendingResults_       === 'function' ? gradeMLBPendingResults_       : null);
   timedGrader('H v2 (shadow)',  typeof gradeMLBHitsV2PendingResults_ === 'function' ? gradeMLBHitsV2PendingResults_ : null);
   timedGrader('H v3 (shadow)',  typeof gradeMLBHitsV3PendingResults_ === 'function' ? gradeMLBHitsV3PendingResults_ : null);
@@ -398,6 +403,7 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   timedGrader('HR promo',       typeof gradeHrPromoPendingResults_   === 'function' ? gradeHrPromoPendingResults_   : null);
   timedGrader('NRFI',         typeof gradeNrfiPendingResults_     === 'function' ? gradeNrfiPendingResults_     : null);
   timedGrader('F5',           typeof gradeF5PendingResults_       === 'function' ? gradeF5PendingResults_       : null);
+  if (typeof mlbDisarmGraderBandDeadline_ === 'function') mlbDisarmGraderBandDeadline_();
   mlbResetPitchGameLogFetchCache_();
   mlbResetPitchHandCache_();
   mlbResetTeamHittingSeasonCache_();

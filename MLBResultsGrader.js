@@ -11,6 +11,30 @@ function mlbTodayYmdNY_() {
   return Utilities.formatDate(new Date(), 'America/New_York', 'yyyy-MM-dd');
 }
 
+// ---- Grader band time budget ----
+// Graders run first in every window. The build-25/27 self-heals + TB wiring
+// created a legitimate multi-hundred-game regrade backlog (each gamePk a
+// multi-MB feed/live fetch) that must drain over SEVERAL windows, not one
+// run. The window runner arms a band-wide deadline; every grader loop checks
+// it and bails cleanly — untouched rows stay PENDING and resume next window.
+// Fetch pacing (120ms throttle, per-execution cache) is intentionally
+// unchanged: the budget bounds how MANY fetches happen, never how fast.
+// Menu-run single graders are unaffected (deadline unarmed → never expires).
+let __mlbGraderBandDeadlineMs = 0;
+
+function mlbArmGraderBandDeadline_(budgetSec) {
+  const s = parseFloat(String(budgetSec != null ? budgetSec : ''));
+  __mlbGraderBandDeadlineMs = Date.now() + (isFinite(s) && s > 0 ? s : 300) * 1000;
+}
+
+function mlbDisarmGraderBandDeadline_() {
+  __mlbGraderBandDeadlineMs = 0;
+}
+
+function mlbGraderBandExpired_() {
+  return __mlbGraderBandDeadlineMs > 0 && Date.now() > __mlbGraderBandDeadlineMs;
+}
+
 function mlbBoxscoreTeams_(payload) {
   if (!payload) return null;
   if (payload.teams) return payload.teams;
@@ -390,6 +414,10 @@ function gradeMLBPendingResults_() {
   let graded = 0;
 
   for (let i = 0; i < data.length; i++) {
+    if (typeof mlbGraderBandExpired_ === 'function' && mlbGraderBandExpired_()) {
+      Logger.log('gradeMLBPendingResults_: grader band budget hit at row ' + (4 + i) + ' — resuming next window');
+      break;
+    }
     const row = data[i];
     const slateStr = mlbReadSlateYmd_(row[1]);
     const market = String(row[5] || '').toLowerCase();

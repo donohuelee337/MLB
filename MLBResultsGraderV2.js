@@ -18,6 +18,10 @@ function gradeMLBHitsV2PendingResults_() {
   let graded = 0;
 
   for (let i = 0; i < data.length; i++) {
+    if (typeof mlbGraderBandExpired_ === 'function' && mlbGraderBandExpired_()) {
+      Logger.log('grader band budget hit at row ' + (4 + i) + ' — resuming next window');
+      break;
+    }
     const row = data[i];
     const slateStr = mlbReadSlateYmd_(row[1]);
     const resCell = String(row[16] || '').trim();
@@ -117,6 +121,10 @@ function gradeMLBTBV2PendingResults_() {
   let graded = 0;
 
   for (let i = 0; i < data.length; i++) {
+    if (typeof mlbGraderBandExpired_ === 'function' && mlbGraderBandExpired_()) {
+      Logger.log('grader band budget hit at row ' + (4 + i) + ' — resuming next window');
+      break;
+    }
     const row = data[i];
     const slateStr = mlbReadSlateYmd_(row[1]);
     const resCell = String(row[16] || '').trim();
@@ -216,6 +224,10 @@ function gradeMLBTBV3PendingResults_() {
   let graded = 0;
 
   for (let i = 0; i < data.length; i++) {
+    if (typeof mlbGraderBandExpired_ === 'function' && mlbGraderBandExpired_()) {
+      Logger.log('grader band budget hit at row ' + (4 + i) + ' — resuming next window');
+      break;
+    }
     const row = data[i];
     const slateStr = mlbReadSlateYmd_(row[1]);
     const resCell = String(row[16] || '').trim();
@@ -314,6 +326,10 @@ function gradeMLBHitsV3PendingResults_() {
   let graded = 0;
 
   for (let i = 0; i < data.length; i++) {
+    if (typeof mlbGraderBandExpired_ === 'function' && mlbGraderBandExpired_()) {
+      Logger.log('grader band budget hit at row ' + (4 + i) + ' — resuming next window');
+      break;
+    }
     const row = data[i];
     const slateStr = mlbReadSlateYmd_(row[1]);
     const resCell = String(row[16] || '').trim();

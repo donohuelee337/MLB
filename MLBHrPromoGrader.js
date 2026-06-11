@@ -44,6 +44,10 @@ function gradeHrPromoPendingResults_() {
 
   let graded = 0;
   for (let i = 0; i < data.length; i++) {
+    if (typeof mlbGraderBandExpired_ === 'function' && mlbGraderBandExpired_()) {
+      Logger.log('gradeHrPromoPendingResults_: grader band budget hit — resuming next window');
+      break;
+    }
     const row = data[i];
     const slateRaw = row[1];
     const slate = (slateRaw instanceof Date)

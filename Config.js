@@ -8,21 +8,26 @@
 const CONFIG_TAB_NAME = '⚙️ Config';
 
 /** Incremented by scripts/clasp-deploy.ps1 on each Apps Script push (visible on ⚙️ Config). */
-const MLB_APPS_SCRIPT_BUILD = 27;
+const MLB_APPS_SCRIPT_BUILD = 28;
 
 function mlbAppsScriptBuild_() {
   return typeof MLB_APPS_SCRIPT_BUILD !== 'undefined' ? MLB_APPS_SCRIPT_BUILD : '';
 }
 
 function safeAlert_(title, message) {
+  // TOAST-ONLY by design (2026-06-10). Ui.alert() is a MODAL that blocks
+  // script execution until a human dismisses it — in a menu-launched window
+  // run, one mid-pipeline alert froze the run for ~27 minutes and killed it
+  // at the max-execution-time ceiling. Toasts never block. Full text always
+  // lands in the log (toasts truncate).
+  Logger.log('ALERT [' + title + ']: ' + (message || ''));
   try {
-    SpreadsheetApp.getUi().alert(title, message || title, SpreadsheetApp.getUi().ButtonSet.OK);
-  } catch (e) {
-    Logger.log('ALERT [' + title + ']: ' + (message || ''));
-    try {
-      SpreadsheetApp.getActiveSpreadsheet().toast((title + ' — ' + (message || '').slice(0, 80)), 'Notice', 8);
-    } catch (_) {}
-  }
+    SpreadsheetApp.getActiveSpreadsheet().toast(
+      String(message || title).slice(0, 200),
+      '⚠️ ' + String(title || 'Notice').slice(0, 60),
+      10
+    );
+  } catch (_) {}
 }
 
 /** MLB team id → common abbreviation (30 teams). */
@@ -222,6 +227,7 @@ function buildConfigTab() {
   row_('STAKE_TIER_2_KELLY_PCT', '1.0', 'Kelly% of bankroll → 2u tier. Default 1.0%.');
   row_('STAKE_TIER_3_KELLY_PCT', '1.5', 'Kelly% of bankroll → 3u tier. Default 1.5%: any Kelly recommendation ≥1.5% of roll is a max-bet conviction play.');
   row_('MAX_SLATE_EXPOSURE_PCT', '10', 'Max % of bankroll staked across one slate (simultaneous bets). Plays beyond the cap stay on 🃏 at $0 with an exposure_cap flag. Kelly assumes sequential bets — uncapped slates risked 30%+ of roll at once.');
+  row_('GRADER_BAND_BUDGET_SEC', '300', 'Time budget (sec) for the grading band at the start of each window. Backlogged regrades beyond the budget stay PENDING and drain over the next windows. Fetch pacing/throttles unchanged.');
   row_('K_PROB_BLEND_MARKET_W', '0.65', '🧪 Shadow only (⚡ Sim_Pitcher_K cols 39-41): weight on de-vigged market prob vs raw model prob. Audit data for market-prior blending; does NOT affect live picks.');
   row_('LEGACY_UNIT_USD', '2.50', 'Flat $ assumed for pre-tier historical bets when running "Backfill historical stakes". Set to what you were actually averaging before the Kelly system.');
   row_('HP_UMP_LAMBDA_MULT', '1', 'Multiply 🎰 λ when hp_umpire listed (1=no change; try 1.02–1.05 cautiously)');
@@ -459,6 +465,7 @@ function validateMlbPipelineConfig_(cfg) {
   warnRange('MIN_ODDS_H', c['MIN_ODDS_H'], -300, 0);
   warnRange('ANCHOR_WEIGHT_K', c['ANCHOR_WEIGHT_K'], 0, 1);
   warnRange('MAX_SLATE_EXPOSURE_PCT', c['MAX_SLATE_EXPOSURE_PCT'], 2, 50);
+  warnRange('GRADER_BAND_BUDGET_SEC', c['GRADER_BAND_BUDGET_SEC'], 60, 1500);
   warnRange('K_PROB_BLEND_MARKET_W', c['K_PROB_BLEND_MARKET_W'], 0, 1);
   warnRange('ANCHOR_WEIGHT_BATTER_HITS', c['ANCHOR_WEIGHT_BATTER_HITS'], 0, 1);
   warnRange('K_OPP_L14_BLEND', c['K_OPP_L14_BLEND'], 0, 1);
