@@ -22,8 +22,13 @@ function mlbPoissonCdf_(maxK, lambda) {
 function mlbProbOverUnderK_(line, lambda) {
   const L = parseFloat(line, 10);
   if (isNaN(L) || lambda <= 0) return { pOver: '', pUnder: '' };
+  const isWhole = Math.abs(L - Math.round(L)) < 1e-9;
   const kMinOver = Math.floor(L) + 1;
-  const kMaxUnder = Math.floor(L + 1e-9);
+  // Whole lines: X == L is a PUSH (refund), not an Under win. Including it
+  // in pUnder overstated Under win probability/EV by P(X = L) — ~16pp at
+  // λ = L = 6. Half lines have no push mass and are unchanged. For whole
+  // lines pOver + pUnder < 1 by exactly the push probability (correct).
+  const kMaxUnder = isWhole ? Math.round(L) - 1 : Math.floor(L + 1e-9);
   const pOver = 1 - mlbPoissonCdf_(kMinOver - 1, lambda);
   const pUnder = mlbPoissonCdf_(kMaxUnder, lambda);
   return { pOver: pOver, pUnder: pUnder };

@@ -76,7 +76,9 @@ function mlbLiveModelVersionForMarket_(market, cfg) {
     return 'k.v1-anch' + (cal ? '+cal' : '');
   }
   if (m.indexOf('total base') !== -1) return 'tb.v1';
-  if (m.indexOf('hit') !== -1) return 'h.v2-full-sim';
+  if (m.indexOf('hit') !== -1) {
+    return typeof mlbHitsActiveModelVersion_ === 'function' ? mlbHitsActiveModelVersion_() : 'h.v2-full-sim-os';
+  }
   return '';
 }
 

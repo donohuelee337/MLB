@@ -8,7 +8,7 @@
 const CONFIG_TAB_NAME = '⚙️ Config';
 
 /** Incremented by scripts/clasp-deploy.ps1 on each Apps Script push (visible on ⚙️ Config). */
-const MLB_APPS_SCRIPT_BUILD = 26;
+const MLB_APPS_SCRIPT_BUILD = 27;
 
 function mlbAppsScriptBuild_() {
   return typeof MLB_APPS_SCRIPT_BUILD !== 'undefined' ? MLB_APPS_SCRIPT_BUILD : '';
@@ -221,6 +221,8 @@ function buildConfigTab() {
   row_('STAKE_TIER_1_KELLY_PCT', '0.5', 'Kelly% of bankroll → 1u tier. Default 0.5%: if quarter-Kelly says risk ≥0.5% of roll, place 1u. Below this floor → no bet.');
   row_('STAKE_TIER_2_KELLY_PCT', '1.0', 'Kelly% of bankroll → 2u tier. Default 1.0%.');
   row_('STAKE_TIER_3_KELLY_PCT', '1.5', 'Kelly% of bankroll → 3u tier. Default 1.5%: any Kelly recommendation ≥1.5% of roll is a max-bet conviction play.');
+  row_('MAX_SLATE_EXPOSURE_PCT', '10', 'Max % of bankroll staked across one slate (simultaneous bets). Plays beyond the cap stay on 🃏 at $0 with an exposure_cap flag. Kelly assumes sequential bets — uncapped slates risked 30%+ of roll at once.');
+  row_('K_PROB_BLEND_MARKET_W', '0.65', '🧪 Shadow only (⚡ Sim_Pitcher_K cols 39-41): weight on de-vigged market prob vs raw model prob. Audit data for market-prior blending; does NOT affect live picks.');
   row_('LEGACY_UNIT_USD', '2.50', 'Flat $ assumed for pre-tier historical bets when running "Backfill historical stakes". Set to what you were actually averaging before the Kelly system.');
   row_('HP_UMP_LAMBDA_MULT', '1', 'Multiply 🎰 λ when hp_umpire listed (1=no change; try 1.02–1.05 cautiously)');
   row_('LHP_K_LAMBDA_MULT', '1', 'Extra λ mult when pitcher throws L (1=no change)');
@@ -456,6 +458,8 @@ function validateMlbPipelineConfig_(cfg) {
   warnRange('MAX_ODDS_H', c['MAX_ODDS_H'], -400, 0);
   warnRange('MIN_ODDS_H', c['MIN_ODDS_H'], -300, 0);
   warnRange('ANCHOR_WEIGHT_K', c['ANCHOR_WEIGHT_K'], 0, 1);
+  warnRange('MAX_SLATE_EXPOSURE_PCT', c['MAX_SLATE_EXPOSURE_PCT'], 2, 50);
+  warnRange('K_PROB_BLEND_MARKET_W', c['K_PROB_BLEND_MARKET_W'], 0, 1);
   warnRange('ANCHOR_WEIGHT_BATTER_HITS', c['ANCHOR_WEIGHT_BATTER_HITS'], 0, 1);
   warnRange('K_OPP_L14_BLEND', c['K_OPP_L14_BLEND'], 0, 1);
   warnRange('K_OPP_K_STRENGTH', c['K_OPP_K_STRENGTH'], 0, 1);

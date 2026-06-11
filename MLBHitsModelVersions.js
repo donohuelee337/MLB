@@ -13,20 +13,19 @@
 // fork as a new shadow tab — do not replace v2-full until v3 is promoted.
 // ============================================================
 
-// Calibration experiment (not a model family — same h.v2-full projection):
-//   h.v2-full-1side — one-sided H_MODEL_P_SHRINK. The live shrink scales both
-//   Over and Under; this variant shrinks only the Over (the documented
-//   overconfident side) and derives Under as the complement. Runs as audit-only
-//   shadow columns 37..40 on ⚡ Sim_Batter_Hits (no separate tab/log). Promote by
-//   swapping the live pOAdj/pUAdj block in MLBSimBatterHits.js once its graded
-//   ROI beats the symmetric shrink.
+// Shrink history (same h.v2-full projection, different probability layer):
+//   build ≤26: symmetric H_MODEL_P_SHRINK (both sides scaled — incoherent,
+//     P(O)+P(U) = shrink < 1; suppressed Unders). Now the SHADOW in audit
+//     cols 37..40 of ⚡ Sim_Batter_Hits as p_*_sym.
+//   build 27+: h.v2-full-sim-os — one-sided shrink LIVE: Over scaled (the
+//     documented overconfident side), Under = exact complement on half lines.
 const MLB_HITS_MODEL_VERSIONS = {
-  active: 'h.v2-full',
-  shadow: ['h.v1', 'h.v3-contact'],
+  active: 'h.v2-full-sim-os',
+  shadow: ['h.v1', 'h.v3-contact', 'h.v2-full-sym'],
 };
 
 function mlbHitsActiveModelVersion_() {
-  return MLB_HITS_MODEL_VERSIONS.active || 'h.v2-full';
+  return MLB_HITS_MODEL_VERSIONS.active || 'h.v2-full-sim-os';
 }
 
 function mlbHitsShadowModelVersions_() {

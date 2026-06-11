@@ -56,6 +56,16 @@ function refreshPitcherKSimEngine_() {
   const rows = src.getRange(4, 1, last - 3, colsToRead).getValues();
   const out = [];
 
+  // 🧪 Market-blend shadow (cols 39..41, audit only — NOT used for picks).
+  // p_blend = w·fair_market + (1−w)·p_model_raw, fair = de-vigged two-way FD
+  // price, p_model_raw = Poisson at the UNANCHORED model λ. Rationale: across
+  // ~2,900 graded bets the model's biggest claimed edges were its biggest
+  // misses — the market prior was right. This column accumulates the data to
+  // judge whether blended probabilities gate/stake better before any of it
+  // touches the live pick path.
+  const wMktRaw = parseFloat(String(cfg['K_PROB_BLEND_MARKET_W'] != null ? cfg['K_PROB_BLEND_MARKET_W'] : '0.65'));
+  const wMkt = !isNaN(wMktRaw) ? Math.max(0, Math.min(1, wMktRaw)) : 0.65;
+
   rows.forEach(function (r) {
     const gamePk = r[0];
     const matchup = r[1];
@@ -145,6 +155,18 @@ function refreshPitcherKSimEngine_() {
     const evO = pOver !== '' && fdOver !== '' ? mlbEvPerDollarRisked_(pOver, fdOver) : '';
     const evU = pUnder !== '' && fdUnder !== '' ? mlbEvPerDollarRisked_(pUnder, fdUnder) : '';
 
+    // Market-blend shadow values (see header comment above).
+    let pOverBlend = '';
+    let pUnderBlend = '';
+    if (imO !== '' && imU !== '' && !isNaN(lambdaModel) && lambdaModel > 0 && !isNaN(lineNum)) {
+      const fair = mlbDevigTwoWay_(imO, imU);
+      const puRawModel = mlbProbOverUnderK_(line, lambdaModel);
+      if (fair.fairSide !== '' && puRawModel.pOver !== '') {
+        pOverBlend = Math.round((wMkt * fair.fairSide + (1 - wMkt) * puRawModel.pOver) * 1000) / 1000;
+        pUnderBlend = Math.round((wMkt * fair.fairOpp + (1 - wMkt) * puRawModel.pUnder) * 1000) / 1000;
+      }
+    }
+
     const pick = (typeof mlbChooseSideOutcomeFirst_ === 'function')
       ? mlbChooseSideOutcomeFirst_('Over', pOver, evO, 'Under', pUnder, evU, cfg)
       : { side: '', ev: NaN };
@@ -201,6 +223,10 @@ function refreshPitcherKSimEngine_() {
       seasonBfV3 === '' || seasonBfV3 == null ? '' : seasonBfV3,
       kPerPaV3 === '' || kPerPaV3 == null ? '' : kPerPaV3,
       projPaBfV3 === '' || projPaBfV3 == null ? '' : projPaBfV3,
+      // 🧪 market-blend shadow cols 39..41.
+      pOverBlend,
+      pUnderBlend,
+      pOverBlend !== '' ? wMkt : '',
     ]);
   });
 
@@ -241,8 +267,9 @@ function refreshPitcherKSimEngine_() {
     sh = ss.insertSheet(MLB_PITCHER_K_SIM_TAB);
   }
   sh.setTabColor('#1565c0');
-  // Sim sheet may have been created at 22 or 30 cols; ensure room for v2 (23..30) + v3.bf (31..38).
-  const NEED_COLS_K_SIM = 38;
+  // Sim sheet may have been created at 22/30/38 cols; ensure room for v2
+  // (23..30) + v3.bf (31..38) + market-blend shadow (39..41).
+  const NEED_COLS_K_SIM = 41;
   if (sh.getMaxColumns() < NEED_COLS_K_SIM) {
     sh.insertColumnsAfter(sh.getMaxColumns(), NEED_COLS_K_SIM - sh.getMaxColumns());
   }
@@ -250,7 +277,7 @@ function refreshPitcherKSimEngine_() {
   sh.getRange(1, 1, 1, NEED_COLS_K_SIM)
     .merge()
     .setValue(
-      '⚡ Sim_Pitcher_K — anchored Poisson (ANCHOR_WEIGHT_K). pick = side we prefer (PICK_BY=outcome). Cols 23..30 = 🧪 k.v2 · 31..38 = 🧪 k.v3.bf.'
+      '⚡ Sim_Pitcher_K — anchored Poisson (ANCHOR_WEIGHT_K). pick = side we prefer (PICK_BY=outcome). Cols 23..30 = 🧪 k.v2 · 31..38 = 🧪 k.v3.bf · 39..41 = 🧪 market-blend shadow (audit only).'
     )
     .setFontWeight('bold')
     .setBackground('#0d47a1')
@@ -298,6 +325,9 @@ function refreshPitcherKSimEngine_() {
     'season_bf',
     'k_per_pa',
     'proj_pa_bf',
+    'p_over_blend',
+    'p_under_blend',
+    'blend_w',
   ];
   sh.getRange(3, 1, 1, headers.length)
     .setValues([headers])

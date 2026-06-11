@@ -66,17 +66,12 @@ function refreshBatterHitsSimEngine_() {
     let evU = '';
     let bestSide = '';
     let bestEv = '';
-    // 🧪 one-sided-shrink shadow (audit cols 37..40; NOT used for live picks).
-    // The live shrink above scales BOTH sides by H_MODEL_P_SHRINK, but the
-    // documented calibration miss is one-sided ("model overestimates P(≥1 hit)").
-    // Correcting a too-high Over should RAISE the Under (its complement), not
-    // shrink it too. This shadow shrinks only the Over and derives the Under as
-    // the complement (exact for half-integer hit lines — no push). Compare its
-    // graded ROI vs the live symmetric shrink before promoting.
-    let pO1s = '';
-    let pU1s = '';
-    let bestSide1s = '';
-    let bestEv1s = '';
+    // 🧪 symmetric-shrink shadow (audit cols 37..40; the PRE-build-27 live
+    // behavior, kept running in parallel per the model-versioning policy).
+    let pOSym = '';
+    let pUSym = '';
+    let bestSideSym = '';
+    let bestEvSym = '';
 
     if (!isNaN(estPa) && estPa > 0 && !isNaN(lamAnch) && lamAnch > 0 && !isNaN(lineNum)) {
       let baAnch = lamAnch / estPa;
@@ -85,25 +80,34 @@ function refreshBatterHitsSimEngine_() {
       const kU = Math.floor(lineNum + 1e-9);
       const pORaw = mlbBinomialPGeqK_(kO, estPa, baAnch);
       const pURaw = mlbBinomialPLeqK_(kU, estPa, baAnch);
+      // PROMOTED build 27 → h.v2-full-sim-os: ONE-SIDED shrink is now the
+      // live computation. The documented calibration miss is one-sided
+      // ("model overestimates P(≥1 hit)"); the old symmetric shrink scaled
+      // BOTH sides by H_MODEL_P_SHRINK so P(O)+P(U) = shrink < 1 — a
+      // probabilistically incoherent distribution that suppressed Under
+      // EV by ~(1−shrink) of its true probability. Over is shrunk; Under is
+      // its exact complement on half-integer lines (no push mass). Whole
+      // lines (rare for H) keep the symmetric fallback — the complement
+      // would wrongly absorb the push mass there.
+      const isHalfLine = Math.abs(lineNum - Math.floor(lineNum) - 0.5) < 1e-6;
       const pOAdj = (hShrink > 0 && hShrink < 1) ? Math.min(pORaw * hShrink, 0.9999) : pORaw;
-      const pUAdj = (hShrink > 0 && hShrink < 1) ? Math.min(pURaw * hShrink, 0.9999) : pURaw;
+      const pUSymAdj = (hShrink > 0 && hShrink < 1) ? Math.min(pURaw * hShrink, 0.9999) : pURaw;
+      const pUAdj = isHalfLine ? Math.max(0, Math.min(0.9999, 1 - pOAdj)) : pUSymAdj;
       pOver = Math.round(pOAdj * 1000) / 1000;
       pUnder = Math.round(pUAdj * 1000) / 1000;
       if (fdOver !== '') evO = mlbEvPerDollarRisked_(pOAdj, fdOver);
       if (fdUnder !== '') evU = mlbEvPerDollarRisked_(pUAdj, fdUnder);
 
-      // One-sided shadow: shrink the Over, Under = 1 − Over_adj.
-      const pO1sAdj = (hShrink > 0 && hShrink < 1) ? Math.min(pORaw * hShrink, 0.9999) : pORaw;
-      const pU1sAdj = Math.max(0, Math.min(0.9999, 1 - pO1sAdj));
-      pO1s = Math.round(pO1sAdj * 1000) / 1000;
-      pU1s = Math.round(pU1sAdj * 1000) / 1000;
-      const evO1s = fdOver !== '' ? mlbEvPerDollarRisked_(pO1sAdj, fdOver) : '';
-      const evU1s = fdUnder !== '' ? mlbEvPerDollarRisked_(pU1sAdj, fdUnder) : '';
-      if (evO1s !== '' && evU1s !== '') {
-        if (evO1s >= evU1s) { bestSide1s = 'Over'; bestEv1s = evO1s; }
-        else { bestSide1s = 'Under'; bestEv1s = evU1s; }
-      } else if (evO1s !== '') { bestSide1s = 'Over'; bestEv1s = evO1s; }
-      else if (evU1s !== '') { bestSide1s = 'Under'; bestEv1s = evU1s; }
+      // Symmetric shadow (old live behavior): both sides scaled by shrink.
+      pOSym = Math.round(pOAdj * 1000) / 1000;
+      pUSym = Math.round(pUSymAdj * 1000) / 1000;
+      const evOSym = fdOver !== '' ? mlbEvPerDollarRisked_(pOAdj, fdOver) : '';
+      const evUSym = fdUnder !== '' ? mlbEvPerDollarRisked_(pUSymAdj, fdUnder) : '';
+      if (evOSym !== '' && evUSym !== '') {
+        if (evOSym >= evUSym) { bestSideSym = 'Over'; bestEvSym = evOSym; }
+        else { bestSideSym = 'Under'; bestEvSym = evUSym; }
+      } else if (evOSym !== '') { bestSideSym = 'Over'; bestEvSym = evOSym; }
+      else if (evUSym !== '') { bestSideSym = 'Under'; bestEvSym = evUSym; }
       if (evO !== '' && evU !== '') {
         if (evO >= evU && evO > 0) {
           bestSide = 'Over';
@@ -145,7 +149,7 @@ function refreshBatterHitsSimEngine_() {
 
     pairs.push({
       row: outRow,
-      aud: [!isNaN(lambdaModel) ? lambdaModel : '', 0, pO1s, pU1s, bestSide1s, bestEv1s],
+      aud: [!isNaN(lambdaModel) ? lambdaModel : '', 0, pOSym, pUSym, bestSideSym, bestEvSym],
     });
   });
 
@@ -171,7 +175,7 @@ function refreshBatterHitsSimEngine_() {
 function _mlbWriteBatterHitsSimSheet_(ss, out, audit) {
   const NEED_COLS = 34;
   // Audit block: 35 lambda_hits_model, 36 context_score,
-  // 37..40 = 🧪 one-sided-shrink shadow (p_over/p_under/best_side/best_ev).
+  // 37..40 = 🧪 symmetric-shrink shadow (pre-build-27 live behavior).
   const AUDIT_COLS = 6;
   let sh = ss.getSheetByName(MLB_BATTER_HITS_SIM_TAB);
   if (sh) {
@@ -193,7 +197,7 @@ function _mlbWriteBatterHitsSimSheet_(ss, out, audit) {
   sh.getRange(1, 1, 1, NEED_COLS)
     .merge()
     .setValue(
-      '⚡ Sim_Batter_Hits — anchored h.v2-full (ANCHOR_WEIGHT_BATTER_HITS); 🃏 H rows use this tab. Cols 35..36 = model λ + context audit; 37..40 = 🧪 one-sided-shrink shadow (audit only).'
+      '⚡ Sim_Batter_Hits — anchored h.v2-full-sim-os (one-sided shrink LIVE since build 27); 🃏 H rows use this tab. Cols 35..36 = model λ + context audit; 37..40 = 🧪 symmetric-shrink shadow (pre-build-27 live, audit only).'
     )
     .setFontWeight('bold')
     .setBackground('#1b5e20')
@@ -257,10 +261,10 @@ function _mlbWriteBatterHitsSimSheet_(ss, out, audit) {
       .setValues([[
         'lambda_hits_model',
         'context_score',
-        'p_over_1side',
-        'p_under_1side',
-        'best_side_1side',
-        'best_ev_1side',
+        'p_over_sym',
+        'p_under_sym',
+        'best_side_sym',
+        'best_ev_sym',
       ]])
       .setFontWeight('bold')
       .setBackground('#388e3c')

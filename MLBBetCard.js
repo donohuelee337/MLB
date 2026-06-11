@@ -132,9 +132,10 @@ function mlbBetCardSourceSheet_(ss, simTab, cardTab, label) {
  * Normalize 🎰 Pitcher_K_Card rows (39-col layout, pitch_team at idx 4) to the
  * ⚡ Sim_Pitcher_K row shape every K reader below expects. Sim rows pass
  * through untouched. Card-only extras the sim lacks (opp_abbr / opp_k_pa /
- * opp_k_pa_vs / hot_cold) ride at idx 38..41, so they are only ever readable
- * when the source really was the card — sim v2 audit cols can no longer
- * masquerade as opponent context. Columns resolve by header name with
+ * opp_k_pa_vs / hot_cold) ride at idx 50..53 — far beyond any real sim
+ * column — so they are only ever readable when the source really was the
+ * card; sim audit cols can never masquerade as opponent context even as the
+ * sim tab grows new columns. Columns resolve by header name with
  * current-layout fallbacks (root cause of the build-24 zero-K-picks bug was
  * hard-coded indices surviving a column insertion).
  */
@@ -157,7 +158,7 @@ function mlbBetCardKRowsToSimShape_(srcSheet, rows) {
   };
   return rows.map(function (r) {
     const g = function (i) { return r[i] != null ? r[i] : ''; };
-    return [
+    const out = [
       g(0), g(1), g(2), g(3),
       g(C.line), g(C.over), g(C.under), g(C.ip), g(C.lambda), g(C.edge),
       g(C.pOver), g(C.pUnder), g(C.imO), g(C.imU), g(C.evO), g(C.evU),
@@ -166,9 +167,11 @@ function mlbBetCardKRowsToSimShape_(srcSheet, rows) {
       // raw λ + inputs but not the anchored/best-side audit values — blank.
       g(C.lV2), '', '', '', '', g(C.games), g(C.k9V2), g(C.ipV2),
       g(C.lV3), '', '', '', '', g(C.sBf), g(C.kPa), g(C.paBf),
-      // Extras 38..41 — card-only opponent context + hot/cold.
-      g(C.oppAbbr), g(C.oppKpa), g(C.oppKpaVs), g(C.hotCold),
     ];
+    while (out.length < 50) out.push('');
+    // Extras 50..53 — card-only opponent context + hot/cold.
+    out.push(g(C.oppAbbr), g(C.oppKpa), g(C.oppKpaVs), g(C.hotCold));
+    return out;
   });
 }
 
@@ -189,10 +192,10 @@ function mlbBetCardKBasicOk_(r) {
   return { side: side, american: american, pitcher: pitcher };
 }
 
-/** Matchup tags for segment registry (HOT/COLD rides at extras idx 41 on card-sourced rows). */
+/** Matchup tags for segment registry (HOT/COLD rides at extras idx 53 on card-sourced rows). */
 function mlbBetCardKTagsFromRow_(r) {
   const tags = [];
-  const hc = String((r.length > 41 && r[41] != null ? r[41] : '') || '').toUpperCase();
+  const hc = String((r.length > 53 && r[53] != null ? r[53] : '') || '').toUpperCase();
   if (hc === 'HOT' || hc === 'COLD') tags.push(hc);
   const flags = String(r[18] || '');
   if (flags.indexOf('opp_k_high') !== -1) tags.push('opp_k_high');
@@ -200,10 +203,10 @@ function mlbBetCardKTagsFromRow_(r) {
   return tags;
 }
 
-/** Opp K context — extras idx 39/40 on card-sourced rows; blank on sim rows (sim omits these). */
+/** Opp K context — extras idx 51/52 on card-sourced rows; blank on sim rows (sim omits these). */
 function mlbBetCardKOppContextFromRow_(r) {
-  const vs = parseFloat(String(r.length > 40 && r[40] != null ? r[40] : ''), 10);
-  const all = parseFloat(String(r.length > 39 && r[39] != null ? r[39] : ''), 10);
+  const vs = parseFloat(String(r.length > 52 && r[52] != null ? r[52] : ''), 10);
+  const all = parseFloat(String(r.length > 51 && r[51] != null ? r[51] : ''), 10);
   const oppKL14 = !isNaN(vs) && vs > 0 ? vs : !isNaN(all) && all > 0 ? all : '';
   const lambdaRaw = r[8];
   return { oppKL14: oppKL14, lambdaRaw: lambdaRaw };
@@ -267,7 +270,7 @@ function mlbBetCardKRowToPlay_(r, cfg, gameTimeIdx, meta) {
   const pitcherId = r[19];
   const hpUmp = String(r[20] || '').trim();
   const throws = String(r[21] || '').trim();
-  const hotCold = String((r.length > 41 && r[41] != null ? r[41] : '') || '').toUpperCase();
+  const hotCold = String((r.length > 53 && r[53] != null ? r[53] : '') || '').toUpperCase();
   const hand =
     throws.toUpperCase() === 'R' ? 'RHP' : throws.toUpperCase() === 'L' ? 'LHP' : throws ? throws : '';
   const pickLabel =
@@ -660,6 +663,36 @@ function refreshMLBBetCard() {
   // EV > 0, MIN_EV_BET_CARD, MAX_ODDS_H (H). See mlbBetCardThresholds_().
   const selected = allPlays;
 
+  // Per-slate exposure cap. Stakes are Kelly-sized per bet with no portfolio
+  // constraint, so a 20-pick slate could put ~30% of the roll in play in
+  // simultaneous, partially correlated bets — Kelly math assumes sequential
+  // bets. Walk plays in conviction order (selected is still rank-sorted
+  // here; the display re-sort below comes after) and zero out stakes once
+  // the slate's total risk reaches MAX_SLATE_EXPOSURE_PCT of bankroll.
+  // Capped plays stay on the card at $0 with an exposure_cap flag.
+  const expTiers = mlbStakeTiersFromConfig_(cfg);
+  const expPctRaw = parseFloat(String(cfg['MAX_SLATE_EXPOSURE_PCT'] != null ? cfg['MAX_SLATE_EXPOSURE_PCT'] : '10'));
+  const expCapUsd = ((!isNaN(expPctRaw) && expPctRaw > 0 ? expPctRaw : 10) / 100) * expTiers.bankroll;
+  let slateRisk = 0;
+  let exposureCapped = 0;
+  selected.forEach(function (p) {
+    const st = mlbKellyStake_(p.pWin, p.american, bankroll, kellyFrac, cfg);
+    if (st !== '' && st > 0 && slateRisk + st > expCapUsd) {
+      p.stake = 0;
+      p.flags = p.flags ? p.flags + '; exposure_cap' : 'exposure_cap';
+      exposureCapped++;
+    } else {
+      p.stake = st;
+      if (st !== '' && st > 0) slateRisk += st;
+    }
+  });
+  if (exposureCapped > 0 && typeof addPipelineWarning_ === 'function') {
+    addPipelineWarning_(
+      'Bet card: ' + exposureCapped + ' play(s) stake-zeroed at the $' +
+      Math.round(expCapUsd * 100) / 100 + ' slate exposure cap (MAX_SLATE_EXPOSURE_PCT)'
+    );
+  }
+
   // Display order: game start time asc, then by gamePk (keep same-time games
   // grouped), then by rank (win prob in outcome mode, EV in legacy) within a game.
   selected.sort(function (a, b) {
@@ -694,7 +727,8 @@ function refreshMLBBetCard() {
     }
     lastGamePk = gKey;
     visibleIdx++;
-    const stake = mlbKellyStake_(p.pWin, p.american, bankroll, kellyFrac, cfg);
+    // Stake was sized (and exposure-capped) in conviction order above.
+    const stake = p.stake != null ? p.stake : mlbKellyStake_(p.pWin, p.american, bankroll, kellyFrac, cfg);
     const rowOut = [
       slateDate,                                                  // 0  date
       visibleIdx,                                                 // 1  #
