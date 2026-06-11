@@ -8,7 +8,7 @@
 const CONFIG_TAB_NAME = '⚙️ Config';
 
 /** Incremented by scripts/clasp-deploy.ps1 on each Apps Script push (visible on ⚙️ Config). */
-const MLB_APPS_SCRIPT_BUILD = 29;
+const MLB_APPS_SCRIPT_BUILD = 30;
 
 function mlbAppsScriptBuild_() {
   return typeof MLB_APPS_SCRIPT_BUILD !== 'undefined' ? MLB_APPS_SCRIPT_BUILD : '';
@@ -228,6 +228,9 @@ function buildConfigTab() {
   row_('STAKE_TIER_3_KELLY_PCT', '1.5', 'Kelly% of bankroll → 3u tier. Default 1.5%: any Kelly recommendation ≥1.5% of roll is a max-bet conviction play.');
   row_('MAX_SLATE_EXPOSURE_PCT', '10', 'Max % of bankroll staked across one slate (simultaneous bets). Plays beyond the cap stay on 🃏 at $0 with an exposure_cap flag. Kelly assumes sequential bets — uncapped slates risked 30%+ of roll at once.');
   row_('GRADER_BAND_BUDGET_SEC', '300', 'Time budget (sec) for the grading band at the start of each window. Backlogged regrades beyond the budget stay PENDING and drain over the next windows. Fetch pacing/throttles unchanged.');
+  row_('INJURY_NEWS_ENABLED', 'Y', '🚑 Y/N — soft-injury news sweep + scratch detection for 🃏 card players. Signal-only (red cell + hover note); never auto-gates stakes.');
+  row_('INJURY_NEWS_MAX_FETCH', '15', '🚑 Max Google News RSS fetches per run (one per card player, 250ms pacing).');
+  row_('INJURY_NEWS_LOOKBACK_H', '48', '🚑 Headline freshness window in hours for the injury-news sweep.');
   row_('K_PROB_BLEND_MARKET_W', '0.65', '🧪 Shadow only (⚡ Sim_Pitcher_K cols 39-41): weight on de-vigged market prob vs raw model prob. Audit data for market-prior blending; does NOT affect live picks.');
   row_('LEGACY_UNIT_USD', '2.50', 'Flat $ assumed for pre-tier historical bets when running "Backfill historical stakes". Set to what you were actually averaging before the Kelly system.');
   row_('HP_UMP_LAMBDA_MULT', '1', 'Multiply 🎰 λ when hp_umpire listed (1=no change; try 1.02–1.05 cautiously)');
@@ -479,6 +482,8 @@ function validateMlbPipelineConfig_(cfg) {
   warnRange('ANCHOR_WEIGHT_K', c['ANCHOR_WEIGHT_K'], 0, 1);
   warnRange('MAX_SLATE_EXPOSURE_PCT', c['MAX_SLATE_EXPOSURE_PCT'], 2, 50);
   warnRange('GRADER_BAND_BUDGET_SEC', c['GRADER_BAND_BUDGET_SEC'], 60, 1500);
+  warnRange('INJURY_NEWS_MAX_FETCH', c['INJURY_NEWS_MAX_FETCH'], 1, 40);
+  warnRange('INJURY_NEWS_LOOKBACK_H', c['INJURY_NEWS_LOOKBACK_H'], 6, 168);
   warnRange('K_PROB_BLEND_MARKET_W', c['K_PROB_BLEND_MARKET_W'], 0, 1);
   warnRange('ANCHOR_WEIGHT_BATTER_HITS', c['ANCHOR_WEIGHT_BATTER_HITS'], 0, 1);
   warnRange('K_OPP_L14_BLEND', c['K_OPP_L14_BLEND'], 0, 1);

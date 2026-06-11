@@ -16,6 +16,7 @@ function onOpen() {
     .addItem('📆 Run Morning for tomorrow (NY)', 'runMorningForTomorrowNY_')
     .addItem('🌤 Run Midday  (odds + pipeline, injuries unchanged)', 'runMiddayWindowMLB')
     .addItem('🔒 Run Final  (full refresh + snapshot)', 'runFinalWindowMLB')
+    .addItem('🚑 Re-check health signals (card players)', 'mlbFlagBetCardHealthSignals_')
     .addSeparator();
 
   // ---- Calibration & profitability (analytics on graded logs) ----
@@ -535,6 +536,12 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   // gate tally against mlbBetCardPlayStats_() and surface miscount drift.
   // Outcome lookups below are name-based, so step insertions here are safe.
   step('Bet Card funnel diagnostic', diagnoseBetCardFunnel_);
+  // 🚑 Health signals AFTER the card builds: scratch detection (batter out of
+  // a confirmed lineup / probable changed) + soft-injury news sweep for card
+  // players. Signal-only — red cell + 🚑 flag + hover note; never auto-gates.
+  step('Health signals (🚑)', function () {
+    if (typeof mlbFlagBetCardHealthSignals_ === 'function') mlbFlagBetCardHealthSignals_();
+  });
   // Early Win card reads ✅ FanDuel_MLB_Odds (h2h) + 📅 MLB_Schedule, both
   // already built above. Cheap (~1s) and runs daily even when card is empty,
   // because the DK token resets every morning regardless of slate.
