@@ -274,11 +274,18 @@ function refreshHitMachine_() {
     }
   });
 
-  // Rank: p desc, arsenal rv as tiebreak (only a NUDGE — never promotes a
-  // lower-p batter past a clearly higher one).
+  // Rank: p desc → arsenal rv → last-game line. Each later term is only a
+  // tiebreak — it can never promote a lower-p batter past a clearly higher
+  // one. Last-game (operator rule): all things equal, prefer the guy who
+  // hit yesterday; a flag to pay attention, never a reason on its own.
   cands.sort(function (a, b) {
     if (Math.abs(b.p - a.p) > 0.015) return b.p - a.p;
-    return (b.arsRv != null ? b.arsRv : -99) - (a.arsRv != null ? a.arsRv : -99);
+    const ar = (b.arsRv != null ? b.arsRv : -99) - (a.arsRv != null ? a.arsRv : -99);
+    if (Math.abs(ar) > 0.3) return ar;
+    const aHit = String(a.flags || '').indexOf('hitless_last_gm') !== -1 ? 0 : 1;
+    const bHit = String(b.flags || '').indexOf('hitless_last_gm') !== -1 ? 0 : 1;
+    if (bHit !== aHit) return bHit - aHit;
+    return ar;
   });
 
   // Top 2 eligible = the parlay. Cross-game pairs are preferred (honest
@@ -496,6 +503,10 @@ function mlbHmWriteBoard_(ss, cands, parlay, hint, diag) {
     for (let i = 0; i < out.length; i++) {
       if (String(out[i][10]).indexOf('bvp_cold') !== -1) {
         sh.getRange(5 + i, 1, 1, 12).setBackground('#eceff1').setFontColor('#90a4ae');
+      } else if (String(out[i][10]).indexOf('hitless_last_gm') !== -1) {
+        // Pay-attention tint (operator rule): hitless yesterday — not a
+        // veto, just don't let it slide past the eye.
+        sh.getRange(5 + i, 11).setBackground('#e3f2fd');
       }
     }
   }
