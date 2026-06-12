@@ -32,9 +32,50 @@ const MLB_HIT_MACHINE_LOG_HEADERS = [
 ];
 
 var __mlbHmBvpCache = {}; // 'bid|spId' → {pa, h, avg} | null
+var __mlbHmLastGmCache = {}; // bid → {h, ab} | null
 
 function mlbResetHitMachineCaches_() {
   __mlbHmBvpCache = {};
+  __mlbHmLastGmCache = {};
+}
+
+/**
+ * Batter's most recent completed game line. TRACKED SIGNAL, NOT A FILTER:
+ * a single hitless game shifts next-game hit probability by ~1pp (noise),
+ * and good hitters go 0-fer in ~25-30% of games — a hard filter would
+ * randomly delete 2-4 of the top 10 daily. Logged on every candidate/leg
+ * so the graded data can vote on whether "hitless yesterday" predicts
+ * anything here. Promote to a veto only if the log says so.
+ */
+function mlbHmLastGameLine_(batterId, season) {
+  const key = String(batterId);
+  if (key in __mlbHmLastGmCache) return __mlbHmLastGmCache[key];
+  let out = null;
+  try {
+    const url =
+      mlbStatsApiBaseUrl_() + '/people/' + parseInt(batterId, 10) +
+      '/stats?stats=gameLog&group=hitting&season=' + season;
+    const resp = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+    if (resp.getResponseCode() === 200) {
+      const json = JSON.parse(resp.getContentText());
+      const splits = json && json.stats && json.stats[0] && json.stats[0].splits;
+      if (splits && splits.length) {
+        for (let i = splits.length - 1; i >= 0; i--) {
+          const st = splits[i] && splits[i].stat;
+          const ab = st ? parseInt(st.atBats, 10) : NaN;
+          if (isFinite(ab) && ab > 0) {
+            out = { h: parseInt(st.hits, 10) || 0, ab: ab };
+            break;
+          }
+        }
+      }
+    }
+    Utilities.sleep(150);
+  } catch (e) {
+    Logger.log('mlbHmLastGameLine_: ' + (e.message || e));
+  }
+  __mlbHmLastGmCache[key] = out;
+  return out;
 }
 
 /** Career batter-vs-pitcher line from statsapi. null = no data / fetch fail. */
@@ -225,6 +266,12 @@ function refreshHitMachine_() {
     // One-way stay-away veto: enough career PA and basically hitless.
     c.bvpCold = !!(bvp && bvp.pa >= bvpMinPa && (bvp.h === 0 || (isFinite(bvp.avg) && bvp.avg < bvpMaxAvg)));
     if (c.bvpCold) c.flags = 'bvp_cold';
+    // Last-game line — tracked, never filtered (see mlbHmLastGameLine_).
+    const lg = mlbHmLastGameLine_(c.batterId, hmSeason);
+    c.lastGm = lg ? lg.h + '-for-' + lg.ab : '';
+    if (lg && lg.h === 0 && lg.ab >= 3) {
+      c.flags = c.flags ? c.flags + '; hitless_last_gm' : 'hitless_last_gm';
+    }
   });
 
   // Rank: p desc, arsenal rv as tiebreak (only a NUDGE — never promotes a
@@ -364,6 +411,9 @@ function mlbHmWhyForCandidate_(c) {
   }
   if (c.bvp) {
     lines.push('BvP ' + c.bvp + (c.bvpCold ? ' → STAY-AWAY (cold at sample, one-way veto)' : ' career vs this SP'));
+  }
+  if (c.lastGm) {
+    lines.push('last game ' + c.lastGm + ' (tracked signal — a single 0-fer is ~noise; the log will vote)');
   }
   return lines.join('  ·  ');
 }
@@ -523,7 +573,9 @@ function mlbHmUpsertLog_(ss, parlay) {
     l1.batter, l1.batterId, l1.gamePk, l1.odds, l1.p, l1.arsRv != null ? l1.arsRv : '', l1.bvp,
     l2.batter, l2.batterId, l2.gamePk, l2.odds, l2.p, l2.arsRv != null ? l2.arsRv : '', l2.bvp,
     parlay.american, parlay.p, parlay.ev, parlay.stake,
-    '', 'PENDING', '', '', betKey, '', 'SHADOW(paper)' + (parlay.sgp ? '·SGP' : ''),
+    '', 'PENDING', '', '', betKey, '',
+    'SHADOW(paper)' + (parlay.sgp ? '·SGP' : '') +
+      (l1.lastGm ? '·L1 ' + l1.lastGm : '') + (l2.lastGm ? '·L2 ' + l2.lastGm : ''),
   ];
 
   // Find today's row (PENDING only — never disturb a graded parlay).
