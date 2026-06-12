@@ -102,11 +102,10 @@ function refreshHitMachine_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const cfg = getConfig();
   if (String(cfg['HM_ENABLED'] != null ? cfg['HM_ENABLED'] : 'Y').toUpperCase() !== 'Y') return;
-  // NOTE: HM_MIN_P is on the POST-SHRINK scale (sim p = raw × H_MODEL_P_SHRINK
-  // 0.82). 0.65 here ≈ 0.79 raw. The original 0.75 default demanded a ~91%
-  // raw hitter — mathematically empty board every slate.
+  // HM_MIN_P gates PARLAY LEGS only — the candidate list always shows the
+  // top-N most-likely hitters regardless. Post-shrink scale (× 0.82).
   const minP = parseFloat(String(cfg['HM_MIN_P'] != null ? cfg['HM_MIN_P'] : '0.65')) || 0.65;
-  const listN = parseInt(String(cfg['HM_LIST_N'] != null ? cfg['HM_LIST_N'] : '8'), 10) || 8;
+  const listN = parseInt(String(cfg['HM_LIST_N'] != null ? cfg['HM_LIST_N'] : '10'), 10) || 10;
   const oddsFloor = parseFloat(String(cfg['HM_LEG_ODDS_FLOOR'] != null ? cfg['HM_LEG_ODDS_FLOOR'] : '-350')) || -350;
   const bvpMinPa = parseInt(String(cfg['HM_BVP_MIN_PA'] != null ? cfg['HM_BVP_MIN_PA'] : '12'), 10) || 12;
   const bvpMaxAvg = parseFloat(String(cfg['HM_BVP_MAX_AVG'] != null ? cfg['HM_BVP_MAX_AVG'] : '0.10')) || 0.10;
@@ -117,26 +116,40 @@ function refreshHitMachine_() {
     mlbHmWriteBoard_(ss, [], null, 'Run the Hits sim first (Morning pipeline builds it).', '');
     return;
   }
-  const rows = src.getRange(4, 1, src.getLastRow() - 3, 34).getValues();
+  // Read through the audit block (col 35 = lambda_hits_model, the UNANCHORED
+  // model λ). The sim's own p_over anchors λ 65% toward the betting line —
+  // sane for K where the line IS the market's estimate, degenerate for hits
+  // where every line is the constant 0.5: it dragged every batter toward
+  // ~0.8 expected hits and every P(1+H) toward a coin flip, so no one could
+  // ever clear the floor. The Machine answers the actual question — "is this
+  // guy going to get a hit?" — from the unanchored model.
+  const rows = src.getRange(4, 1, src.getLastRow() - 3, Math.min(40, src.getLastColumn())).getValues();
+  const hShrinkRaw = parseFloat(String(cfg['H_MODEL_P_SHRINK'] != null ? cfg['H_MODEL_P_SHRINK'] : '0.82'));
+  const hShrink = (!isNaN(hShrinkRaw) && hShrinkRaw > 0 && hShrinkRaw <= 1) ? hShrinkRaw : 0.82;
 
-  // Pass 1 — cheap gates, build candidate pool sorted by p. Every rejection
-  // is TALLIED so an empty board can always explain itself on the tab.
-  const tally = { scanned: 0, not05: 0, noP: 0, pBelow: 0, noOdds: 0, juiced: 0, injury: 0, noIds: 0, scratched: 0, slot6plus: 0 };
+  // Pass 1 — probability-first pool. ODDS ARE NOT AN ENTRY REQUIREMENT:
+  // the list is "the N batters most likely to get a hit"; price/EV attach
+  // when FD still posts the market. Every rejection is tallied.
+  const tally = { scanned: 0, noModel: 0, injury: 0, noIds: 0, scratched: 0, slot6plus: 0, noOdds: 0 };
   let bestP = NaN;
   const pool = [];
   rows.forEach(function (r) {
     const batter = String(r[2] || '').trim();
     if (!batter) return;
     tally.scanned++;
-    const line = parseFloat(String(r[3]));
-    if (isNaN(line) || Math.abs(line - 0.5) > 1e-9) { tally.not05++; return; } // 1+ hit only
-    const p = parseFloat(String(r[8]));
-    if (isNaN(p)) { tally.noP++; return; }
+    const lamModel = parseFloat(String(r.length > 34 && r[34] != null ? r[34] : ''));
+    const estPa = parseFloat(String(r[25]));
+    let p = NaN;
+    if (isFinite(lamModel) && lamModel > 0 && isFinite(estPa) && estPa > 0 &&
+        typeof mlbBinomialPGeqK_ === 'function') {
+      let ba = lamModel / estPa;
+      ba = Math.max(0.02, Math.min(0.499, ba));
+      // One-sided shrink on the Over — same calibration treatment as the
+      // live h.v2-full-sim-os path, applied to the unanchored λ.
+      p = Math.min(0.9999, mlbBinomialPGeqK_(1, estPa, ba) * hShrink);
+    }
+    if (isNaN(p)) { tally.noModel++; return; }
     if (isNaN(bestP) || p > bestP) bestP = p;
-    if (p < minP) { tally.pBelow++; return; }
-    const odds = parseFloat(String(r[4]));
-    if (isNaN(odds)) { tally.noOdds++; return; } // FD pulls markets at first pitch
-    if (odds < oddsFloor) { tally.juiced++; return; }
     const flags = String(r[16] || '');
     if (flags.indexOf('injury') !== -1) { tally.injury++; return; }
     const gamePk = parseInt(r[0], 10);
@@ -153,11 +166,19 @@ function refreshHitMachine_() {
     } else {
       lineupNote = 'lineup_unconfirmed';
     }
+    // Odds attach when present (line 0.5 only) — absence just means the leg
+    // can't be priced into the parlay, not exclusion from the list.
+    const line = parseFloat(String(r[3]));
+    let odds = parseFloat(String(r[4]));
+    if (isNaN(line) || Math.abs(line - 0.5) > 1e-9 || isNaN(odds) || odds < oddsFloor) {
+      odds = NaN;
+      tally.noOdds++;
+    }
     pool.push({
       batter: batter, batterId: batterId, gamePk: gamePk,
-      matchup: String(r[1] || ''), odds: odds, p: p,
-      lam: parseFloat(String(r[6])), estPa: parseFloat(String(r[25])),
-      oppSpName: String(r[27] || ''), lineupNote: lineupNote, flags: '',
+      matchup: String(r[1] || ''), odds: isNaN(odds) ? '' : odds, p: Math.round(p * 1000) / 1000,
+      lam: Math.round(lamModel * 100) / 100, estPa: estPa,
+      oppSpName: String(r[27] || ''), lineupNote: lineupNote, flags: isNaN(odds) ? 'no_price' : '',
     });
   });
   pool.sort(function (a, b) { return b.p - a.p; });
@@ -198,7 +219,11 @@ function refreshHitMachine_() {
   const sgpRho = parseFloat(String(cfg['HM_SGP_RHO'] != null ? cfg['HM_SGP_RHO'] : '0.08')) || 0.08;
   const sgpHaircut = parseFloat(String(cfg['HM_SGP_HAIRCUT'] != null ? cfg['HM_SGP_HAIRCUT'] : '0.10')) || 0.10;
 
-  const eligible = cands.filter(function (c) { return !c.bvpCold; });
+  // Parlay legs need everything the list doesn't: a live 0.5-line price,
+  // the p floor, and no BvP veto.
+  const eligible = cands.filter(function (c) {
+    return !c.bvpCold && c.odds !== '' && c.p >= minP;
+  });
   let legs = [];
   // Pass A: best cross-game pair (anchored on the top candidate).
   for (let i = 0; i < eligible.length && legs.length < 2; i++) {
@@ -249,17 +274,15 @@ function refreshHitMachine_() {
   } catch (e) {}
 
   const diag = staleNote +
-    'Gate tally: scanned ' + tally.scanned +
-    ' · line≠0.5 ' + tally.not05 +
-    ' · no model p ' + tally.noP +
-    ' · p<' + minP + ' ' + tally.pBelow + (isFinite(bestP) ? ' (best p seen ' + Math.round(bestP * 1000) / 10 + '%)' : '') +
-    ' · no live odds ' + tally.noOdds +
-    ' · odds<' + oddsFloor + ' ' + tally.juiced +
+    'Tally: scanned ' + tally.scanned +
+    ' · no model ' + tally.noModel + (isFinite(bestP) ? ' (best model p ' + Math.round(bestP * 1000) / 10 + '%)' : '') +
     ' · injury ' + tally.injury +
     ' · scratched ' + tally.scratched +
     ' · slot 6+ ' + tally.slot6plus +
     ' · no ids ' + tally.noIds +
-    '  →  pool ' + pool.length + ' / list ' + cands.length;
+    ' · unpriced ' + tally.noOdds + ' (still listed — just not parlay-eligible)' +
+    '  →  list ' + cands.length + ' of pool ' + pool.length +
+    '  ·  parlay legs need p≥' + minP + ' + a live 0.5-line price';
   // The tally goes EVERYWHERE — sheet, execution log, toast — so a thin
   // board can never again fail to explain itself ("No logs available").
   Logger.log('Hit Machine: ' + diag);
@@ -284,7 +307,7 @@ function refreshHitMachine_() {
 function mlbHmWhyForCandidate_(c) {
   const lines = [];
   if (isFinite(c.lam) && isFinite(c.estPa)) {
-    lines.push('λ ' + c.lam + ' expected hits over ~' + c.estPa + ' PA (' + c.lineupNote + ')');
+    lines.push('model λ ' + c.lam + ' expected hits over ~' + c.estPa + ' PA (' + c.lineupNote + ') — unanchored model, one-sided shrink');
   }
   const imp = mlbAmericanImplied_(c.odds);
   const impN = parseFloat(String(imp));
@@ -294,6 +317,8 @@ function mlbHmWhyForCandidate_(c) {
       'P(1+H) ' + Math.round(c.p * 1000) / 10 + '% vs ' + Math.round(impN * 1000) / 10 +
       '% implied at ' + c.odds + ' → ' + (gap >= 0 ? '+' : '') + gap + 'pp'
     );
+  } else if (isFinite(c.p)) {
+    lines.push('P(1+H) ' + Math.round(c.p * 1000) / 10 + '% — no live 0.5-line price (list-only, not parlay-eligible)');
   }
   if (c.arsRv != null) {
     lines.push(
