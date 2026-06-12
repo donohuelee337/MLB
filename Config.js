@@ -8,7 +8,7 @@
 const CONFIG_TAB_NAME = '⚙️ Config';
 
 /** Incremented by scripts/clasp-deploy.ps1 on each Apps Script push (visible on ⚙️ Config). */
-const MLB_APPS_SCRIPT_BUILD = 37;
+const MLB_APPS_SCRIPT_BUILD = 38;
 
 function mlbAppsScriptBuild_() {
   return typeof MLB_APPS_SCRIPT_BUILD !== 'undefined' ? MLB_APPS_SCRIPT_BUILD : '';
@@ -238,6 +238,7 @@ function buildConfigTab() {
   row_('HM_ENABLED', 'Y', '🎯 Y/N — Hit Machine 2-leg 1+H parlay board + SHADOW paper log. No real stakes until promoted.');
   row_('HM_MIN_P', '0.65', '🎯 Min model P(1+ hit) for PARLAY LEGS only (post-shrink scale, 0.65 ≈ 0.79 raw). The candidate list always shows the top-N most likely hitters regardless.');
   row_('HM_LIST_N', '10', '🎯 Candidate list size — "here are the N guys most likely to get a hit" (BvP/arsenal context fetched for these only). Odds NOT required to make the list.');
+  row_('HM_MIN_SEASON_AB', '40', '🎯 Min season at-bats to appear on the board at all — a 5-for-9 season prints a huge λ with no credibility. Thin-sample names are removed; next-best qualifiers backfill.');
   row_('HM_LEG_ODDS_FLOOR', '-350', '🎯 Worst (most negative) acceptable leg price.');
   row_('HM_BVP_MIN_PA', '12', '🎯 Career PA vs tonight\'s SP before the BvP stay-away veto can fire. One-way prune, never a boost.');
   row_('HM_BVP_MAX_AVG', '0.10', '🎯 BvP veto: career avg below this (with PA ≥ min) = stay away.');
@@ -505,6 +506,7 @@ function validateMlbPipelineConfig_(cfg) {
   warnRange('HM_BVP_MIN_PA', c['HM_BVP_MIN_PA'], 6, 60);
   warnRange('HM_BVP_MAX_AVG', c['HM_BVP_MAX_AVG'], 0.02, 0.2);
   warnRange('HM_PAPER_STAKE', c['HM_PAPER_STAKE'], 1, 7.5);
+  warnRange('HM_MIN_SEASON_AB', c['HM_MIN_SEASON_AB'], 10, 250);
   warnRange('HM_SGP_RHO', c['HM_SGP_RHO'], 0, 0.3);
   warnRange('HM_SGP_HAIRCUT', c['HM_SGP_HAIRCUT'], 0, 0.3);
   warnRange('K_PROB_BLEND_MARKET_W', c['K_PROB_BLEND_MARKET_W'], 0, 1);

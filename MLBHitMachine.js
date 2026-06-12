@@ -182,7 +182,34 @@ function refreshHitMachine_() {
     });
   });
   pool.sort(function (a, b) { return b.p - a.p; });
-  const cands = pool.slice(0, listN);
+
+  // Sample-size gate: a 5-for-9 season prints a monster λ with zero
+  // credibility behind it. Walk the ranked pool and keep the first N with
+  // season AB ≥ HM_MIN_SEASON_AB — thin-sample names are removed entirely
+  // and the next-best qualifiers backfill the list. Season stats come from
+  // the shared fetch layer (cached per run, own pacing). Unknown AB (fetch
+  // miss) keeps the row but marks it ab_unknown rather than silently
+  // passing judgment either way.
+  const minAb = parseInt(String(cfg['HM_MIN_SEASON_AB'] != null ? cfg['HM_MIN_SEASON_AB'] : '40'), 10) || 40;
+  const hmSeason = typeof mlbSlateSeasonYear_ === 'function' ? mlbSlateSeasonYear_(cfg) : new Date().getFullYear();
+  const cands = [];
+  let thinSample = 0;
+  for (let i = 0; i < pool.length && cands.length < listN; i++) {
+    const c = pool[i];
+    let ab = NaN;
+    try {
+      if (typeof mlbSharedFetchBatterHittingSplitsAndSeason_ === 'function') {
+        const data = mlbSharedFetchBatterHittingSplitsAndSeason_(c.batterId, hmSeason);
+        const szn = (data && data.szn) || {};
+        ab = parseInt(szn.atBats, 10);
+        if (isNaN(ab)) ab = parseInt(szn.plateAppearances, 10); // AB missing → PA proxy
+      }
+    } catch (e) {}
+    if (isFinite(ab) && ab < minAb) { thinSample++; continue; }
+    c.seasonAb = isFinite(ab) ? ab : '';
+    if (!isFinite(ab)) c.flags = c.flags ? c.flags + '; ab_unknown' : 'ab_unknown';
+    cands.push(c);
+  }
 
   // Pass 2 — expensive context for the short list only: SP id, arsenal, BvP.
   cands.forEach(function (c) {
@@ -281,6 +308,7 @@ function refreshHitMachine_() {
     ' · slot 6+ ' + tally.slot6plus +
     ' · no ids ' + tally.noIds +
     ' · unpriced ' + tally.noOdds + ' (still listed — just not parlay-eligible)' +
+    ' · thin sample (<' + minAb + ' AB) ' + thinSample +
     '  →  list ' + cands.length + ' of pool ' + pool.length +
     '  ·  parlay legs need p≥' + minP + ' + a live 0.5-line price';
   // The tally goes EVERYWHERE — sheet, execution log, toast — so a thin
@@ -307,7 +335,11 @@ function refreshHitMachine_() {
 function mlbHmWhyForCandidate_(c) {
   const lines = [];
   if (isFinite(c.lam) && isFinite(c.estPa)) {
-    lines.push('model λ ' + c.lam + ' expected hits over ~' + c.estPa + ' PA (' + c.lineupNote + ') — unanchored model, one-sided shrink');
+    lines.push(
+      'model λ ' + c.lam + ' expected hits over ~' + c.estPa + ' PA (' + c.lineupNote + ')' +
+      (c.seasonAb !== '' && c.seasonAb != null ? ' · ' + c.seasonAb + ' season AB behind the rate' : '') +
+      ' — unanchored model, one-sided shrink'
+    );
   }
   const imp = mlbAmericanImplied_(c.odds);
   const impN = parseFloat(String(imp));
