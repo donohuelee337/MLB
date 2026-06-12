@@ -236,7 +236,19 @@ function refreshHitMachine_() {
     }
   }
 
-  const diag =
+  // Staleness check: the board is only as fresh as the last pipeline window.
+  // A 7 AM manual refresh reads YESTERDAY's sim rows (odds pulled at first
+  // pitch) and correctly finds nothing — say so instead of looking broken.
+  let staleNote = '';
+  try {
+    const todaySlate = getSlateDateString_(cfg);
+    if (typeof mlbOddsTabIsForSlate_ === 'function' && !mlbOddsTabIsForSlate_(ss, todaySlate)) {
+      staleNote = '⚠️ STALE DATA: the ✅ odds tab is not for ' + todaySlate +
+        ' — this board was built from old sim rows. Run a pipeline window (Morning/Midday/Final) first.  ·  ';
+    }
+  } catch (e) {}
+
+  const diag = staleNote +
     'Gate tally: scanned ' + tally.scanned +
     ' · line≠0.5 ' + tally.not05 +
     ' · no model p ' + tally.noP +
@@ -248,9 +260,20 @@ function refreshHitMachine_() {
     ' · slot 6+ ' + tally.slot6plus +
     ' · no ids ' + tally.noIds +
     '  →  pool ' + pool.length + ' / list ' + cands.length;
+  // The tally goes EVERYWHERE — sheet, execution log, toast — so a thin
+  // board can never again fail to explain itself ("No logs available").
+  Logger.log('Hit Machine: ' + diag);
   mlbHmWriteBoard_(ss, cands, parlay, null, diag);
   mlbHmMarkSourceTabs_(ss, cands, parlay);
   if (parlay) mlbHmUpsertLog_(ss, parlay);
+  try {
+    ss.toast(
+      (parlay ? '🎟️ parlay set · ' : 'no parlay · ') + cands.length + ' candidate(s) · ' +
+      (staleNote ? 'STALE DATA — run a window first' : 'pool ' + pool.length + ' of ' + tally.scanned + ' scanned'),
+      '🎯 Hit Machine',
+      10
+    );
+  } catch (e) {}
 }
 
 /**
@@ -299,10 +322,11 @@ function mlbHmWriteBoard_(ss, cands, parlay, hint, diag) {
     sh = ss.insertSheet(MLB_HIT_MACHINE_TAB);
   }
   sh.setTabColor('#f9a825');
+  const builtAt = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'EEE M/d h:mm a');
   sh.getRange(1, 1, 1, 12)
     .merge()
     .setValue(
-      '🎯 Hit Machine — 2-leg 1+H parlay · SHADOW (paper $) · legs = top-2 cross-game by P(1+H), arsenal rv tiebreak, BvP-cold vetoed · promote only after graded ROI > 0'
+      '🎯 Hit Machine — 2-leg 1+H parlay · SHADOW (paper $) · legs = top-2 by P(1+H) (cross-game preferred, SGP fallback), arsenal rv tiebreak, BvP-cold vetoed · built ' + builtAt
     )
     .setFontWeight('bold')
     .setBackground('#f57f17')
