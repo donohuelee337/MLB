@@ -125,6 +125,49 @@ function mlbArsenalIngestBestEffort_() {
 }
 
 /**
+ * One-time setup: point the Statcast + arsenal CSV config keys at the
+ * operator's published Drive CSVs (Path B), enable both ingests, then run
+ * them and toast the row counts. File IDs are the savant_export.py outputs
+ * in the shared Drive folder; replace the SAME files weekly to keep these
+ * URLs stable. uc?export=download is read by UrlFetchApp (followRedirects),
+ * no Drive scope / re-auth needed since the files are "anyone with link".
+ */
+function mlbApplySavantCsvSetup_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const base = 'https://drive.google.com/uc?export=download&id=';
+  const ids = {
+    pitcherProfile: '1DstWui1Ihlja7WccaP1pNqJZqgezh1k0',
+    batterProfile: '1oVCCzjq5MzyUaUHk71kQsfb8pflCMl0K',
+    arsenalPitcher: '14bOf0f0fVoKS6BjExK2uqxl_gtivf2u_',
+    arsenalBatter: '1lOfvgxLHStownlpQIu1Hn0Rb-b1JpobC',
+  };
+  setConfigValue_('STATCAST_ENABLED', 'true');
+  setConfigValue_('STATCAST_PITCHER_PROFILE_CSV_URL', base + ids.pitcherProfile);
+  setConfigValue_('STATCAST_BATTER_PROFILE_CSV_URL', base + ids.batterProfile);
+  setConfigValue_('ARSENAL_INGEST_ENABLED', 'Y');
+  setConfigValue_('ARSENAL_P_CSV_URL', base + ids.arsenalPitcher);
+  setConfigValue_('ARSENAL_B_CSV_URL', base + ids.arsenalBatter);
+  SpreadsheetApp.flush();
+
+  const parts = [];
+  try {
+    if (typeof mlbStatcastIngestProfilesBestEffort_ === 'function') {
+      const s = mlbStatcastIngestProfilesBestEffort_();
+      parts.push('Statcast P=' + (s.pitchers || 0) + ' B=' + (s.batters || 0));
+    }
+  } catch (e) { parts.push('Statcast ERR ' + (e.message || e)); }
+  try {
+    if (typeof mlbArsenalIngestBestEffort_ === 'function') {
+      const a = mlbArsenalIngestBestEffort_();
+      parts.push('Arsenal P=' + a.p + ' B=' + a.b);
+    }
+  } catch (e) { parts.push('Arsenal ERR ' + (e.message || e)); }
+  const msg = 'Savant CSV setup: ' + parts.join(' · ');
+  Logger.log(msg);
+  try { ss.toast(msg + ' — open Game Cards to see EV/LA', '🔧 Savant CSV setup', 15); } catch (e) {}
+}
+
+/**
  * Menu: run the arsenal ingest once and report the result, so we can settle
  * Path A (live Savant CSV) vs Path B (hosted CSV override) in one click.
  */

@@ -23,6 +23,7 @@ function onOpen() {
     .addItem('🎴 Open Game Cards (tab)', 'mlbActivateGameCardsTab_')
     .addItem('🔗 Show shareable Game Cards link', 'mlbShowGameCardsWebUrl_')
     .addItem('🧪 Open Hits v4 shadow log', 'mlbActivateHitsV4LogTab_')
+    .addItem('🔧 Apply Savant CSV URLs (one-time setup)', 'mlbApplySavantCsvSetup_')
     .addItem('🧪 Test Savant arsenal fetch (A vs B)', 'mlbTestArsenalFetch_')
     .addItem('🌙 Night Audit (grade + close-out — no rebuilds)', 'runNightAuditMLB')
     .addSeparator();
