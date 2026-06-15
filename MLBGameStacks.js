@@ -119,7 +119,7 @@ function mlbGameCardsCollect_(ss, cfg) {
   return byGame;
 }
 
-/** batterId → HR-promo signal {p, sznHR, sznPA, l14}. One tab read, cheap. */
+/** batterId → HR-promo signal {rank, p, sznHR, sznPA, l14}. One tab read, cheap. */
 function mlbGameCardsHrMap_(ss) {
   const map = {};
   const hr = ss.getSheetByName(typeof MLB_BATTER_HR_PROMO_TAB !== 'undefined' ? MLB_BATTER_HR_PROMO_TAB : '📣 Batter_HR_Promo');
@@ -130,6 +130,7 @@ function mlbGameCardsHrMap_(ss) {
     const pc = mlbGameCardsNum_(r[8]); // p_calibrated
     const pp = mlbGameCardsNum_(r[7]); // p_poisson
     map[bid] = {
+      rank: parseInt(r[0], 10) || 0, // HR-promo rank (1 = best)
       p: isFinite(pc) && pc > 0 ? pc : pp,
       sznHR: mlbGameCardsNum_(r[17]),
       sznPA: mlbGameCardsNum_(r[18]),
@@ -301,7 +302,7 @@ function mlbGameCardsData_(ss, cfg) {
   };
   // HR signal map (icon + blurb) and BvP context budget.
   const hrMap = mlbGameCardsHrMap_(ss);
-  const hrIconP = mlbGameCardsNum_(cfg['GS_MIN_P_HR']) || 0.12;
+  const hrTopN = parseInt(String(cfg['GS_HR_ICON_TOP_N'] != null ? cfg['GS_HR_ICON_TOP_N'] : '10'), 10) || 10;
   const bvpOn = String(cfg['GS_BVP_BLURB'] != null ? cfg['GS_BVP_BLURB'] : 'Y').toUpperCase() === 'Y';
   let bvpBudget = bvpOn ? (parseInt(String(cfg['GS_BVP_MAX_FETCH'] != null ? cfg['GS_BVP_MAX_FETCH'] : '40'), 10) || 40) : 0;
   const games = Object.keys(byGame).filter(function (pk) { return byGame[pk].length > 0; });
@@ -317,9 +318,9 @@ function mlbGameCardsData_(ss, cfg) {
   const out = games.map(function (pk) {
     const m = meta[pk] || {};
     const t = timeIdx[pk] || {};
-    const legs = byGame[pk].slice().sort(function (x, y) {
-      return (mlbGameCardsNum_(y.p) || 0) - (mlbGameCardsNum_(x.p) || 0);
-    }).map(function (leg) {
+    const awayC = typeof mlbCanonicalTeamAbbr_ === 'function' ? mlbCanonicalTeamAbbr_(m.away) : String(m.away || '');
+    const homeC = typeof mlbCanonicalTeamAbbr_ === 'function' ? mlbCanonicalTeamAbbr_(m.home) : String(m.home || '');
+    const legs = byGame[pk].slice().map(function (leg) {
       const p = mlbGameCardsNum_(leg.p);
       const kind = kindFromChip(leg.chip);
       const teamAb = typeof mlbCanonicalTeamAbbr_ === 'function' ? mlbCanonicalTeamAbbr_(leg.team) : String(leg.team || '');
@@ -329,7 +330,7 @@ function mlbGameCardsData_(ss, cfg) {
       if (kind === 'HIT' && leg.bid) {
         const sig = hrMap[leg.bid];
         if (sig) {
-          if (isFinite(sig.p) && sig.p >= hrIconP) hrFlag = true;
+          if (sig.rank > 0 && sig.rank <= hrTopN) hrFlag = true; // top-N of the HR tab
           if (isFinite(sig.sznHR)) {
             blurbParts.push(sig.sznHR + ' HR' + (isFinite(sig.l14) && sig.l14 > 0 ? ' (' + sig.l14 + ' L14)' : '') +
               (isFinite(sig.sznPA) ? ' / ' + sig.sznPA + ' PA' : ''));
@@ -366,7 +367,16 @@ function mlbGameCardsData_(ss, cfg) {
         hr: hrFlag,
         blurb: blurbParts.join(' · '),
         team: teamAb,
+        side: teamAb && teamAb === awayC ? 0 : teamAb && teamAb === homeC ? 1 : 9,
       };
+    });
+    // By-game order: NRFI → K → H, away before home within K/H, conf desc.
+    const segRank = { NRFI: 0, K: 1, HIT: 2 };
+    legs.sort(function (a, b) {
+      const sr = (segRank[a.kind] != null ? segRank[a.kind] : 3) - (segRank[b.kind] != null ? segRank[b.kind] : 3);
+      if (sr) return sr;
+      if (a.side !== b.side) return a.side - b.side;
+      return (b.p || 0) - (a.p || 0);
     });
     // Weather at first pitch (home park) — best-effort, never throws.
     let wx = null;
@@ -376,11 +386,25 @@ function mlbGameCardsData_(ss, cfg) {
         const fp = new Date(t.iso);
         const w = park ? mlbWeatherFetchAtFirstPitch_(park, fp) : null;
         if (w && (isFinite(w.tempF) || isFinite(w.windMph))) {
+          // Wind in/out: project wind onto the park's CF axis (same math the
+          // HR multiplier uses). +out toward CF, −in from CF. ≥+2 mph = out
+          // (green, helps offense), ≤−2 = in (red, suppresses), else cross.
+          let dir = 'cross';
+          let outMph = null;
+          if (isFinite(w.windFromDeg) && isFinite(w.windMph) && park && park.cf != null) {
+            const toward = (w.windFromDeg + 180) % 360;
+            const diff = (((toward - park.cf) % 360) + 360) % 360;
+            const align = Math.cos((diff * Math.PI) / 180);
+            outMph = Math.round(w.windMph * align);
+            dir = outMph >= 2 ? 'out' : outMph <= -2 ? 'in' : 'cross';
+          }
           wx = {
             tempF: isFinite(w.tempF) ? Math.round(w.tempF) : null,
             windMph: isFinite(w.windMph) ? Math.round(w.windMph) : null,
             windFromDeg: isFinite(w.windFromDeg) ? Math.round(w.windFromDeg) : null,
-            dome: !!(park && park.dome),
+            dir: dir,
+            outMph: outMph,
+            dome: !!(park && (park.dome || park.roof === 'dome')),
           };
         }
       } catch (e) {}

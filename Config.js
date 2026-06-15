@@ -8,7 +8,7 @@
 const CONFIG_TAB_NAME = '⚙️ Config';
 
 /** Incremented by scripts/clasp-deploy.ps1 on each Apps Script push (visible on ⚙️ Config). */
-const MLB_APPS_SCRIPT_BUILD = 49;
+const MLB_APPS_SCRIPT_BUILD = 50;
 
 function mlbAppsScriptBuild_() {
   return typeof MLB_APPS_SCRIPT_BUILD !== 'undefined' ? MLB_APPS_SCRIPT_BUILD : '';
@@ -193,7 +193,8 @@ function buildConfigTab() {
   row_('GS_MIN_P_K', '0.60', '🎴 Game Cards: min max(p_over,p_under) to show a pitcher-K leg.');
   row_('GS_MIN_PROJ_HITS', '1.00', '🎴 Game Cards: min Hits v3 proj_hits to show a batter-hit leg.');
   row_('GS_MIN_P_HR', '0.12', '🎴 Game Cards: min HR-promo P(1+ HR) to show a HR leg. HR is low-prob/high-variance — own color scale on the card.');
-  row_('GS_MIN_HR_PA', '40', '🎴 Game Cards: min season PA before the 💣 HR icon shows (guards roster-fallback small samples). HR is an indicator on HIT rows, not its own section.');
+  row_('GS_MIN_HR_PA', '40', '🎴 Game Cards: (legacy) min season PA guard for HR context. HR icon now gates on HR-tab rank, see GS_HR_ICON_TOP_N.');
+  row_('GS_HR_ICON_TOP_N', '10', '🎴 Game Cards: 💣 icon shows when the batter is within the top-N of 📣 Batter_HR_Promo (by rank). Indicator on HIT rows, not its own section.');
   row_('GS_BVP_BLURB', 'Y', '🎴 Game Cards (web): fetch career batter-vs-pitcher line for the right-hand blurb. Y = per-hits-leg statsapi fetch on open (adds a few sec); N = season context only, faster.');
   row_('GS_BVP_MAX_FETCH', '40', '🎴 Game Cards (web): cap on BvP fetches per open so the dialog never hangs.');
   // --- K walk-forward engine (🗄️ Pitcher_K_Logs → segment registry) ---

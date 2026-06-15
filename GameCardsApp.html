@@ -74,7 +74,7 @@
       <span class="meta" id="meta"></span>
     </div>
   </div>
-  <div class="legend">★ = Hit Machine · 💣 = HR signal · team logo marks each player's club · right column = BvP & season context · for SGP building, not staking advice</div>
+  <div class="legend">★ = Hit Machine · 💣 = HR top-10 · wind <span style="color:#1a9850;font-weight:700">out</span>/<span style="color:#d7301f;font-weight:700">in</span>/<span style="color:#333">cross</span> · right column = BvP &amp; season context · for SGP building, not staking advice</div>
   <div id="app" class="wrap"></div>
   <div class="foot" id="foot"></div>
 
@@ -107,9 +107,16 @@
   }
   function teamImg(ab,cls){ var u=logo(ab); if(!u)return'<span class="tdot">•</span>';
     return '<img class="'+cls+'" src="'+u+'" alt="'+esc(ab)+'" onerror="this.style.display=\'none\'">'; }
-  function wxHtml(wx){ if(!wx)return''; if(wx.dome)return'<span class="wx">Dome</span>';
-    var b=[]; if(wx.tempF!=null)b.push(wx.tempF+'&deg;'); if(wx.windMph!=null)b.push(compass(wx.windFromDeg)+' '+wx.windMph+' mph');
-    return '<span class="wx">'+b.join(' &middot; ')+'</span>'; }
+  function wxHtml(wx){
+    if(!wx)return''; if(wx.dome)return'<span class="wx">Dome</span>';
+    var b=[]; if(wx.tempF!=null)b.push('<span style="color:#333">'+wx.tempF+'&deg;</span>');
+    if(wx.windMph!=null){
+      var wc = wx.dir==='out'?'#1a9850':wx.dir==='in'?'#d7301f':'#333';
+      var wl = wx.dir==='out'?'out':wx.dir==='in'?'in':compass(wx.windFromDeg);
+      b.push('<span style="color:'+wc+';font-weight:700">'+wx.windMph+' mph '+wl+'</span>');
+    }
+    return '<span class="wx">'+b.join(' &middot; ')+'</span>';
+  }
 
   function legRow(leg, showTeamLogo){
     var col=confColor(leg.p,leg.kind), pct=leg.p==null?'':Math.round(leg.p)+'%';
