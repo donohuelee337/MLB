@@ -18,6 +18,8 @@ function onOpen() {
     .addItem('🔒 Run Final  (full refresh + snapshot)', 'runFinalWindowMLB')
     .addItem('🚑 Re-check health signals (card players)', 'mlbFlagBetCardHealthSignals_')
     .addItem('🎯 Refresh Hit Machine (shadow parlay)', 'refreshHitMachine_')
+    .addItem('🎴 Refresh Game Cards', 'refreshMLBGameCards')
+    .addItem('🎴 Open Game Cards', 'mlbActivateGameCardsTab_')
     .addItem('🧪 Open Hits v4 shadow log', 'mlbActivateHitsV4LogTab_')
     .addItem('🌙 Night Audit (grade + close-out — no rebuilds)', 'runNightAuditMLB')
     .addSeparator();
@@ -652,6 +654,11 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   // health signals so lineup-confirmed state is as fresh as possible.
   step('Hit Machine (shadow)', function () {
     if (typeof refreshHitMachine_ === 'function') refreshHitMachine_();
+  });
+  // 🎴 Game Cards reads NRFI + K sim + Hits v3 + the Hit Machine board, so it
+  // runs last. Display-only; failure can't affect any bet surface.
+  step('Game Cards', function () {
+    if (typeof refreshMLBGameCards === 'function') refreshMLBGameCards();
   });
   // Early Win card reads ✅ FanDuel_MLB_Odds (h2h) + 📅 MLB_Schedule, both
   // already built above. Cheap (~1s) and runs daily even when card is empty,
