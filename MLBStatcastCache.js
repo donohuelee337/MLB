@@ -123,8 +123,8 @@ function mlbParseStatcastProfileCsv_(text, role) {
   }
   const iPid = col(['player_id', 'playerid', 'mlbam_id', 'key_mlbam']);
   const iSeason = col(['year', 'season']);
-  const iEv = col(['exit_velocity_avg', 'exit_velocity', 'ev', 'avg_hit_speed']);
-  const iLa = col(['launch_angle_avg', 'launch_angle', 'la']);
+  const iEv = col(['exit_velocity_avg', 'exit_velocity', 'ev_avg', 'ev', 'avg_hit_speed']);
+  const iLa = col(['launch_angle_avg', 'launch_angle', 'la_avg', 'la', 'avg_hit_angle']);
   const iXba = col(['xba', 'est_ba', 'estimated_ba', 'ba']);
   const iXwoba = col(['xwoba', 'est_woba', 'estimated_woba']);
   const iWhiff = col(['whiff_percent', 'whiff_pct', 'whiff']);
@@ -437,8 +437,11 @@ function mlbStatcastIngestUrlToTab_(url, label, role, ss, tabName, title, header
  * Fetch optional CSV URLs, write profile tabs, reload in-memory cache.
  * @returns {{ pitchers: number, batters: number, skipped: boolean }}
  */
-function mlbStatcastIngestProfilesBestEffort_() {
-  if (!pipelineLog_) {
+function mlbStatcastIngestProfilesBestEffort_(force) {
+  // The pipelineLog_ guard skips this during non-window executions so a
+  // stray call can't fire mid-edit. The one-time menu setup passes
+  // force=true to ingest on demand (menu runs have no pipelineLog_).
+  if (!force && !pipelineLog_) {
     return { pitchers: 0, batters: 0, skipped: true };
   }
   const cfg = getConfig() || {};

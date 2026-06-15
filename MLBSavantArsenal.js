@@ -152,8 +152,8 @@ function mlbApplySavantCsvSetup_() {
   const parts = [];
   try {
     if (typeof mlbStatcastIngestProfilesBestEffort_ === 'function') {
-      const s = mlbStatcastIngestProfilesBestEffort_();
-      parts.push('Statcast P=' + (s.pitchers || 0) + ' B=' + (s.batters || 0));
+      const s = mlbStatcastIngestProfilesBestEffort_(true); // force — menu run has no pipelineLog_
+      parts.push('Statcast P=' + (s.pitchers || 0) + ' B=' + (s.batters || 0) + (s.skipped ? ' (skipped)' : ''));
     }
   } catch (e) { parts.push('Statcast ERR ' + (e.message || e)); }
   try {
