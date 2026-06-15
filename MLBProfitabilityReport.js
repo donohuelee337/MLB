@@ -56,6 +56,11 @@ function mlbBuildProfitabilityReport_(ss) {
   const clvAgg = { n: 0, sum: 0, pos: 0 };
   const clvByMarket = {};
   const pnlBySlate = {};
+  // Post-fix view: rows carrying a model_version stamp are post-audit (the
+  // stamp landed in build 26). The pre-audit backlog has none and will
+  // forever drown the topline — this isolates "how is the CURRENT system
+  // doing" from the broken model's record.
+  const postFix = { n: 0, wins: 0, losses: 0, stake: 0, pnl: 0, clvN: 0, clvSum: 0 };
   let gradedN = 0;
   let wins = 0;
   let losses = 0;
@@ -113,9 +118,22 @@ function mlbBuildProfitabilityReport_(ss) {
     if (!byMarket[mk]) byMarket[mk] = segInit_();
     segAdd_(byMarket[mk], result, stake, pnl);
 
-    const mv = String(r.length > 38 && r[38] != null ? r[38] : '').trim() || '(unstamped)';
+    const mvRaw = String(r.length > 38 && r[38] != null ? r[38] : '').trim();
+    const mv = mvRaw || '(unstamped)';
     if (!byVersion[mv]) byVersion[mv] = segInit_();
     segAdd_(byVersion[mv], result, stake, pnl);
+
+    // Post-fix accumulator — stamped rows only.
+    if (mvRaw) {
+      postFix.n++;
+      if (result === 'WIN') postFix.wins++; else postFix.losses++;
+      if (!isNaN(stake) && stake > 0) {
+        postFix.stake += stake;
+        if (!isNaN(pnl)) postFix.pnl += pnl;
+      }
+      const clvPf = parseFloat(String(r[33]));
+      if (!isNaN(clvPf)) { postFix.clvN++; postFix.clvSum += clvPf; }
+    }
 
     const prob = parseFloat(String(r[9]));
     if (!isNaN(prob) && prob > 0 && prob < 1) {
@@ -260,6 +278,15 @@ function mlbBuildProfitabilityReport_(ss) {
     recommendations: recommendations,
     clv: clv,
     bankroll: bankroll,
+    postFix: {
+      n: postFix.n,
+      hitRate: (postFix.wins + postFix.losses) > 0 ? postFix.wins / (postFix.wins + postFix.losses) : null,
+      stake: Math.round(postFix.stake * 100) / 100,
+      pnl: Math.round(postFix.pnl * 100) / 100,
+      roiPct: postFix.stake > 0 ? Math.round((postFix.pnl / postFix.stake) * 10000) / 100 : null,
+      clvAvg: postFix.clvN > 0 ? Math.round((postFix.clvSum / postFix.clvN) * 100) / 100 : null,
+      clvN: postFix.clvN,
+    },
   };
 }
 
@@ -291,6 +318,22 @@ function mlbWriteProfitabilityReportTab_(ss, report) {
     ['— CLV (north star) —', ''],
     ['Avg CLV (pp)', clv.avgPp != null ? clv.avgPp : '(no captures yet)'],
     ['Beat-close %', clv.beatClosePct != null ? clv.beatClosePct + '%  (n=' + clv.n + ')' : ''],
+    ['— POST-FIX ONLY (model_version stamped — the current system) —', ''],
+    ['Stamped plays', (report.postFix && report.postFix.n) || 0],
+    [
+      'Post-fix ROI / hit',
+      report.postFix && report.postFix.n > 0
+        ? (report.postFix.roiPct != null ? report.postFix.roiPct + '%' : 'n/a') +
+          ' · ' + (report.postFix.hitRate != null ? Math.round(report.postFix.hitRate * 1000) / 10 + '%' : '') +
+          ' · P/L $' + report.postFix.pnl
+        : '(none yet — pre-audit backlog only; this fills as new slates grade)',
+    ],
+    [
+      'Post-fix CLV',
+      report.postFix && report.postFix.clvN > 0
+        ? report.postFix.clvAvg + 'pp (n=' + report.postFix.clvN + ')'
+        : '(no captures yet)',
+    ],
     ['— Bankroll —', ''],
     ['Start / Current', br.start != null ? '$' + br.start + ' → $' + br.current : ''],
     ['Peak', br.peak != null ? '$' + br.peak : ''],

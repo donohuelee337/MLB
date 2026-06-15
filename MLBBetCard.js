@@ -58,7 +58,10 @@ function mlbBetCardKGateProfile_(cfg) {
   const mode = String(cfg['K_BET_CARD_GATES'] != null ? cfg['K_BET_CARD_GATES'] : 'balanced')
     .trim()
     .toLowerCase();
-  if (mode === 'balanced') return { kOver: 0.58, kUnder: 0.68 };
+  // kOver floored at 0.60 (was 0.58): the graded log's 0.55-0.60 model%
+  // bucket is -23% ROI / 39% hit on 453 plays — the single worst seam in
+  // the data. The balanced profile must not dip a live K Over into it.
+  if (mode === 'balanced') return { kOver: 0.60, kUnder: 0.68 };
   if (mode === 'research') return { kOver: 0.55, kUnder: 0.62 };
   return null;
 }
