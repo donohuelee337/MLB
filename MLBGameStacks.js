@@ -186,6 +186,68 @@ function refreshMLBGameCards() {
   });
 
   mlbGameCardsRender_(ss, games, byGame, meta, timeIdx);
+  // Publish the structured snapshot for the shared web app (read-only friends).
+  try { mlbGameCardsPublishData_(ss); } catch (e) { Logger.log('publish: ' + (e.message || e)); }
+}
+
+// ============================================================
+// 🔗 Shared Web App — read-only friends open a URL, no sheet access.
+// doGet runs AS THE OWNER and serves a CACHED snapshot (refreshed each
+// pipeline run / menu refresh), so many friends loading it never re-fetch
+// BvP or burn statsapi/quota. Deploy: clasp deploy (manifest webapp =
+// executeAs owner, access anyone). Share ScriptApp.getService().getUrl().
+// ============================================================
+var MLB_GC_CACHE_KEY = 'GC_DATA_V1';
+var MLB_GC_SS_PROP = 'GC_SS_ID';
+var MLB_GC_DATA_TAB = '🎴_GC_Data';
+
+/** Build the structured data once and stash it (cache + durable cell). */
+function mlbGameCardsPublishData_(ss) {
+  ss = ss || SpreadsheetApp.getActiveSpreadsheet();
+  const data = mlbGameCardsData_(ss, getConfig());
+  const json = JSON.stringify(data);
+  try { PropertiesService.getScriptProperties().setProperty(MLB_GC_SS_PROP, ss.getId()); } catch (e) {}
+  // Durable store on a hidden helper tab (survives the 6h cache window).
+  let sh = ss.getSheetByName(MLB_GC_DATA_TAB);
+  if (!sh) { sh = ss.insertSheet(MLB_GC_DATA_TAB); try { sh.hideSheet(); } catch (e) {} }
+  sh.getRange(1, 1).setValue(json);
+  // Fast path: script cache (≤100KB), refreshed every window.
+  try { if (json.length < 100000) CacheService.getScriptCache().put(MLB_GC_CACHE_KEY, json, 21600); } catch (e) {}
+  return data.games ? data.games.length : 0;
+}
+
+/** Read the published snapshot JSON (cache → durable cell). '' if none. */
+function mlbGameCardsPublishedJson_() {
+  try { const c = CacheService.getScriptCache().get(MLB_GC_CACHE_KEY); if (c) return c; } catch (e) {}
+  try {
+    const id = PropertiesService.getScriptProperties().getProperty(MLB_GC_SS_PROP);
+    if (id) {
+      const sh = SpreadsheetApp.openById(id).getSheetByName(MLB_GC_DATA_TAB);
+      if (sh) { const v = String(sh.getRange(1, 1).getValue() || ''); if (v) return v; }
+    }
+  } catch (e) {}
+  return '';
+}
+
+/** Web app entry — serves the Game Cards UI from the published snapshot. */
+function doGet(e) {
+  const json = mlbGameCardsPublishedJson_() || '{"builtAt":"","games":[]}';
+  const t = HtmlService.createTemplateFromFile('GameCardsApp');
+  t.dataJson = json;
+  return t.evaluate()
+    .setTitle('MLB Game Cards')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+/** Menu: toast + log the shareable web-app URL (null until deployed). */
+function mlbShowGameCardsWebUrl_() {
+  let url = '';
+  try { url = ScriptApp.getService().getUrl() || ''; } catch (e) {}
+  const msg = url
+    ? 'Shareable Game Cards link (read-only, no sign-in):\n' + url
+    : 'Not deployed yet — Deploy ▸ New deployment ▸ Web app (or clasp deploy) first.';
+  Logger.log(msg);
+  try { SpreadsheetApp.getActiveSpreadsheet().toast(url || 'Web app not deployed yet', '🔗 Game Cards link', 15); } catch (e) {}
 }
 
 function mlbGameCardsRender_(ss, games, byGame, meta, timeIdx) {
