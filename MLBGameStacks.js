@@ -219,10 +219,9 @@ var MLB_GC_SS_PROP = 'GC_SS_ID';
 var MLB_GC_DATA_TAB = '🎴_GC_Data';
 
 /** Build the structured data once and stash it (cache + durable cell). */
-function mlbGameCardsPublishData_(ss) {
+/** Store an already-built snapshot JSON (cache + durable cell + ss id). */
+function mlbGameCardsStoreSnapshot_(json, ss) {
   ss = ss || SpreadsheetApp.getActiveSpreadsheet();
-  const data = mlbGameCardsData_(ss, getConfig());
-  const json = JSON.stringify(data);
   try { PropertiesService.getScriptProperties().setProperty(MLB_GC_SS_PROP, ss.getId()); } catch (e) {}
   // Durable store on a hidden helper tab (survives the 6h cache window).
   let sh = ss.getSheetByName(MLB_GC_DATA_TAB);
@@ -230,6 +229,12 @@ function mlbGameCardsPublishData_(ss) {
   sh.getRange(1, 1).setValue(json);
   // Fast path: script cache (≤100KB), refreshed every window.
   try { if (json.length < 100000) CacheService.getScriptCache().put(MLB_GC_CACHE_KEY, json, 21600); } catch (e) {}
+}
+
+function mlbGameCardsPublishData_(ss) {
+  ss = ss || SpreadsheetApp.getActiveSpreadsheet();
+  const data = mlbGameCardsData_(ss, getConfig());
+  mlbGameCardsStoreSnapshot_(JSON.stringify(data), ss);
   return data.games ? data.games.length : 0;
 }
 
@@ -559,8 +564,12 @@ function mlbGameCardsData_(ss, cfg) {
 function mlbOpenGameCardsApp_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const data = mlbGameCardsData_(ss, getConfig());
+  const json = JSON.stringify(data);
+  // Opening the dialog also publishes the shared snapshot, so the web link
+  // always reflects what the owner last looked at (no separate refresh needed).
+  try { mlbGameCardsStoreSnapshot_(json, ss); } catch (e) {}
   const t = HtmlService.createTemplateFromFile('GameCardsApp');
-  t.dataJson = JSON.stringify(data);
+  t.dataJson = json;
   const html = t.evaluate().setWidth(1040).setHeight(800);
   SpreadsheetApp.getUi().showModalDialog(html, '🎴 Game Cards');
 }
