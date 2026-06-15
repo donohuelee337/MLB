@@ -8,7 +8,7 @@
 const CONFIG_TAB_NAME = '⚙️ Config';
 
 /** Incremented by scripts/clasp-deploy.ps1 on each Apps Script push (visible on ⚙️ Config). */
-const MLB_APPS_SCRIPT_BUILD = 51;
+const MLB_APPS_SCRIPT_BUILD = 52;
 
 function mlbAppsScriptBuild_() {
   return typeof MLB_APPS_SCRIPT_BUILD !== 'undefined' ? MLB_APPS_SCRIPT_BUILD : '';
@@ -197,6 +197,9 @@ function buildConfigTab() {
   row_('GS_HR_ICON_TOP_N', '10', '🎴 Game Cards: 💣 icon shows when the batter is within the top-N of 📣 Batter_HR_Promo (by rank). Indicator on HIT rows, not its own section.');
   row_('GS_BVP_BLURB', 'Y', '🎴 Game Cards (web): fetch career batter-vs-pitcher line for the right-hand blurb. Y = per-hits-leg statsapi fetch on open (adds a few sec); N = season context only, faster.');
   row_('GS_BVP_MAX_FETCH', '40', '🎴 Game Cards (web): cap on BvP fetches per open so the dialog never hangs.');
+  row_('GS_K_AGREE_BAND', '0.5', '🎴 Game Cards: |proj_K − FD line| under this = model+book AGREE (🤝). Not an over/under edge — surfaces an alt X+ ladder instead.');
+  row_('GS_K_AGREE_MIN_PROJ', '4', '🎴 Game Cards: min proj_K for an agree 🤝 row (skip low-K starters where alt X+ is pointless).');
+  row_('GS_K_AGREE_ALT_MIN_P', '0.70', '🎴 Game Cards: highest alt X+ threshold whose P(X≥k) clears this = the "safe alt" shown on an agree row.');
   // --- K walk-forward engine (🗄️ Pitcher_K_Logs → segment registry) ---
   row_('K_SEGMENT_MODE', 'shadow', 'shadow = legacy gates on 🃏 + segment cols for audit; live = segment registry drives K picks; legacy = old gates only.');
   row_('K_SEGMENT_MAX_PLAYS', '5', 'Max K plays on 🃏 when K_SEGMENT_MODE=live.');

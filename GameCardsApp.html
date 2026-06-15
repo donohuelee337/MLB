@@ -81,7 +81,7 @@
       <span class="meta" id="meta"></span>
     </div>
   </div>
-  <div class="legend">★ = Hit Machine · 💣 = HR top-10 · wind <span style="color:#1a9850;font-weight:700">out</span>/<span style="color:#d7301f;font-weight:700">in</span>/<span style="color:#333">cross</span> · right column = BvP &amp; season context · for SGP building, not staking advice</div>
+  <div class="legend">★ = Hit Machine · 💣 = HR top-10 · 🤝 = model+book agree (alt X+ ladder at right) · wind arrow points way it blows (<span style="color:#1a9850;font-weight:700">out</span>/<span style="color:#d7301f;font-weight:700">in</span>) · for SGP building, not staking advice</div>
   <div id="app" class="wrap"></div>
   <div class="foot" id="foot"></div>
 
@@ -118,9 +118,13 @@
     if(!wx)return''; if(wx.dome)return'<span class="wx">Dome</span>';
     var b=[]; if(wx.tempF!=null)b.push('<span style="color:#333">'+wx.tempF+'&deg;</span>');
     if(wx.windMph!=null){
-      var wc = wx.dir==='out'?'#1a9850':wx.dir==='in'?'#d7301f':'#333';
-      var wl = wx.dir==='out'?'out':wx.dir==='in'?'in':compass(wx.windFromDeg);
-      b.push('<span style="color:'+wc+';font-weight:700">'+wx.windMph+' mph '+wl+'</span>');
+      var wc = wx.dir==='out'?'#1a9850':wx.dir==='in'?'#d7301f':'#555';
+      var wl = wx.dir==='out'?'out':wx.dir==='in'?'in':'cross';
+      // Arrow points the way the wind blows on a CF-up field (covers-style).
+      var arrow = wx.arrowDeg!=null
+        ? '<span style="display:inline-block;transform:rotate('+wx.arrowDeg+'deg);color:'+wc+';font-weight:700">&#8593;</span> '
+        : '';
+      b.push('<span style="color:'+wc+';font-weight:700">'+arrow+wx.windMph+' '+wl+'</span>');
     }
     return '<span class="wx">'+b.join(' &middot; ')+'</span>';
   }
@@ -130,13 +134,14 @@
     var w=leg.p==null?0:Math.max(4,Math.min(100,leg.p));
     var star=leg.hm?'<span class="star">★</span>':'';
     var hric=leg.hr?'<span class="hric" title="HR signal">💣</span>':'';
+    var agr=leg.agree?'<span class="hric" title="model + book agree on K level — alt X+ play, not over/under">🤝</span>':'';
     var tm=leg.team?'<span class="tm" style="color:'+tcol(leg.team)+'">'+esc(leg.team)+'</span>':'';
     var lead=showTeamLogo?teamImg(leg.team,'tlogo'):'<span class="tdot"></span>';
     var blurb=leg.blurb?'<span class="blurb">'+esc(leg.blurb)+'</span>':'<span class="blurb"></span>';
     return '<div class="leg'+(leg.hm?' hm':'')+'">'+lead+
       '<span class="chip '+leg.kind+'">'+esc(leg.kind==='HIT'?'HIT':leg.kind)+'</span>'+
       '<span class="who"><span class="name">'+esc(leg.who)+'</span>'+tm+
-      ' <span class="sub">'+esc(leg.pick)+'</span>'+star+hric+'</span>'+
+      ' <span class="sub">'+esc(leg.pick)+'</span>'+star+hric+agr+'</span>'+
       '<span class="conf"><span class="bar"><span style="width:'+w+'%;background:'+col+'"></span></span>'+
       '<span class="pct" style="color:'+col+'">'+pct+'</span></span>'+
       '<span class="odds">'+esc(leg.odds)+'</span>'+blurb+'</div>';

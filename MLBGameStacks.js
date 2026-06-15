@@ -86,13 +86,29 @@ function mlbGameCardsCollect_(ss, cfg) {
       const pU = mlbGameCardsNum_(r[12]);
       const overBest = !(pU > pO);
       const p = overBest ? pO : pU;
-      if (!(p >= minK)) return;
       const line = r[5];
-      bucket(r[0]).push({
-        chip: '⚾ K', who: pitcher, pick: (overBest ? 'Over ' : 'Under ') + line + ' K',
-        p: p, odds: overBest ? r[6] : r[7], note: 'unanchored', hm: false,
-        team: String(r[4] || '').trim(), kproj: mlbGameCardsNum_(r[9]), // pitch_team, proj_K
-      });
+      const projK = mlbGameCardsNum_(r[9]);
+      const team = String(r[4] || '').trim();
+      if (p >= minK) {
+        // Edge: we disagree with the book enough to pick a side.
+        bucket(r[0]).push({
+          chip: '⚾ K', who: pitcher, pick: (overBest ? 'Over ' : 'Under ') + line + ' K',
+          p: p, odds: overBest ? r[6] : r[7], note: 'unanchored', hm: false,
+          team: team, kproj: projK,
+        });
+        return;
+      }
+      // Agreement: model ≈ book on the K level → no main-line edge, but a
+      // high-confidence LEVEL → flag for an alt X+ play (not an over/under).
+      const lineN = mlbGameCardsNum_(line);
+      const agreeBand = mlbGameCardsNum_(cfg['GS_K_AGREE_BAND']) || 0.5;
+      const agreeMinProj = mlbGameCardsNum_(cfg['GS_K_AGREE_MIN_PROJ']) || 4;
+      if (isFinite(projK) && isFinite(lineN) && Math.abs(projK - lineN) < agreeBand && projK >= agreeMinProj) {
+        bucket(r[0]).push({
+          chip: '⚾ K', who: pitcher, pick: '', p: null, odds: '', note: '', hm: false,
+          team: team, kproj: projK, agree: true, kline: lineN,
+        });
+      }
     });
   }
 
@@ -413,20 +429,47 @@ function mlbGameCardsData_(ss, cfg) {
             } catch (e) {}
           }
         }
+      } else if (kind === 'K' && leg.agree) {
+        // Agreement → alt X+ ladder from the unanchored λ (proj_K). Highest
+        // threshold still ≥ GS_K_AGREE_ALT_MIN_P is the "safe alt".
+        const lam = mlbGameCardsNum_(leg.kproj);
+        const altMinP = mlbGameCardsNum_(cfg['GS_K_AGREE_ALT_MIN_P']) || 0.70;
+        const pAtLeast = function (k) {
+          if (typeof mlbProbOverUnderK_ !== 'function') return NaN;
+          const r2 = mlbProbOverUnderK_(k - 0.5, lam);
+          return r2 && r2.pOver !== '' ? r2.pOver : NaN;
+        };
+        let safeAlt = null, safeP = null;
+        for (let k = 1; k <= 12; k++) {
+          const pk = pAtLeast(k);
+          if (isFinite(pk) && pk >= altMinP) { safeAlt = k; safeP = pk; }
+        }
+        const lo = Math.max(1, Math.floor(lam) - 1);
+        const ladder = [];
+        for (let k = lo; k <= lo + 3; k++) {
+          const pk = pAtLeast(k);
+          if (isFinite(pk)) ladder.push(k + '+ ' + Math.round(pk * 100) + '%');
+        }
+        leg._agreeP = safeP != null ? Math.round(safeP * 1000) / 10 : null;
+        leg._agreePick = '≈' + (Math.round(lam * 10) / 10) + ' K (agree)' +
+          (safeAlt ? ' → ' + safeAlt + '+ alt' : '');
+        blurbParts.push(ladder.join(' · '));
       } else if (kind === 'K' && isFinite(mlbGameCardsNum_(leg.kproj))) {
         blurbParts.push('proj ' + (Math.round(mlbGameCardsNum_(leg.kproj) * 10) / 10) + ' K');
       } else if (kind === 'NRFI' && isFinite(mlbGameCardsNum_(leg.ltot))) {
         blurbParts.push('λ ' + (Math.round(mlbGameCardsNum_(leg.ltot) * 100) / 100) + ' runs (1st)');
       }
+      const isAgree = !!(kind === 'K' && leg.agree);
       return {
         kind: kind,
         who: String(leg.who || ''),
-        pick: String(leg.pick || ''),
-        p: isFinite(p) ? Math.round(p * 1000) / 10 : null,
+        pick: isAgree ? String(leg._agreePick || '') : String(leg.pick || ''),
+        p: isAgree ? (leg._agreeP != null ? leg._agreeP : null) : (isFinite(p) ? Math.round(p * 1000) / 10 : null),
         odds: leg.odds != null && leg.odds !== '' ? String(leg.odds) : '',
         note: String(leg.note || ''),
         hm: !!leg.hm,
         hr: hrFlag,
+        agree: isAgree,
         blurb: blurbParts.join(' · '),
         team: teamAb,
         side: teamAb && teamAb === awayC ? 0 : teamAb && teamAb === homeC ? 1 : 9,
@@ -453,12 +496,16 @@ function mlbGameCardsData_(ss, cfg) {
           // (green, helps offense), ≤−2 = in (red, suppresses), else cross.
           let dir = 'cross';
           let outMph = null;
+          let arrowDeg = null;
           if (isFinite(w.windFromDeg) && isFinite(w.windMph) && park && park.cf != null) {
             const toward = (w.windFromDeg + 180) % 360;
             const diff = (((toward - park.cf) % 360) + 360) % 360;
             const align = Math.cos((diff * Math.PI) / 180);
             outMph = Math.round(w.windMph * align);
             dir = outMph >= 2 ? 'out' : outMph <= -2 ? 'in' : 'cross';
+            // Arrow rotation on a field drawn CF-up: 0° = straight out to CF
+            // (up), 180° = straight in to the plate (down), 90/270 = cross.
+            arrowDeg = Math.round(diff);
           }
           wx = {
             tempF: isFinite(w.tempF) ? Math.round(w.tempF) : null,
@@ -466,6 +513,7 @@ function mlbGameCardsData_(ss, cfg) {
             windFromDeg: isFinite(w.windFromDeg) ? Math.round(w.windFromDeg) : null,
             dir: dir,
             outMph: outMph,
+            arrowDeg: arrowDeg,
             dome: !!(park && (park.dome || park.roof === 'dome')),
           };
         }
