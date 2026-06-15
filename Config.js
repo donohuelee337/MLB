@@ -8,7 +8,7 @@
 const CONFIG_TAB_NAME = '⚙️ Config';
 
 /** Incremented by scripts/clasp-deploy.ps1 on each Apps Script push (visible on ⚙️ Config). */
-const MLB_APPS_SCRIPT_BUILD = 41;
+const MLB_APPS_SCRIPT_BUILD = 42;
 
 function mlbAppsScriptBuild_() {
   return typeof MLB_APPS_SCRIPT_BUILD !== 'undefined' ? MLB_APPS_SCRIPT_BUILD : '';
@@ -188,6 +188,7 @@ function buildConfigTab() {
   // --- Sim anchor weights (⚡ tabs → 🃏) — tune via 🔬 Sim_Gate_Backtest ---
   row_('ANCHOR_WEIGHT_K', '0.35', '0..1 weight on model λ vs FD K line in ⚡ Sim_Pitcher_K (anchored Poisson). 0.35 = 65% line / 35% model. Tune with 🔬 Sim_Gate_Backtest on graded 📋 MLB_Results_Log.');
   row_('ANCHOR_WEIGHT_BATTER_HITS', '0.35', '0..1 weight on model λ vs FD H line in ⚡ Sim_Batter_Hits. Tune with 🔬 Sim_Gate_Backtest.');
+  row_('HITS_V4_SHADOW_ENABLED', 'Y', '🧪 Y/N — log h.v4-unanchored shadow (P from unanchored model λ, no 0.5-line anchor) to 🧪 MLB_Results_Log_Hits_v4 for grading vs live v2-full. Shadow only; never bet.');
   // --- K walk-forward engine (🗄️ Pitcher_K_Logs → segment registry) ---
   row_('K_SEGMENT_MODE', 'shadow', 'shadow = legacy gates on 🃏 + segment cols for audit; live = segment registry drives K picks; legacy = old gates only.');
   row_('K_SEGMENT_MAX_PLAYS', '5', 'Max K plays on 🃏 when K_SEGMENT_MODE=live.');

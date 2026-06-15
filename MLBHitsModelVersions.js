@@ -21,7 +21,11 @@
 //     documented overconfident side), Under = exact complement on half lines.
 const MLB_HITS_MODEL_VERSIONS = {
   active: 'h.v2-full-sim-os',
-  shadow: ['h.v1', 'h.v3-contact', 'h.v2-full-sym'],
+  // h.v4-unanchored (build 42): same projection, P from the UNANCHORED model
+  // λ instead of the line-anchored λ — tests whether dropping the 0.5-line
+  // anchor (degenerate for hits) beats live v2-full. Logged to
+  // 🧪 MLB_Results_Log_Hits_v4. Promote only on holdout-validated graded ROI.
+  shadow: ['h.v1', 'h.v3-contact', 'h.v2-full-sym', 'h.v4-unanchored'],
 };
 
 function mlbHitsActiveModelVersion_() {

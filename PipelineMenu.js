@@ -18,6 +18,7 @@ function onOpen() {
     .addItem('🔒 Run Final  (full refresh + snapshot)', 'runFinalWindowMLB')
     .addItem('🚑 Re-check health signals (card players)', 'mlbFlagBetCardHealthSignals_')
     .addItem('🎯 Refresh Hit Machine (shadow parlay)', 'refreshHitMachine_')
+    .addItem('🧪 Open Hits v4 shadow log', 'mlbActivateHitsV4LogTab_')
     .addItem('🌙 Night Audit (grade + close-out — no rebuilds)', 'runNightAuditMLB')
     .addSeparator();
 
@@ -371,6 +372,7 @@ function runNightAuditMLB() {
   timedNight('K (live)',       typeof gradeMLBPendingResults_       === 'function' ? gradeMLBPendingResults_       : null);
   timedNight('H v2 (shadow)',  typeof gradeMLBHitsV2PendingResults_ === 'function' ? gradeMLBHitsV2PendingResults_ : null);
   timedNight('H v3 (shadow)',  typeof gradeMLBHitsV3PendingResults_ === 'function' ? gradeMLBHitsV3PendingResults_ : null);
+  timedNight('H v4 (shadow)',  typeof gradeMLBHitsV4PendingResults_ === 'function' ? gradeMLBHitsV4PendingResults_ : null);
   timedNight('TB v2 (shadow)', typeof gradeMLBTBV2PendingResults_   === 'function' ? gradeMLBTBV2PendingResults_   : null);
   timedNight('TB v3 (shadow)', typeof gradeMLBTBV3PendingResults_   === 'function' ? gradeMLBTBV3PendingResults_   : null);
   timedNight('HR promo',       typeof gradeHrPromoPendingResults_   === 'function' ? gradeHrPromoPendingResults_   : null);
@@ -487,6 +489,7 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
   timedGrader('K (live)',       typeof gradeMLBPendingResults_       === 'function' ? gradeMLBPendingResults_       : null);
   timedGrader('H v2 (shadow)',  typeof gradeMLBHitsV2PendingResults_ === 'function' ? gradeMLBHitsV2PendingResults_ : null);
   timedGrader('H v3 (shadow)',  typeof gradeMLBHitsV3PendingResults_ === 'function' ? gradeMLBHitsV3PendingResults_ : null);
+  timedGrader('H v4 (shadow)',  typeof gradeMLBHitsV4PendingResults_ === 'function' ? gradeMLBHitsV4PendingResults_ : null);
   // TB graders were never wired in — the TB shadow logs sat PENDING forever,
   // so the "promote shadow after 100+ graded" bar could never be met. Cheap
   // once backlog clears: graders skip rows that already hold a final result.
@@ -814,6 +817,17 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
       snapshotMLBHitsV3BetCardToLog(windowTag);
     } catch (e) {
       addPipelineWarning_('Hits v3 shadow snapshot: ' + (e.message || e));
+    }
+  }
+
+  // Hits v4 UNANCHORED shadow — recomputes P from the sim's unanchored λ
+  // (gated on the Hits SIM, which oHSim tracks) and writes 🧪 …_Hits_v4.
+  const oHSimV4 = outcomes.filter(function (o) { return o.name.indexOf('Sim Engine (Batter Hits)') !== -1; })[0] || { ok: false };
+  if (oHSimV4.ok && typeof snapshotMLBHitsV4ToLog === 'function') {
+    try {
+      snapshotMLBHitsV4ToLog(windowTag);
+    } catch (e) {
+      addPipelineWarning_('Hits v4 shadow snapshot: ' + (e.message || e));
     }
   }
 
