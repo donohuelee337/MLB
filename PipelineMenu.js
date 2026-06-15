@@ -19,7 +19,8 @@ function onOpen() {
     .addItem('🚑 Re-check health signals (card players)', 'mlbFlagBetCardHealthSignals_')
     .addItem('🎯 Refresh Hit Machine (shadow parlay)', 'refreshHitMachine_')
     .addItem('🎴 Refresh Game Cards', 'refreshMLBGameCards')
-    .addItem('🎴 Open Game Cards', 'mlbActivateGameCardsTab_')
+    .addItem('🎴 Open Game Cards (web)', 'mlbOpenGameCardsApp_')
+    .addItem('🎴 Open Game Cards (tab)', 'mlbActivateGameCardsTab_')
     .addItem('🧪 Open Hits v4 shadow log', 'mlbActivateHitsV4LogTab_')
     .addItem('🌙 Night Audit (grade + close-out — no rebuilds)', 'runNightAuditMLB')
     .addSeparator();

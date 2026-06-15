@@ -242,6 +242,74 @@ function mlbGameCardsRender_(ss, games, byGame, meta, timeIdx) {
   } catch (e) {}
 }
 
+/**
+ * Structured per-game data for the HTML web app (and reusable elsewhere).
+ * Shares the same gates/collection as the sheet renderer (mlbGameCardsCollect_).
+ * Returns { builtAt, games: [{ pk, teams, matchup, when, iso, legs: [...] }] }.
+ */
+function mlbGameCardsData_(ss, cfg) {
+  const byGame = mlbGameCardsCollect_(ss, cfg);
+  const timeIdx = typeof mlbScheduleGameTimeIndex_ === 'function' ? mlbScheduleGameTimeIndex_(ss) : {};
+  const block = typeof mlbGetScheduleBlock_ === 'function' ? mlbGetScheduleBlock_(ss) : [];
+  const meta = {};
+  block.forEach(function (r) {
+    const pk = String(parseInt(r[0], 10) || 0);
+    meta[pk] = { matchup: String(r[5] || '').trim(), away: String(r[3] || '').trim(), home: String(r[4] || '').trim() };
+  });
+  const kindFromChip = function (chip) {
+    if (chip.indexOf('NRFI') !== -1) return 'NRFI';
+    if (chip.indexOf('K') !== -1) return 'K';
+    return 'HIT';
+  };
+  const games = Object.keys(byGame).filter(function (pk) { return byGame[pk].length > 0; });
+  games.sort(function (a, b) {
+    const ia = (timeIdx[a] && timeIdx[a].iso) || '';
+    const ib = (timeIdx[b] && timeIdx[b].iso) || '';
+    if (ia && ib && ia !== ib) return ia < ib ? -1 : 1;
+    if (ia && !ib) return -1;
+    if (!ia && ib) return 1;
+    return 0;
+  });
+  const out = games.map(function (pk) {
+    const m = meta[pk] || {};
+    const t = timeIdx[pk] || {};
+    const legs = byGame[pk].slice().sort(function (x, y) {
+      return (mlbGameCardsNum_(y.p) || 0) - (mlbGameCardsNum_(x.p) || 0);
+    }).map(function (leg) {
+      const p = mlbGameCardsNum_(leg.p);
+      return {
+        kind: kindFromChip(leg.chip),
+        who: String(leg.who || ''),
+        pick: String(leg.pick || ''),
+        p: isFinite(p) ? Math.round(p * 1000) / 10 : null,
+        odds: leg.odds != null && leg.odds !== '' ? String(leg.odds) : '',
+        note: String(leg.note || ''),
+        hm: !!leg.hm,
+      };
+    });
+    return {
+      pk: pk,
+      teams: m.away && m.home ? m.away + ' @ ' + m.home : (m.matchup || 'Game ' + pk),
+      matchup: m.matchup || '',
+      when: t.hhmm ? t.hhmm + ' ET' : 'TBD',
+      iso: t.iso || '',
+      legs: legs,
+    };
+  });
+  const builtAt = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'EEE M/d · h:mm a');
+  return { builtAt: builtAt, games: out };
+}
+
+/** Open the dark "sportsbook" Game Cards web app in a modal dialog. */
+function mlbOpenGameCardsApp_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const data = mlbGameCardsData_(ss, getConfig());
+  const t = HtmlService.createTemplateFromFile('GameCardsApp');
+  t.dataJson = JSON.stringify(data);
+  const html = t.evaluate().setWidth(940).setHeight(780);
+  SpreadsheetApp.getUi().showModalDialog(html, '🎴 Game Cards');
+}
+
 function mlbActivateGameCardsTab_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const sh = ss.getSheetByName(MLB_GAME_CARDS_TAB);

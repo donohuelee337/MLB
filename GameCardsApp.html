@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<style>
+  :root {
+    --bg: #0c1016; --surface: #161d28; --surface2: #1e2735; --line: #2a3445;
+    --txt: #e8edf4; --muted: #8a97a8; --dim: #5d6b7e;
+    --green: #2fbf71; --lime: #8bd450; --amber: #f2b53b; --red: #e2574c;
+    --gold: #f2b53b; --blue: #4a9be8; --pink: #e86fa0;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg); color: var(--txt);
+    font-family: 'Inter','Segoe UI',system-ui,sans-serif; -webkit-font-smoothing: antialiased; }
+  body { padding: 0 0 28px; }
+  .top { position: sticky; top: 0; z-index: 5; background: rgba(12,16,22,0.96);
+    border-bottom: 1px solid var(--line); padding: 14px 20px; display: flex;
+    align-items: baseline; justify-content: space-between; }
+  .top h1 { font-size: 17px; font-weight: 700; letter-spacing: .3px; }
+  .top .meta { font-size: 12px; color: var(--muted); }
+  .legend { padding: 8px 20px 0; font-size: 11px; color: var(--dim); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(395px, 1fr));
+    gap: 14px; padding: 14px 20px; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+    overflow: hidden; }
+  .card-hd { display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 16px; background: var(--surface2); border-bottom: 1px solid var(--line); }
+  .card-hd .teams { font-size: 15px; font-weight: 700; }
+  .card-hd .when { font-size: 12px; color: var(--amber); font-weight: 600; }
+  .leg { display: flex; align-items: center; gap: 10px; padding: 10px 16px;
+    border-bottom: 1px solid rgba(42,52,69,0.5); }
+  .leg:last-child { border-bottom: none; }
+  .leg.hm { background: rgba(242,181,59,0.07); box-shadow: inset 3px 0 0 var(--gold); }
+  .chip { flex: 0 0 60px; text-align: center; font-size: 10px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .4px; padding: 4px 0; border-radius: 6px; }
+  .chip.NRFI { background: rgba(242,181,59,0.16); color: var(--amber); }
+  .chip.K { background: rgba(74,155,232,0.16); color: var(--blue); }
+  .chip.HIT { background: rgba(232,111,160,0.16); color: var(--pink); }
+  .who { flex: 1; min-width: 0; }
+  .who .name { font-size: 14px; font-weight: 600; }
+  .who .sub { font-size: 12px; color: var(--muted); }
+  .who .star { color: var(--gold); font-size: 12px; margin-left: 4px; }
+  .conf { flex: 0 0 96px; display: flex; align-items: center; gap: 7px; }
+  .bar { flex: 1; height: 6px; background: var(--surface2); border-radius: 3px; overflow: hidden; }
+  .bar span { display: block; height: 100%; border-radius: 3px; }
+  .pct { font-size: 12px; font-weight: 700; min-width: 34px; text-align: right; }
+  .odds { flex: 0 0 46px; text-align: right; font-size: 13px; color: var(--muted);
+    font-variant-numeric: tabular-nums; }
+  .empty { padding: 60px 20px; text-align: center; color: var(--muted); }
+  .foot { padding: 4px 20px; font-size: 11px; color: var(--dim); }
+</style>
+</head>
+<body>
+  <div class="top">
+    <h1>🎴 Game Cards</h1>
+    <span class="meta" id="meta"></span>
+  </div>
+  <div class="legend">Sorted by conviction · ⭐ gold rail = also on Hit Machine · for SGP building, not staking advice</div>
+  <div id="app" class="grid"></div>
+  <div class="foot" id="foot"></div>
+
+<script>
+  var DATA = <?!= dataJson ?>;
+
+  function confColor(p) {
+    if (p == null) return 'var(--dim)';
+    if (p >= 75) return 'var(--green)';
+    if (p >= 70) return 'var(--green)';
+    if (p >= 65) return 'var(--lime)';
+    if (p >= 60) return 'var(--amber)';
+    return 'var(--red)';
+  }
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+    });
+  }
+  function legHtml(leg) {
+    var col = confColor(leg.p);
+    var pct = leg.p == null ? '' : leg.p + '%';
+    var w = leg.p == null ? 0 : Math.max(4, Math.min(100, leg.p));
+    var star = leg.hm ? '<span class="star">★</span>' : '';
+    return '<div class="leg' + (leg.hm ? ' hm' : '') + '">' +
+      '<span class="chip ' + leg.kind + '">' + esc(leg.kind === 'NRFI' ? '1st inn' : leg.kind) + '</span>' +
+      '<span class="who"><span class="name">' + esc(leg.who) + '</span> ' +
+      '<span class="sub">' + esc(leg.pick) + '</span>' + star + '</span>' +
+      '<span class="conf"><span class="bar"><span style="width:' + w + '%;background:' + col + '"></span></span>' +
+      '<span class="pct" style="color:' + col + '">' + pct + '</span></span>' +
+      '<span class="odds">' + esc(leg.odds) + '</span>' +
+      '</div>';
+  }
+  function cardHtml(g) {
+    var legs = g.legs.map(legHtml).join('');
+    return '<div class="card"><div class="card-hd">' +
+      '<span class="teams">' + esc(g.teams) + '</span>' +
+      '<span class="when">' + esc(g.when) + '</span></div>' + legs + '</div>';
+  }
+  function render() {
+    var app = document.getElementById('app');
+    var games = (DATA && DATA.games) || [];
+    var legCount = games.reduce(function (s, g) { return s + g.legs.length; }, 0);
+    document.getElementById('meta').textContent = games.length + ' games · ' + legCount + ' legs · built ' + (DATA.builtAt || '');
+    if (!games.length) {
+      app.className = '';
+      app.innerHTML = '<div class="empty">No qualifying legs yet.<br>Run a pipeline window (NRFI / K card / Hits v3 feed this board), then reopen.</div>';
+      return;
+    }
+    app.innerHTML = games.map(cardHtml).join('');
+    document.getElementById('foot').textContent =
+      'Thresholds: NRFI p≥.60 · K p≥.60 (unanchored card) · HIT proj≥1.00. Confidence shaded red→amber→green.';
+  }
+  render();
+</script>
+</body>
+</html>
