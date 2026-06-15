@@ -9,13 +9,17 @@
     font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
     -webkit-font-smoothing: antialiased; font-size: 13px; }
   .appbar { position: sticky; top: 0; z-index: 5; background: #d22d49; color: #fff;
-    padding: 11px 18px; display: flex; align-items: baseline; justify-content: space-between; }
+    padding: 10px 18px; display: flex; align-items: center; justify-content: space-between; }
   .appbar h1 { font-size: 16px; font-weight: 700; letter-spacing: .2px; }
+  .appbar .right { display: flex; align-items: center; gap: 12px; }
   .appbar .meta { font-size: 11px; opacity: .9; }
-  .legend { padding: 7px 18px; font-size: 11px; color: #666; background: #fff;
-    border-bottom: 1px solid #e3e3e3; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(410px, 1fr));
-    gap: 12px; padding: 14px 18px; }
+  .toggle { display: inline-flex; border: 1px solid rgba(255,255,255,.6); border-radius: 4px; overflow: hidden; }
+  .toggle button { background: transparent; color: #fff; border: none; padding: 5px 11px;
+    font-size: 12px; font-weight: 700; cursor: pointer; font-family: inherit; }
+  .toggle button.on { background: #fff; color: #d22d49; }
+  .legend { padding: 7px 18px; font-size: 11px; color: #666; background: #fff; border-bottom: 1px solid #e3e3e3; }
+  .wrap { padding: 14px 18px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(410px, 1fr)); gap: 12px; }
   .card { background: #fff; border: 1px solid #d8d8d8; border-radius: 4px; overflow: hidden; }
   .card-hd { display: flex; align-items: center; justify-content: space-between;
     padding: 9px 12px; background: #f7f7f7; border-bottom: 2px solid #d22d49; }
@@ -26,18 +30,25 @@
   .gmeta { text-align: right; line-height: 1.35; }
   .gmeta .when { font-size: 13px; font-weight: 700; color: #333; }
   .gmeta .wx { font-size: 11px; color: #777; }
-  .leg { display: flex; align-items: center; gap: 9px; padding: 8px 12px;
-    border-bottom: 1px solid #eee; }
+  .section { background: #fff; border: 1px solid #d8d8d8; border-radius: 4px; overflow: hidden; margin-bottom: 12px; }
+  .sec-hd { padding: 8px 13px; font-size: 14px; font-weight: 700; color: #fff; letter-spacing: .4px; }
+  .sec-hd .ct { float: right; font-weight: 400; font-size: 12px; opacity: .85; }
+  .sec-hd.NRFI { background: #b26a00; } .sec-hd.K { background: #1763a6; }
+  .sec-hd.H { background: #b1224b; } .sec-hd.HR { background: #5b3a8a; }
+  .teamsub { display: flex; align-items: center; gap: 6px; padding: 5px 13px; background: #f3f3f3;
+    border-top: 1px solid #eee; border-bottom: 1px solid #eee; font-size: 11px; font-weight: 700; color: #555; }
+  .teamsub img { width: 18px; height: 18px; object-fit: contain; }
+  .leg { display: flex; align-items: center; gap: 9px; padding: 8px 13px; border-bottom: 1px solid #eee; }
   .leg:last-child { border-bottom: none; }
   .leg.hm { background: #fff8e1; }
   .leg .tlogo { flex: 0 0 22px; width: 22px; height: 22px; object-fit: contain; }
   .leg .tdot { flex: 0 0 22px; text-align: center; color: #bbb; }
-  .chip { flex: 0 0 46px; text-align: center; font-size: 10px; font-weight: 700;
-    text-transform: uppercase; letter-spacing: .3px; padding: 3px 0; border-radius: 3px;
-    border: 1px solid; }
+  .chip { flex: 0 0 44px; text-align: center; font-size: 10px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .3px; padding: 3px 0; border-radius: 3px; border: 1px solid; }
   .chip.NRFI { color: #b26a00; border-color: #e8b563; background: #fdf3e0; }
   .chip.K { color: #1763a6; border-color: #8fbfe8; background: #eaf3fb; }
   .chip.HIT { color: #b1224b; border-color: #e79bb3; background: #fbeaf0; }
+  .chip.HR { color: #5b3a8a; border-color: #b39ddb; background: #efe9f6; }
   .who { flex: 1; min-width: 0; line-height: 1.3; }
   .who .name { font-size: 13px; font-weight: 700; }
   .who .tm { font-size: 10px; font-weight: 700; margin-left: 4px; }
@@ -46,22 +57,27 @@
   .conf { flex: 0 0 92px; display: flex; align-items: center; gap: 6px; }
   .bar { flex: 1; height: 7px; background: #ececec; border-radius: 4px; overflow: hidden; }
   .bar span { display: block; height: 100%; }
-  .pct { font-size: 12px; font-weight: 700; min-width: 32px; text-align: right;
-    font-variant-numeric: tabular-nums; }
-  .odds { flex: 0 0 44px; text-align: right; font-size: 12px; color: #555;
-    font-variant-numeric: tabular-nums; }
+  .pct { font-size: 12px; font-weight: 700; min-width: 32px; text-align: right; font-variant-numeric: tabular-nums; }
+  .odds { flex: 0 0 44px; text-align: right; font-size: 12px; color: #555; font-variant-numeric: tabular-nums; }
   .empty { padding: 56px 20px; text-align: center; color: #888; line-height: 1.6; }
   .foot { padding: 6px 18px 16px; font-size: 11px; color: #999; }
 </style>
 </head>
 <body>
-  <div class="appbar"><h1>Game Cards</h1><span class="meta" id="meta"></span></div>
-  <div class="legend">Sorted by conviction &nbsp;·&nbsp; <span style="color:#e8a000;font-weight:700;">★</span> = also on Hit Machine &nbsp;·&nbsp; team logo marks each player's club &nbsp;·&nbsp; for SGP building, not staking advice</div>
-  <div id="app" class="grid"></div>
+  <div class="appbar">
+    <h1>Game Cards</h1>
+    <div class="right">
+      <span class="toggle"><button id="bMarket" class="on" onclick="setView('market')">By market</button><button id="bGame" onclick="setView('game')">By game</button></span>
+      <span class="meta" id="meta"></span>
+    </div>
+  </div>
+  <div class="legend">★ = also on Hit Machine · team logo marks each player's club · HR uses its own (lower) scale · for SGP building, not staking advice</div>
+  <div id="app" class="wrap"></div>
   <div class="foot" id="foot"></div>
 
 <script>
   var DATA = <?!= dataJson ?>;
+  var VIEW = 'market';
   var TEAM = {
     LAA:{id:108,c:'#BA0021'}, ARI:{id:109,c:'#A71930'}, AZ:{id:109,c:'#A71930'},
     BAL:{id:110,c:'#DF4601'}, BOS:{id:111,c:'#BD3039'}, CHC:{id:112,c:'#0E3386'},
@@ -76,73 +92,97 @@
     CHW:{id:145,c:'#111111'}, MIA:{id:146,c:'#00A3E0'}, NYY:{id:147,c:'#0C2340'},
     MIL:{id:158,c:'#12284B'}
   };
-  function logo(ab) { var t = TEAM[ab]; return t ? 'https://www.mlbstatic.com/team-logos/' + t.id + '.svg' : ''; }
-  function tcol(ab) { var t = TEAM[ab]; return t ? t.c : '#333'; }
-  function compass(deg) {
-    if (deg == null) return '';
-    var dirs = ['N','NE','E','SE','S','SW','W','NW'];
-    return dirs[Math.round(deg / 45) % 8];
+  var SEGS = [['NRFI','NRFI'],['K','Strikeouts'],['HIT','Hits'],['HR','Home runs']];
+  function logo(ab){ var t=TEAM[ab]; return t?'https://www.mlbstatic.com/team-logos/'+t.id+'.svg':''; }
+  function tcol(ab){ var t=TEAM[ab]; return t?t.c:'#333'; }
+  function compass(d){ if(d==null)return''; return ['N','NE','E','SE','S','SW','W','NW'][Math.round(d/45)%8]; }
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+  function confColor(p,kind){
+    if(p==null)return'#bbb';
+    if(kind==='HR'){ if(p>=20)return'#1a9850'; if(p>=16)return'#66bd63'; if(p>=12)return'#e8a000'; return'#d7301f'; }
+    if(p>=70)return'#1a9850'; if(p>=65)return'#66bd63'; if(p>=60)return'#e8a000'; return'#d7301f';
   }
-  function confColor(p) {
-    if (p == null) return '#bbb';
-    if (p >= 70) return '#1a9850';
-    if (p >= 65) return '#66bd63';
-    if (p >= 60) return '#e8a000';
-    return '#d7301f';
+  function teamImg(ab,cls){ var u=logo(ab); if(!u)return'<span class="tdot">•</span>';
+    return '<img class="'+cls+'" src="'+u+'" alt="'+esc(ab)+'" onerror="this.style.display=\'none\'">'; }
+  function wxHtml(wx){ if(!wx)return''; if(wx.dome)return'<span class="wx">Dome</span>';
+    var b=[]; if(wx.tempF!=null)b.push(wx.tempF+'&deg;'); if(wx.windMph!=null)b.push(compass(wx.windFromDeg)+' '+wx.windMph+' mph');
+    return '<span class="wx">'+b.join(' &middot; ')+'</span>'; }
+
+  function legRow(leg, showTeamLogo){
+    var col=confColor(leg.p,leg.kind), pct=leg.p==null?'':Math.round(leg.p)+'%';
+    var w=leg.p==null?0:(leg.kind==='HR'?Math.max(4,Math.min(100,leg.p/30*100)):Math.max(4,Math.min(100,leg.p)));
+    var star=leg.hm?'<span class="star">★</span>':'';
+    var tm=leg.team?'<span class="tm" style="color:'+tcol(leg.team)+'">'+esc(leg.team)+'</span>':'';
+    var lead=showTeamLogo?teamImg(leg.team,'tlogo'):'<span class="tdot"></span>';
+    return '<div class="leg'+(leg.hm?' hm':'')+'">'+lead+
+      '<span class="chip '+leg.kind+'">'+esc(leg.kind==='HIT'?'HIT':leg.kind)+'</span>'+
+      '<span class="who"><span class="name">'+esc(leg.who)+'</span>'+tm+
+      ' <span class="sub">'+esc(leg.pick)+'</span>'+star+'</span>'+
+      '<span class="conf"><span class="bar"><span style="width:'+w+'%;background:'+col+'"></span></span>'+
+      '<span class="pct" style="color:'+col+'">'+pct+'</span></span>'+
+      '<span class="odds">'+esc(leg.odds)+'</span></div>';
   }
-  function esc(s) {
-    return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
-      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+
+  function gameView(games){
+    return '<div class="grid">'+games.map(function(g){
+      var head='<div class="card-hd"><span class="matchup">'+
+        teamImg(g.away,'')+'<span class="ab" style="color:'+tcol(g.away)+'">'+esc(g.away)+'</span>'+
+        '<span class="at">@</span>'+
+        teamImg(g.home,'')+'<span class="ab" style="color:'+tcol(g.home)+'">'+esc(g.home)+'</span></span>'+
+        '<span class="gmeta"><div class="when">'+esc(g.when)+'</div>'+wxHtml(g.wx)+'</span></div>';
+      return '<div class="card">'+head+g.legs.map(function(l){return legRow(l,true);}).join('')+'</div>';
+    }).join('')+'</div>';
+  }
+
+  function marketView(games){
+    var seg={NRFI:[],K:[],HIT:[],HR:[]};
+    games.forEach(function(g){ g.legs.forEach(function(l){
+      var x={kind:l.kind,who:l.who,pick:l.pick,p:l.p,odds:l.odds,note:l.note,hm:l.hm,team:l.team,teams:g.teams,away:g.away,home:g.home};
+      if(seg[l.kind]) seg[l.kind].push(x);
+    });});
+    var byConf=function(a,b){return (b.p||0)-(a.p||0);};
+    var html='';
+    SEGS.forEach(function(s){
+      var k=s[0], label=s[1], legs=seg[k]; if(!legs.length) return;
+      html+='<div class="section"><div class="sec-hd '+k+'">'+label+'<span class="ct">'+legs.length+'</span></div>';
+      if(k==='NRFI'){
+        legs.sort(byConf);
+        html+=legs.map(function(l){
+          var col=confColor(l.p,'NRFI'),w=Math.max(4,Math.min(100,l.p||0));
+          return '<div class="leg">'+teamImg(l.away,'tlogo')+
+            '<span class="chip NRFI">NRFI</span>'+
+            '<span class="who"><span class="name">'+esc(l.away)+' @ '+esc(l.home)+'</span> <span class="sub">'+esc(l.pick)+'</span></span>'+
+            '<span class="conf"><span class="bar"><span style="width:'+w+'%;background:'+col+'"></span></span>'+
+            '<span class="pct" style="color:'+col+'">'+Math.round(l.p)+'%</span></span>'+
+            '<span class="odds">'+esc(l.odds)+'</span></div>';
+        }).join('');
+      } else {
+        var byTeam={}; legs.forEach(function(l){ var t=l.team||'?'; (byTeam[t]=byTeam[t]||[]).push(l); });
+        Object.keys(byTeam).sort().forEach(function(t){
+          html+='<div class="teamsub">'+teamImg(t,'')+'<span style="color:'+tcol(t)+'">'+esc(t)+'</span></div>';
+          byTeam[t].sort(byConf);
+          html+=byTeam[t].map(function(l){return legRow(l,false);}).join('');
+        });
+      }
+      html+='</div>';
     });
+    return html;
   }
-  function teamImg(ab, cls) {
-    var u = logo(ab);
-    if (!u) return '<span class="tdot">•</span>';
-    return '<img class="' + cls + '" src="' + u + '" alt="' + esc(ab) + '" onerror="this.style.display=\'none\'">';
+
+  function render(){
+    var app=document.getElementById('app');
+    var games=(DATA&&DATA.games)||[];
+    var legCount=games.reduce(function(s,g){return s+g.legs.length;},0);
+    document.getElementById('meta').textContent=games.length+' games · '+legCount+' legs · built '+(DATA.builtAt||'');
+    if(!games.length){ app.innerHTML='<div class="empty">No qualifying legs yet.<br>Run a pipeline window, then reopen.</div>'; return; }
+    app.innerHTML = VIEW==='market' ? marketView(games) : gameView(games);
+    document.getElementById('foot').textContent='Thresholds: NRFI/K p≥.60 · HIT proj≥1.00 · HR p≥.12 (own scale). K from unanchored card.';
   }
-  function legHtml(leg) {
-    var col = confColor(leg.p), pct = leg.p == null ? '' : Math.round(leg.p) + '%';
-    var w = leg.p == null ? 0 : Math.max(4, Math.min(100, leg.p));
-    var star = leg.hm ? '<span class="star">★</span>' : '';
-    var tm = leg.team ? '<span class="tm" style="color:' + tcol(leg.team) + '">' + esc(leg.team) + '</span>' : '';
-    return '<div class="leg' + (leg.hm ? ' hm' : '') + '">' +
-      teamImg(leg.team, 'tlogo') +
-      '<span class="chip ' + leg.kind + '">' + esc(leg.kind) + '</span>' +
-      '<span class="who"><span class="name">' + esc(leg.who) + '</span>' + tm +
-      ' <span class="sub">' + esc(leg.pick) + '</span>' + star + '</span>' +
-      '<span class="conf"><span class="bar"><span style="width:' + w + '%;background:' + col + '"></span></span>' +
-      '<span class="pct" style="color:' + col + '">' + pct + '</span></span>' +
-      '<span class="odds">' + esc(leg.odds) + '</span></div>';
-  }
-  function wxHtml(wx) {
-    if (!wx) return '';
-    if (wx.dome) return '<span class="wx">Dome</span>';
-    var bits = [];
-    if (wx.tempF != null) bits.push(wx.tempF + '&deg;');
-    if (wx.windMph != null) bits.push(compass(wx.windFromDeg) + ' ' + wx.windMph + ' mph');
-    return '<span class="wx">' + bits.join(' &middot; ') + '</span>';
-  }
-  function cardHtml(g) {
-    var head = '<div class="card-hd"><span class="matchup">' +
-      teamImg(g.away, '') + '<span class="ab" style="color:' + tcol(g.away) + '">' + esc(g.away) + '</span>' +
-      '<span class="at">@</span>' +
-      teamImg(g.home, '') + '<span class="ab" style="color:' + tcol(g.home) + '">' + esc(g.home) + '</span>' +
-      '</span><span class="gmeta"><div class="when">' + esc(g.when) + '</div>' + wxHtml(g.wx) + '</span></div>';
-    return '<div class="card">' + head + g.legs.map(legHtml).join('') + '</div>';
-  }
-  function render() {
-    var app = document.getElementById('app');
-    var games = (DATA && DATA.games) || [];
-    var legCount = games.reduce(function (s, g) { return s + g.legs.length; }, 0);
-    document.getElementById('meta').textContent = games.length + ' games · ' + legCount + ' legs · built ' + (DATA.builtAt || '');
-    if (!games.length) {
-      app.className = '';
-      app.innerHTML = '<div class="empty">No qualifying legs yet.<br>Run a pipeline window (NRFI / K card / Hits v3 feed this board), then reopen.</div>';
-      return;
-    }
-    app.innerHTML = games.map(cardHtml).join('');
-    document.getElementById('foot').textContent =
-      'Thresholds: NRFI p≥.60 · K p≥.60 (unanchored card) · HIT proj≥1.00. Confidence shaded red→amber→green.';
+  function setView(v){
+    VIEW=v;
+    document.getElementById('bMarket').className = v==='market'?'on':'';
+    document.getElementById('bGame').className = v==='game'?'on':'';
+    render();
   }
   render();
 </script>

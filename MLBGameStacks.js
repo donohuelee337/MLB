@@ -114,6 +114,29 @@ function mlbGameCardsCollect_(ss, cfg) {
     });
   }
 
+  // 💣 HR signal (📣 Batter_HR_Promo model). Longshot/high-variance by nature,
+  // and the promo model has had roster-fallback noise — so gate on season PA
+  // and use p_calibrated when available. gamePk is col 1 here, team col 5.
+  const minHr = mlbGameCardsNum_(cfg['GS_MIN_P_HR']) || 0.12;
+  const minHrPa = mlbGameCardsNum_(cfg['GS_MIN_HR_PA']) || 40;
+  const hr = ss.getSheetByName(typeof MLB_BATTER_HR_PROMO_TAB !== 'undefined' ? MLB_BATTER_HR_PROMO_TAB : '📣 Batter_HR_Promo');
+  if (hr && hr.getLastRow() >= 4) {
+    hr.getRange(4, 1, hr.getLastRow() - 3, 20).getValues().forEach(function (r) {
+      const batter = String(r[3] || '').trim();
+      if (!batter) return;
+      const pc = mlbGameCardsNum_(r[8]); // p_calibrated
+      const pp = mlbGameCardsNum_(r[7]); // p_poisson
+      const p = isFinite(pc) && pc > 0 ? pc : pp;
+      if (!(p >= minHr)) return;
+      const pa = mlbGameCardsNum_(r[18]); // szn_PA
+      if (isFinite(pa) && pa < minHrPa) return;
+      bucket(r[1]).push({
+        chip: '💣 HR', who: batter, pick: '1+ HR', p: p, odds: '', note: '', hm: false,
+        team: String(r[5] || '').trim(),
+      });
+    });
+  }
+
   return byGame;
 }
 
@@ -260,6 +283,7 @@ function mlbGameCardsData_(ss, cfg) {
   });
   const kindFromChip = function (chip) {
     if (chip.indexOf('NRFI') !== -1) return 'NRFI';
+    if (chip.indexOf('HR') !== -1) return 'HR';
     if (chip.indexOf('K') !== -1) return 'K';
     return 'HIT';
   };
