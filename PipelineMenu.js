@@ -22,6 +22,7 @@ function onOpen() {
     .addItem('🎴 Open Game Cards (web)', 'mlbOpenGameCardsApp_')
     .addItem('🎴 Open Game Cards (tab)', 'mlbActivateGameCardsTab_')
     .addItem('🧪 Open Hits v4 shadow log', 'mlbActivateHitsV4LogTab_')
+    .addItem('🧪 Test Savant arsenal fetch (A vs B)', 'mlbTestArsenalFetch_')
     .addItem('🌙 Night Audit (grade + close-out — no rebuilds)', 'runNightAuditMLB')
     .addSeparator();
 
@@ -617,7 +618,11 @@ function runMLBBallWindow_(windowTag, skipInjuriesFetch) {
     if (typeof mlbArsenalIngestBestEffort_ !== 'function') return;
     const res = mlbArsenalIngestBestEffort_();
     if (res.p === 0 || res.b === 0) {
-      addPipelineWarning_('Arsenal ingest: pitcher=' + res.p + ' batter=' + res.b + ' rows — 🎯 matchup scores will be blank');
+      const d = res.diag || {};
+      const why = (d.pitcher ? 'P:HTTP' + d.pitcher.code + '/' + d.pitcher.reason : '') +
+        (d.batter ? ' B:HTTP' + d.batter.code + '/' + d.batter.reason : '');
+      addPipelineWarning_('Arsenal ingest: pitcher=' + res.p + ' batter=' + res.b + ' rows — ' + why +
+        ' — 🎯 matchup scores blank; if blocked use hosted CSV (ARSENAL_*_CSV_URL)');
     }
   });
   step('Slate board (join)', refreshMLBSlateBoard);

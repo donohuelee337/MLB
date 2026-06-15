@@ -432,9 +432,17 @@ function mlbParseSavantTeamWhiffCsv_(text) {
 }
 
 function mlbSavantFetchCsvText_(url) {
+  // Browser-like headers — Baseball Savant has no official API; its CSV
+  // endpoints can refuse header-less automated (UrlFetchApp) requests. A
+  // real User-Agent + Accept makes the scrape-style fetch look like a
+  // browser download and is far less likely to be blocked.
   const res = UrlFetchApp.fetch(url, {
     muteHttpExceptions: true,
     followRedirects: true,
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36',
+      'Accept': 'text/csv,text/plain,*/*',
+    },
   });
   const code = res.getResponseCode();
   if (code !== 200) {

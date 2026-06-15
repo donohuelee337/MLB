@@ -24,6 +24,7 @@ const MLB_ARSENAL_SHRINK_PA = 50;      // batter pitches-seen shrink constant
 
 var __mlbArsenalPMap = null; // pid → [{pt, usage, whiff, rv100, n}]
 var __mlbArsenalBMap = null; // bid → {pt: {rv100, whiff, n}}
+var __mlbArsenalDiag = { pitcher: null, batter: null }; // last-fetch diagnostics
 
 function mlbResetArsenalCaches_() {
   __mlbArsenalPMap = null;
@@ -44,13 +45,18 @@ function mlbArsenalIngestOne_(ss, cfg, type, tabName, urlKey) {
     : new Date().getFullYear();
   const urlCfg = String(cfg[urlKey] != null ? cfg[urlKey] : '').trim();
   const url = urlCfg || mlbArsenalDefaultUrl_(type, season);
+  const src = urlCfg ? 'override URL' : 'live Savant CSV';
+  const setDiag = function (rows, code, reason) {
+    __mlbArsenalDiag[type] = { rows: rows, code: code, reason: reason, src: src };
+  };
   const res = mlbSavantFetchCsvText_(url);
   if (!res.ok) {
-    Logger.log('Arsenal ingest (' + type + '): HTTP ' + res.code);
+    Logger.log('Arsenal ingest (' + type + '): HTTP ' + res.code + ' (' + src + ')');
+    setDiag(0, res.code, 'fetch blocked/failed — HTTP ' + res.code);
     return 0;
   }
   const lines = mlbSavantCsvLines_(res.text);
-  if (lines.length < 2) return 0;
+  if (lines.length < 2) { setDiag(0, res.code, 'empty/short CSV'); return 0; }
   const head = mlbSavantHeadNorm_(mlbCsvSplitRow_(lines[0]));
   const iId = mlbSavantColIdx_(head, ['player_id', 'pitcher_id', 'batter_id', 'mlbam_id']);
   const iName = mlbSavantColIdx_(head, ['player_name', 'name', 'last_name, first_name']);
@@ -61,6 +67,7 @@ function mlbArsenalIngestOne_(ss, cfg, type, tabName, urlKey) {
   const iN = mlbSavantColIdx_(head, ['pitches', 'pa', 'n']);
   if (iId < 0 || iPt < 0 || iRv < 0) {
     Logger.log('Arsenal ingest (' + type + '): CSV missing player_id/pitch_type/run_value cols');
+    setDiag(0, res.code, 'CSV columns not recognized (format changed?)');
     return 0;
   }
   const out = [];
@@ -78,7 +85,8 @@ function mlbArsenalIngestOne_(ss, cfg, type, tabName, urlKey) {
       parseFloat(c[iRv]),
     ].map(function (v) { return v != null && v === v ? v : ''; }).concat([iN >= 0 ? (parseFloat(c[iN]) || '') : '']).slice(0, 7));
   }
-  if (!out.length) return 0;
+  if (!out.length) { setDiag(0, res.code, 'no parseable rows'); return 0; }
+  setDiag(out.length, res.code, 'ok');
 
   let sh = ss.getSheetByName(tabName);
   if (sh) {
@@ -109,11 +117,37 @@ function mlbArsenalIngestBestEffort_() {
     Utilities.sleep(400);
     const b = mlbArsenalIngestOne_(ss, cfg, 'batter', MLB_ARSENAL_B_TAB, 'ARSENAL_B_CSV_URL');
     mlbResetArsenalCaches_();
-    return { p: p, b: b };
+    return { p: p, b: b, diag: { pitcher: __mlbArsenalDiag.pitcher, batter: __mlbArsenalDiag.batter } };
   } catch (e) {
     Logger.log('mlbArsenalIngestBestEffort_: ' + (e.message || e));
     return { p: 0, b: 0 };
   }
+}
+
+/**
+ * Menu: run the arsenal ingest once and report the result, so we can settle
+ * Path A (live Savant CSV) vs Path B (hosted CSV override) in one click.
+ */
+function mlbTestArsenalFetch_() {
+  const res = mlbArsenalIngestBestEffort_();
+  const d = (res && res.diag) || {};
+  function line(label, x) {
+    if (!x) return label + ': n/a';
+    return label + ': ' + x.rows + ' rows · HTTP ' + x.code + ' · ' + x.src + ' · ' + x.reason;
+  }
+  const full = 'Savant arsenal fetch test\n' + line('Pitcher', d.pitcher) + '\n' + line('Batter', d.batter) +
+    '\n\nrows>0 = Path A works (logos/out-pitch can use it). HTTP 403/blocked or 0 rows = use Path B: ' +
+    'download the arsenal CSV, publish it (Google Sheet → CSV, or Drive), set ARSENAL_P_CSV_URL / ARSENAL_B_CSV_URL.';
+  Logger.log(full);
+  const okP = d.pitcher && d.pitcher.rows > 0;
+  const okB = d.batter && d.batter.rows > 0;
+  const summary = (okP && okB)
+    ? '✅ Path A works — P ' + d.pitcher.rows + ' / B ' + d.batter.rows + ' rows'
+    : '⚠️ Path A blocked — P ' + (d.pitcher ? 'HTTP ' + d.pitcher.code : 'n/a') +
+      ' / B ' + (d.batter ? 'HTTP ' + d.batter.code : 'n/a') + ' → use hosted CSV (see log)';
+  try {
+    SpreadsheetApp.getActiveSpreadsheet().toast(summary, '🧪 Arsenal fetch', 12);
+  } catch (e) {}
 }
 
 function mlbArsenalReadTab_(tabName) {
