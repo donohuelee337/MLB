@@ -431,7 +431,30 @@ function mlbParseSavantTeamWhiffCsv_(text) {
   return { count: count, warn: warn };
 }
 
+/** Extract a Google Drive file ID from common URL forms (or '' if none). */
+function mlbExtractDriveFileId_(url) {
+  const s = String(url || '');
+  const m = s.match(/\/file\/d\/([A-Za-z0-9_-]{20,})/) ||
+            s.match(/[?&]id=([A-Za-z0-9_-]{20,})/) ||
+            s.match(/\/d\/([A-Za-z0-9_-]{20,})/);
+  return m ? m[1] : '';
+}
+
 function mlbSavantFetchCsvText_(url) {
+  // Drive-hosted CSV (the Path B published files)? Read directly via DriveApp
+  // by file ID. uc?export=download 302-redirects to a content host and
+  // returns an HTML interstitial to UrlFetchApp for some files → 0 rows.
+  // Reading the blob is bulletproof for files the script owner owns, and
+  // independent of share settings. Falls back to UrlFetch on any failure.
+  try {
+    const driveId = mlbExtractDriveFileId_(url);
+    if (driveId) {
+      const t = DriveApp.getFileById(driveId).getBlob().getDataAsString('UTF-8') || '';
+      if (t.length >= 10) return { ok: true, code: 200, text: t };
+    }
+  } catch (e) {
+    Logger.log('mlbSavantFetchCsvText_: Drive read failed (' + (e.message || e) + ') — falling back to UrlFetch');
+  }
   // Browser-like headers — Baseball Savant has no official API; its CSV
   // endpoints can refuse header-less automated (UrlFetchApp) requests. A
   // real User-Agent + Accept makes the scrape-style fetch look like a
