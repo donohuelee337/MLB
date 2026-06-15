@@ -89,12 +89,13 @@ function mlbGameCardsCollect_(ss, cfg) {
       const line = r[5];
       const projK = mlbGameCardsNum_(r[9]);
       const team = String(r[4] || '').trim();
+      const pid = parseInt(r[20], 10) || 0; // pitcher_id (for EV-allowed lookup)
       if (p >= minK) {
         // Edge: we disagree with the book enough to pick a side.
         bucket(r[0]).push({
           chip: '⚾ K', who: pitcher, pick: (overBest ? 'Over ' : 'Under ') + line + ' K',
           p: p, odds: overBest ? r[6] : r[7], note: 'unanchored', hm: false,
-          team: team, kproj: projK,
+          team: team, kproj: projK, pid: pid,
         });
         return;
       }
@@ -106,7 +107,7 @@ function mlbGameCardsCollect_(ss, cfg) {
       if (isFinite(projK) && isFinite(lineN) && Math.abs(projK - lineN) < agreeBand && projK >= agreeMinProj) {
         bucket(r[0]).push({
           chip: '⚾ K', who: pitcher, pick: '', p: null, odds: '', note: '', hm: false,
-          team: team, kproj: projK, agree: true, kline: lineN,
+          team: team, kproj: projK, agree: true, kline: lineN, pid: pid,
         });
       }
     });
@@ -378,6 +379,17 @@ function mlbGameCardsData_(ss, cfg) {
     if (chip.indexOf('K') !== -1) return 'K';
     return 'HIT';
   };
+  // Statcast exit-velocity profiles (batter EV, pitcher EV-allowed) — load
+  // the cached maps best-effort so the blurbs can show EV when ingested.
+  try { if (typeof mlbStatcastEnsureLoaded_ === 'function') mlbStatcastEnsureLoaded_(ss); } catch (e) {}
+  const evBat = function (bid) {
+    if (typeof mlbStatcastGetBatterProfile_ !== 'function') return null;
+    const p = mlbStatcastGetBatterProfile_(bid); return p && isFinite(p.ev) ? p.ev : null;
+  };
+  const evPit = function (pid) {
+    if (typeof mlbStatcastGetPitcherProfile_ !== 'function') return null;
+    const p = mlbStatcastGetPitcherProfile_(pid); return p && isFinite(p.ev) ? p.ev : null;
+  };
   // HR signal map (icon + blurb) and BvP context budget.
   const hrMap = mlbGameCardsHrMap_(ss);
   const hrTopN = parseInt(String(cfg['GS_HR_ICON_TOP_N'] != null ? cfg['GS_HR_ICON_TOP_N'] : '10'), 10) || 10;
@@ -414,6 +426,8 @@ function mlbGameCardsData_(ss, cfg) {
               (isFinite(sig.sznPA) ? ' / ' + sig.sznPA + ' PA' : ''));
           }
         }
+        const bev = evBat(leg.bid);
+        if (bev != null) blurbParts.push('EV ' + (Math.round(bev * 10) / 10));
         // BvP vs tonight's SP — expensive per-player fetch, capped + best-effort.
         if (bvpBudget > 0) {
           const opp = mlbGameCardsOppSp_(block, pk, teamAb);
@@ -454,8 +468,12 @@ function mlbGameCardsData_(ss, cfg) {
         leg._agreePick = '≈' + (Math.round(lam * 10) / 10) + ' K (agree)' +
           (safeAlt ? ' → ' + safeAlt + '+ alt' : '');
         blurbParts.push(ladder.join(' · '));
+        const pevA = evPit(leg.pid);
+        if (pevA != null) blurbParts.push('EV allow ' + (Math.round(pevA * 10) / 10));
       } else if (kind === 'K' && isFinite(mlbGameCardsNum_(leg.kproj))) {
         blurbParts.push('proj ' + (Math.round(mlbGameCardsNum_(leg.kproj) * 10) / 10) + ' K');
+        const pev = evPit(leg.pid);
+        if (pev != null) blurbParts.push('EV allow ' + (Math.round(pev * 10) / 10));
       } else if (kind === 'NRFI' && isFinite(mlbGameCardsNum_(leg.ltot))) {
         blurbParts.push('λ ' + (Math.round(mlbGameCardsNum_(leg.ltot) * 100) / 100) + ' runs (1st)');
       }
