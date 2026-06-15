@@ -67,7 +67,7 @@ function mlbGameCardsCollect_(ss, cfg) {
       if (!(p >= minNrfi)) return;
       bucket(r[0]).push({
         chip: '🚦 NRFI', who: 'NRFI', pick: 'Under 0.5 runs (1st inn)',
-        p: p, odds: r[7], note: '', hm: false, team: '',
+        p: p, odds: r[7], note: '', hm: false, team: '', ltot: mlbGameCardsNum_(r[10]),
       });
     });
   }
@@ -91,7 +91,7 @@ function mlbGameCardsCollect_(ss, cfg) {
       bucket(r[0]).push({
         chip: '⚾ K', who: pitcher, pick: (overBest ? 'Over ' : 'Under ') + line + ' K',
         p: p, odds: overBest ? r[6] : r[7], note: 'unanchored', hm: false,
-        team: String(r[4] || '').trim(), // pitch_team
+        team: String(r[4] || '').trim(), kproj: mlbGameCardsNum_(r[9]), // pitch_team, proj_K
       });
     });
   }
@@ -109,35 +109,48 @@ function mlbGameCardsCollect_(ss, cfg) {
       bucket(r[0]).push({
         chip: '🥎 HIT', who: batter, pick: 'Over ' + r[4] + ' (proj ' + (Math.round(proj * 100) / 100) + ')',
         p: mlbGameCardsNum_(r[9]), odds: r[5], note: onHm ? '⭐ Hit Machine' : '', hm: onHm,
-        team: String(r[3] || '').trim(), // bat_team
+        team: String(r[3] || '').trim(), bid: parseInt(r[18], 10) || 0, // bat_team, batter_id
       });
     });
   }
 
-  // 💣 HR signal (📣 Batter_HR_Promo model). Longshot/high-variance by nature,
-  // and the promo model has had roster-fallback noise — so gate on season PA
-  // and use p_calibrated when available. gamePk is col 1 here, team col 5.
-  const minHr = mlbGameCardsNum_(cfg['GS_MIN_P_HR']) || 0.12;
-  const minHrPa = mlbGameCardsNum_(cfg['GS_MIN_HR_PA']) || 40;
-  const hr = ss.getSheetByName(typeof MLB_BATTER_HR_PROMO_TAB !== 'undefined' ? MLB_BATTER_HR_PROMO_TAB : '📣 Batter_HR_Promo');
-  if (hr && hr.getLastRow() >= 4) {
-    hr.getRange(4, 1, hr.getLastRow() - 3, 20).getValues().forEach(function (r) {
-      const batter = String(r[3] || '').trim();
-      if (!batter) return;
-      const pc = mlbGameCardsNum_(r[8]); // p_calibrated
-      const pp = mlbGameCardsNum_(r[7]); // p_poisson
-      const p = isFinite(pc) && pc > 0 ? pc : pp;
-      if (!(p >= minHr)) return;
-      const pa = mlbGameCardsNum_(r[18]); // szn_PA
-      if (isFinite(pa) && pa < minHrPa) return;
-      bucket(r[1]).push({
-        chip: '💣 HR', who: batter, pick: '1+ HR', p: p, odds: '', note: '', hm: false,
-        team: String(r[5] || '').trim(),
-      });
-    });
-  }
-
+  // HR is NOT a leg/section — it rides as an icon on the batter's HIT row.
+  // The HR map (batterId → signal) is built in mlbGameCardsData_.
   return byGame;
+}
+
+/** batterId → HR-promo signal {p, sznHR, sznPA, l14}. One tab read, cheap. */
+function mlbGameCardsHrMap_(ss) {
+  const map = {};
+  const hr = ss.getSheetByName(typeof MLB_BATTER_HR_PROMO_TAB !== 'undefined' ? MLB_BATTER_HR_PROMO_TAB : '📣 Batter_HR_Promo');
+  if (!hr || hr.getLastRow() < 4) return map;
+  hr.getRange(4, 1, hr.getLastRow() - 3, 20).getValues().forEach(function (r) {
+    const bid = parseInt(r[4], 10) || 0;
+    if (!bid) return;
+    const pc = mlbGameCardsNum_(r[8]); // p_calibrated
+    const pp = mlbGameCardsNum_(r[7]); // p_poisson
+    map[bid] = {
+      p: isFinite(pc) && pc > 0 ? pc : pp,
+      sznHR: mlbGameCardsNum_(r[17]),
+      sznPA: mlbGameCardsNum_(r[18]),
+      l14: mlbGameCardsNum_(r[19]),
+    };
+  });
+  return map;
+}
+
+/** Opposing probable {id,name} for a batter's team in a game (from schedule block). */
+function mlbGameCardsOppSp_(block, gamePk, teamAbbr) {
+  const want = typeof mlbCanonicalTeamAbbr_ === 'function' ? mlbCanonicalTeamAbbr_(teamAbbr) : String(teamAbbr || '');
+  for (let i = 0; i < block.length; i++) {
+    if (parseInt(block[i][0], 10) !== parseInt(gamePk, 10)) continue;
+    const away = typeof mlbCanonicalTeamAbbr_ === 'function' ? mlbCanonicalTeamAbbr_(block[i][3]) : String(block[i][3] || '');
+    const home = typeof mlbCanonicalTeamAbbr_ === 'function' ? mlbCanonicalTeamAbbr_(block[i][4]) : String(block[i][4] || '');
+    if (want === away) return { id: parseInt(block[i][12], 10) || 0, name: String(block[i][7] || '').trim() };
+    if (want === home) return { id: parseInt(block[i][11], 10) || 0, name: String(block[i][6] || '').trim() };
+    return null;
+  }
+  return null;
 }
 
 function refreshMLBGameCards() {
@@ -283,10 +296,14 @@ function mlbGameCardsData_(ss, cfg) {
   });
   const kindFromChip = function (chip) {
     if (chip.indexOf('NRFI') !== -1) return 'NRFI';
-    if (chip.indexOf('HR') !== -1) return 'HR';
     if (chip.indexOf('K') !== -1) return 'K';
     return 'HIT';
   };
+  // HR signal map (icon + blurb) and BvP context budget.
+  const hrMap = mlbGameCardsHrMap_(ss);
+  const hrIconP = mlbGameCardsNum_(cfg['GS_MIN_P_HR']) || 0.12;
+  const bvpOn = String(cfg['GS_BVP_BLURB'] != null ? cfg['GS_BVP_BLURB'] : 'Y').toUpperCase() === 'Y';
+  let bvpBudget = bvpOn ? (parseInt(String(cfg['GS_BVP_MAX_FETCH'] != null ? cfg['GS_BVP_MAX_FETCH'] : '40'), 10) || 40) : 0;
   const games = Object.keys(byGame).filter(function (pk) { return byGame[pk].length > 0; });
   games.sort(function (a, b) {
     const ia = (timeIdx[a] && timeIdx[a].iso) || '';
@@ -304,15 +321,51 @@ function mlbGameCardsData_(ss, cfg) {
       return (mlbGameCardsNum_(y.p) || 0) - (mlbGameCardsNum_(x.p) || 0);
     }).map(function (leg) {
       const p = mlbGameCardsNum_(leg.p);
+      const kind = kindFromChip(leg.chip);
+      const teamAb = typeof mlbCanonicalTeamAbbr_ === 'function' ? mlbCanonicalTeamAbbr_(leg.team) : String(leg.team || '');
+      // HR icon + context blurb — HIT legs only (batter rows).
+      let hrFlag = false;
+      let blurbParts = [];
+      if (kind === 'HIT' && leg.bid) {
+        const sig = hrMap[leg.bid];
+        if (sig) {
+          if (isFinite(sig.p) && sig.p >= hrIconP) hrFlag = true;
+          if (isFinite(sig.sznHR)) {
+            blurbParts.push(sig.sznHR + ' HR' + (isFinite(sig.l14) && sig.l14 > 0 ? ' (' + sig.l14 + ' L14)' : '') +
+              (isFinite(sig.sznPA) ? ' / ' + sig.sznPA + ' PA' : ''));
+          }
+        }
+        // BvP vs tonight's SP — expensive per-player fetch, capped + best-effort.
+        if (bvpBudget > 0) {
+          const opp = mlbGameCardsOppSp_(block, pk, teamAb);
+          if (opp && opp.id && typeof mlbHmBvpCareer_ === 'function') {
+            bvpBudget--;
+            try {
+              const bvp = mlbHmBvpCareer_(leg.bid, opp.id);
+              if (bvp && bvp.pa >= 1) {
+                const last = opp.name ? opp.name.split(/\s+/).pop() : 'SP';
+                blurbParts.unshift('BvP ' + bvp.h + '-' + (bvp.ab || bvp.pa) +
+                  (bvp.hr > 0 ? ', ' + bvp.hr + ' HR' : '') + ' vs ' + last);
+              }
+            } catch (e) {}
+          }
+        }
+      } else if (kind === 'K' && isFinite(mlbGameCardsNum_(leg.kproj))) {
+        blurbParts.push('proj ' + (Math.round(mlbGameCardsNum_(leg.kproj) * 10) / 10) + ' K');
+      } else if (kind === 'NRFI' && isFinite(mlbGameCardsNum_(leg.ltot))) {
+        blurbParts.push('λ ' + (Math.round(mlbGameCardsNum_(leg.ltot) * 100) / 100) + ' runs (1st)');
+      }
       return {
-        kind: kindFromChip(leg.chip),
+        kind: kind,
         who: String(leg.who || ''),
         pick: String(leg.pick || ''),
         p: isFinite(p) ? Math.round(p * 1000) / 10 : null,
         odds: leg.odds != null && leg.odds !== '' ? String(leg.odds) : '',
         note: String(leg.note || ''),
         hm: !!leg.hm,
-        team: typeof mlbCanonicalTeamAbbr_ === 'function' ? mlbCanonicalTeamAbbr_(leg.team) : String(leg.team || ''),
+        hr: hrFlag,
+        blurb: blurbParts.join(' · '),
+        team: teamAb,
       };
     });
     // Weather at first pitch (home park) — best-effort, never throws.
@@ -354,7 +407,7 @@ function mlbOpenGameCardsApp_() {
   const data = mlbGameCardsData_(ss, getConfig());
   const t = HtmlService.createTemplateFromFile('GameCardsApp');
   t.dataJson = JSON.stringify(data);
-  const html = t.evaluate().setWidth(940).setHeight(780);
+  const html = t.evaluate().setWidth(1040).setHeight(800);
   SpreadsheetApp.getUi().showModalDialog(html, '🎴 Game Cards');
 }
 

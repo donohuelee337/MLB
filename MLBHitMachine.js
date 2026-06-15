@@ -96,7 +96,8 @@ function mlbHmBvpCareer_(batterId, spId) {
         const pa = parseInt(st.plateAppearances, 10) || parseInt(st.atBats, 10) || 0;
         const h = parseInt(st.hits, 10) || 0;
         const ab = parseInt(st.atBats, 10) || 0;
-        out = { pa: pa, h: h, avg: ab > 0 ? h / ab : NaN };
+        const hr = parseInt(st.homeRuns, 10) || 0;
+        out = { pa: pa, h: h, ab: ab, hr: hr, avg: ab > 0 ? h / ab : NaN };
       }
     }
     Utilities.sleep(150); // pacing — candidates only, never the whole slate

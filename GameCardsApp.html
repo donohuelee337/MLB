@@ -19,7 +19,7 @@
   .toggle button.on { background: #fff; color: #d22d49; }
   .legend { padding: 7px 18px; font-size: 11px; color: #666; background: #fff; border-bottom: 1px solid #e3e3e3; }
   .wrap { padding: 14px 18px; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(410px, 1fr)); gap: 12px; }
+  .stack { display: flex; flex-direction: column; gap: 12px; }
   .card { background: #fff; border: 1px solid #d8d8d8; border-radius: 4px; overflow: hidden; }
   .card-hd { display: flex; align-items: center; justify-content: space-between;
     padding: 9px 12px; background: #f7f7f7; border-bottom: 2px solid #d22d49; }
@@ -54,11 +54,14 @@
   .who .tm { font-size: 10px; font-weight: 700; margin-left: 4px; }
   .who .sub { font-size: 11px; color: #777; }
   .who .star { color: #e8a000; font-size: 12px; margin-left: 3px; }
+  .who .hric { font-size: 12px; margin-left: 3px; }
   .conf { flex: 0 0 92px; display: flex; align-items: center; gap: 6px; }
   .bar { flex: 1; height: 7px; background: #ececec; border-radius: 4px; overflow: hidden; }
   .bar span { display: block; height: 100%; }
   .pct { font-size: 12px; font-weight: 700; min-width: 32px; text-align: right; font-variant-numeric: tabular-nums; }
   .odds { flex: 0 0 44px; text-align: right; font-size: 12px; color: #555; font-variant-numeric: tabular-nums; }
+  .blurb { flex: 0 0 280px; font-size: 11px; color: #667; line-height: 1.35; padding-left: 10px;
+    border-left: 1px solid #eee; }
   .empty { padding: 56px 20px; text-align: center; color: #888; line-height: 1.6; }
   .foot { padding: 6px 18px 16px; font-size: 11px; color: #999; }
 </style>
@@ -71,7 +74,7 @@
       <span class="meta" id="meta"></span>
     </div>
   </div>
-  <div class="legend">★ = also on Hit Machine · team logo marks each player's club · HR uses its own (lower) scale · for SGP building, not staking advice</div>
+  <div class="legend">★ = Hit Machine · 💣 = HR signal · team logo marks each player's club · right column = BvP & season context · for SGP building, not staking advice</div>
   <div id="app" class="wrap"></div>
   <div class="foot" id="foot"></div>
 
@@ -92,7 +95,7 @@
     CHW:{id:145,c:'#111111'}, MIA:{id:146,c:'#00A3E0'}, NYY:{id:147,c:'#0C2340'},
     MIL:{id:158,c:'#12284B'}
   };
-  var SEGS = [['NRFI','NRFI'],['K','Strikeouts'],['HIT','Hits'],['HR','Home runs']];
+  var SEGS = [['NRFI','NRFI'],['K','Strikeouts'],['HIT','Hits']];
   function logo(ab){ var t=TEAM[ab]; return t?'https://www.mlbstatic.com/team-logos/'+t.id+'.svg':''; }
   function tcol(ab){ var t=TEAM[ab]; return t?t.c:'#333'; }
   function compass(d){ if(d==null)return''; return ['N','NE','E','SE','S','SW','W','NW'][Math.round(d/45)%8]; }
@@ -110,21 +113,23 @@
 
   function legRow(leg, showTeamLogo){
     var col=confColor(leg.p,leg.kind), pct=leg.p==null?'':Math.round(leg.p)+'%';
-    var w=leg.p==null?0:(leg.kind==='HR'?Math.max(4,Math.min(100,leg.p/30*100)):Math.max(4,Math.min(100,leg.p)));
+    var w=leg.p==null?0:Math.max(4,Math.min(100,leg.p));
     var star=leg.hm?'<span class="star">★</span>':'';
+    var hric=leg.hr?'<span class="hric" title="HR signal">💣</span>':'';
     var tm=leg.team?'<span class="tm" style="color:'+tcol(leg.team)+'">'+esc(leg.team)+'</span>':'';
     var lead=showTeamLogo?teamImg(leg.team,'tlogo'):'<span class="tdot"></span>';
+    var blurb=leg.blurb?'<span class="blurb">'+esc(leg.blurb)+'</span>':'<span class="blurb"></span>';
     return '<div class="leg'+(leg.hm?' hm':'')+'">'+lead+
       '<span class="chip '+leg.kind+'">'+esc(leg.kind==='HIT'?'HIT':leg.kind)+'</span>'+
       '<span class="who"><span class="name">'+esc(leg.who)+'</span>'+tm+
-      ' <span class="sub">'+esc(leg.pick)+'</span>'+star+'</span>'+
+      ' <span class="sub">'+esc(leg.pick)+'</span>'+star+hric+'</span>'+
       '<span class="conf"><span class="bar"><span style="width:'+w+'%;background:'+col+'"></span></span>'+
       '<span class="pct" style="color:'+col+'">'+pct+'</span></span>'+
-      '<span class="odds">'+esc(leg.odds)+'</span></div>';
+      '<span class="odds">'+esc(leg.odds)+'</span>'+blurb+'</div>';
   }
 
   function gameView(games){
-    return '<div class="grid">'+games.map(function(g){
+    return '<div class="stack">'+games.map(function(g){
       var head='<div class="card-hd"><span class="matchup">'+
         teamImg(g.away,'')+'<span class="ab" style="color:'+tcol(g.away)+'">'+esc(g.away)+'</span>'+
         '<span class="at">@</span>'+
@@ -137,7 +142,7 @@
   function marketView(games){
     var seg={NRFI:[],K:[],HIT:[],HR:[]};
     games.forEach(function(g){ g.legs.forEach(function(l){
-      var x={kind:l.kind,who:l.who,pick:l.pick,p:l.p,odds:l.odds,note:l.note,hm:l.hm,team:l.team,teams:g.teams,away:g.away,home:g.home};
+      var x={kind:l.kind,who:l.who,pick:l.pick,p:l.p,odds:l.odds,note:l.note,hm:l.hm,hr:l.hr,blurb:l.blurb,team:l.team,teams:g.teams,away:g.away,home:g.home};
       if(seg[l.kind]) seg[l.kind].push(x);
     });});
     var byConf=function(a,b){return (b.p||0)-(a.p||0);};
@@ -154,7 +159,8 @@
             '<span class="who"><span class="name">'+esc(l.away)+' @ '+esc(l.home)+'</span> <span class="sub">'+esc(l.pick)+'</span></span>'+
             '<span class="conf"><span class="bar"><span style="width:'+w+'%;background:'+col+'"></span></span>'+
             '<span class="pct" style="color:'+col+'">'+Math.round(l.p)+'%</span></span>'+
-            '<span class="odds">'+esc(l.odds)+'</span></div>';
+            '<span class="odds">'+esc(l.odds)+'</span>'+
+            '<span class="blurb">'+esc(l.blurb||'')+'</span></div>';
         }).join('');
       } else {
         var byTeam={}; legs.forEach(function(l){ var t=l.team||'?'; (byTeam[t]=byTeam[t]||[]).push(l); });
