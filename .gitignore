@@ -9,3 +9,6 @@ node_modules/
 
 .tmp_sheet.txt
 .deployed_truth/
+
+tools/__pycache__/
+*.pyc
