@@ -4,97 +4,131 @@
 <base target="_top">
 <meta charset="utf-8">
 <style>
-  :root {
-    --bg: #0c1016; --surface: #161d28; --surface2: #1e2735; --line: #2a3445;
-    --txt: #e8edf4; --muted: #8a97a8; --dim: #5d6b7e;
-    --green: #2fbf71; --lime: #8bd450; --amber: #f2b53b; --red: #e2574c;
-    --gold: #f2b53b; --blue: #4a9be8; --pink: #e86fa0;
-  }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body { background: var(--bg); color: var(--txt);
-    font-family: 'Inter','Segoe UI',system-ui,sans-serif; -webkit-font-smoothing: antialiased; }
-  body { padding: 0 0 28px; }
-  .top { position: sticky; top: 0; z-index: 5; background: rgba(12,16,22,0.96);
-    border-bottom: 1px solid var(--line); padding: 14px 20px; display: flex;
-    align-items: baseline; justify-content: space-between; }
-  .top h1 { font-size: 17px; font-weight: 700; letter-spacing: .3px; }
-  .top .meta { font-size: 12px; color: var(--muted); }
-  .legend { padding: 8px 20px 0; font-size: 11px; color: var(--dim); }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(395px, 1fr));
-    gap: 14px; padding: 14px 20px; }
-  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
-    overflow: hidden; }
+  html, body { background: #f4f4f4; color: #222;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased; font-size: 13px; }
+  .appbar { position: sticky; top: 0; z-index: 5; background: #d22d49; color: #fff;
+    padding: 11px 18px; display: flex; align-items: baseline; justify-content: space-between; }
+  .appbar h1 { font-size: 16px; font-weight: 700; letter-spacing: .2px; }
+  .appbar .meta { font-size: 11px; opacity: .9; }
+  .legend { padding: 7px 18px; font-size: 11px; color: #666; background: #fff;
+    border-bottom: 1px solid #e3e3e3; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(410px, 1fr));
+    gap: 12px; padding: 14px 18px; }
+  .card { background: #fff; border: 1px solid #d8d8d8; border-radius: 4px; overflow: hidden; }
   .card-hd { display: flex; align-items: center; justify-content: space-between;
-    padding: 12px 16px; background: var(--surface2); border-bottom: 1px solid var(--line); }
-  .card-hd .teams { font-size: 15px; font-weight: 700; }
-  .card-hd .when { font-size: 12px; color: var(--amber); font-weight: 600; }
-  .leg { display: flex; align-items: center; gap: 10px; padding: 10px 16px;
-    border-bottom: 1px solid rgba(42,52,69,0.5); }
+    padding: 9px 12px; background: #f7f7f7; border-bottom: 2px solid #d22d49; }
+  .matchup { display: flex; align-items: center; gap: 7px; }
+  .matchup img { width: 30px; height: 30px; object-fit: contain; vertical-align: middle; }
+  .matchup .ab { font-size: 15px; font-weight: 700; letter-spacing: .3px; }
+  .matchup .at { color: #999; font-weight: 400; font-size: 13px; }
+  .gmeta { text-align: right; line-height: 1.35; }
+  .gmeta .when { font-size: 13px; font-weight: 700; color: #333; }
+  .gmeta .wx { font-size: 11px; color: #777; }
+  .leg { display: flex; align-items: center; gap: 9px; padding: 8px 12px;
+    border-bottom: 1px solid #eee; }
   .leg:last-child { border-bottom: none; }
-  .leg.hm { background: rgba(242,181,59,0.07); box-shadow: inset 3px 0 0 var(--gold); }
-  .chip { flex: 0 0 60px; text-align: center; font-size: 10px; font-weight: 700;
-    text-transform: uppercase; letter-spacing: .4px; padding: 4px 0; border-radius: 6px; }
-  .chip.NRFI { background: rgba(242,181,59,0.16); color: var(--amber); }
-  .chip.K { background: rgba(74,155,232,0.16); color: var(--blue); }
-  .chip.HIT { background: rgba(232,111,160,0.16); color: var(--pink); }
-  .who { flex: 1; min-width: 0; }
-  .who .name { font-size: 14px; font-weight: 600; }
-  .who .sub { font-size: 12px; color: var(--muted); }
-  .who .star { color: var(--gold); font-size: 12px; margin-left: 4px; }
-  .conf { flex: 0 0 96px; display: flex; align-items: center; gap: 7px; }
-  .bar { flex: 1; height: 6px; background: var(--surface2); border-radius: 3px; overflow: hidden; }
-  .bar span { display: block; height: 100%; border-radius: 3px; }
-  .pct { font-size: 12px; font-weight: 700; min-width: 34px; text-align: right; }
-  .odds { flex: 0 0 46px; text-align: right; font-size: 13px; color: var(--muted);
+  .leg.hm { background: #fff8e1; }
+  .leg .tlogo { flex: 0 0 22px; width: 22px; height: 22px; object-fit: contain; }
+  .leg .tdot { flex: 0 0 22px; text-align: center; color: #bbb; }
+  .chip { flex: 0 0 46px; text-align: center; font-size: 10px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: .3px; padding: 3px 0; border-radius: 3px;
+    border: 1px solid; }
+  .chip.NRFI { color: #b26a00; border-color: #e8b563; background: #fdf3e0; }
+  .chip.K { color: #1763a6; border-color: #8fbfe8; background: #eaf3fb; }
+  .chip.HIT { color: #b1224b; border-color: #e79bb3; background: #fbeaf0; }
+  .who { flex: 1; min-width: 0; line-height: 1.3; }
+  .who .name { font-size: 13px; font-weight: 700; }
+  .who .tm { font-size: 10px; font-weight: 700; margin-left: 4px; }
+  .who .sub { font-size: 11px; color: #777; }
+  .who .star { color: #e8a000; font-size: 12px; margin-left: 3px; }
+  .conf { flex: 0 0 92px; display: flex; align-items: center; gap: 6px; }
+  .bar { flex: 1; height: 7px; background: #ececec; border-radius: 4px; overflow: hidden; }
+  .bar span { display: block; height: 100%; }
+  .pct { font-size: 12px; font-weight: 700; min-width: 32px; text-align: right;
     font-variant-numeric: tabular-nums; }
-  .empty { padding: 60px 20px; text-align: center; color: var(--muted); }
-  .foot { padding: 4px 20px; font-size: 11px; color: var(--dim); }
+  .odds { flex: 0 0 44px; text-align: right; font-size: 12px; color: #555;
+    font-variant-numeric: tabular-nums; }
+  .empty { padding: 56px 20px; text-align: center; color: #888; line-height: 1.6; }
+  .foot { padding: 6px 18px 16px; font-size: 11px; color: #999; }
 </style>
 </head>
 <body>
-  <div class="top">
-    <h1>🎴 Game Cards</h1>
-    <span class="meta" id="meta"></span>
-  </div>
-  <div class="legend">Sorted by conviction · ⭐ gold rail = also on Hit Machine · for SGP building, not staking advice</div>
+  <div class="appbar"><h1>Game Cards</h1><span class="meta" id="meta"></span></div>
+  <div class="legend">Sorted by conviction &nbsp;·&nbsp; <span style="color:#e8a000;font-weight:700;">★</span> = also on Hit Machine &nbsp;·&nbsp; team logo marks each player's club &nbsp;·&nbsp; for SGP building, not staking advice</div>
   <div id="app" class="grid"></div>
   <div class="foot" id="foot"></div>
 
 <script>
   var DATA = <?!= dataJson ?>;
-
+  var TEAM = {
+    LAA:{id:108,c:'#BA0021'}, ARI:{id:109,c:'#A71930'}, AZ:{id:109,c:'#A71930'},
+    BAL:{id:110,c:'#DF4601'}, BOS:{id:111,c:'#BD3039'}, CHC:{id:112,c:'#0E3386'},
+    CIN:{id:113,c:'#C6011F'}, CLE:{id:114,c:'#0C2340'}, COL:{id:115,c:'#333366'},
+    DET:{id:116,c:'#0C2340'}, HOU:{id:117,c:'#EB6E1F'}, KC:{id:118,c:'#004687'},
+    LAD:{id:119,c:'#005A9C'}, WSN:{id:120,c:'#AB0003'}, WSH:{id:120,c:'#AB0003'},
+    NYM:{id:121,c:'#002D72'}, OAK:{id:133,c:'#003831'}, ATH:{id:133,c:'#003831'},
+    PIT:{id:134,c:'#111111'}, SD:{id:135,c:'#2F241D'}, SEA:{id:136,c:'#0C2C56'},
+    SF:{id:137,c:'#FD5A1E'}, STL:{id:138,c:'#C41E3A'}, TB:{id:139,c:'#092C5C'},
+    TEX:{id:140,c:'#003278'}, TOR:{id:141,c:'#134A8E'}, MIN:{id:142,c:'#002B5C'},
+    PHI:{id:143,c:'#E81828'}, ATL:{id:144,c:'#CE1141'}, CWS:{id:145,c:'#111111'},
+    CHW:{id:145,c:'#111111'}, MIA:{id:146,c:'#00A3E0'}, NYY:{id:147,c:'#0C2340'},
+    MIL:{id:158,c:'#12284B'}
+  };
+  function logo(ab) { var t = TEAM[ab]; return t ? 'https://www.mlbstatic.com/team-logos/' + t.id + '.svg' : ''; }
+  function tcol(ab) { var t = TEAM[ab]; return t ? t.c : '#333'; }
+  function compass(deg) {
+    if (deg == null) return '';
+    var dirs = ['N','NE','E','SE','S','SW','W','NW'];
+    return dirs[Math.round(deg / 45) % 8];
+  }
   function confColor(p) {
-    if (p == null) return 'var(--dim)';
-    if (p >= 75) return 'var(--green)';
-    if (p >= 70) return 'var(--green)';
-    if (p >= 65) return 'var(--lime)';
-    if (p >= 60) return 'var(--amber)';
-    return 'var(--red)';
+    if (p == null) return '#bbb';
+    if (p >= 70) return '#1a9850';
+    if (p >= 65) return '#66bd63';
+    if (p >= 60) return '#e8a000';
+    return '#d7301f';
   }
   function esc(s) {
     return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
     });
   }
+  function teamImg(ab, cls) {
+    var u = logo(ab);
+    if (!u) return '<span class="tdot">•</span>';
+    return '<img class="' + cls + '" src="' + u + '" alt="' + esc(ab) + '" onerror="this.style.display=\'none\'">';
+  }
   function legHtml(leg) {
-    var col = confColor(leg.p);
-    var pct = leg.p == null ? '' : leg.p + '%';
+    var col = confColor(leg.p), pct = leg.p == null ? '' : Math.round(leg.p) + '%';
     var w = leg.p == null ? 0 : Math.max(4, Math.min(100, leg.p));
     var star = leg.hm ? '<span class="star">★</span>' : '';
+    var tm = leg.team ? '<span class="tm" style="color:' + tcol(leg.team) + '">' + esc(leg.team) + '</span>' : '';
     return '<div class="leg' + (leg.hm ? ' hm' : '') + '">' +
-      '<span class="chip ' + leg.kind + '">' + esc(leg.kind === 'NRFI' ? '1st inn' : leg.kind) + '</span>' +
-      '<span class="who"><span class="name">' + esc(leg.who) + '</span> ' +
-      '<span class="sub">' + esc(leg.pick) + '</span>' + star + '</span>' +
+      teamImg(leg.team, 'tlogo') +
+      '<span class="chip ' + leg.kind + '">' + esc(leg.kind) + '</span>' +
+      '<span class="who"><span class="name">' + esc(leg.who) + '</span>' + tm +
+      ' <span class="sub">' + esc(leg.pick) + '</span>' + star + '</span>' +
       '<span class="conf"><span class="bar"><span style="width:' + w + '%;background:' + col + '"></span></span>' +
       '<span class="pct" style="color:' + col + '">' + pct + '</span></span>' +
-      '<span class="odds">' + esc(leg.odds) + '</span>' +
-      '</div>';
+      '<span class="odds">' + esc(leg.odds) + '</span></div>';
+  }
+  function wxHtml(wx) {
+    if (!wx) return '';
+    if (wx.dome) return '<span class="wx">Dome</span>';
+    var bits = [];
+    if (wx.tempF != null) bits.push(wx.tempF + '&deg;');
+    if (wx.windMph != null) bits.push(compass(wx.windFromDeg) + ' ' + wx.windMph + ' mph');
+    return '<span class="wx">' + bits.join(' &middot; ') + '</span>';
   }
   function cardHtml(g) {
-    var legs = g.legs.map(legHtml).join('');
-    return '<div class="card"><div class="card-hd">' +
-      '<span class="teams">' + esc(g.teams) + '</span>' +
-      '<span class="when">' + esc(g.when) + '</span></div>' + legs + '</div>';
+    var head = '<div class="card-hd"><span class="matchup">' +
+      teamImg(g.away, '') + '<span class="ab" style="color:' + tcol(g.away) + '">' + esc(g.away) + '</span>' +
+      '<span class="at">@</span>' +
+      teamImg(g.home, '') + '<span class="ab" style="color:' + tcol(g.home) + '">' + esc(g.home) + '</span>' +
+      '</span><span class="gmeta"><div class="when">' + esc(g.when) + '</div>' + wxHtml(g.wx) + '</span></div>';
+    return '<div class="card">' + head + g.legs.map(legHtml).join('') + '</div>';
   }
   function render() {
     var app = document.getElementById('app');

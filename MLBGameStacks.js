@@ -66,8 +66,8 @@ function mlbGameCardsCollect_(ss, cfg) {
       const p = mlbGameCardsNum_(r[11]); // p_nrfi
       if (!(p >= minNrfi)) return;
       bucket(r[0]).push({
-        chip: '🚦 NRFI', who: 'NRFI — 1st inning', pick: 'Under 0.5 runs',
-        p: p, odds: r[7], note: '', hm: false,
+        chip: '🚦 NRFI', who: 'NRFI', pick: 'Under 0.5 runs (1st inn)',
+        p: p, odds: r[7], note: '', hm: false, team: '',
       });
     });
   }
@@ -91,6 +91,7 @@ function mlbGameCardsCollect_(ss, cfg) {
       bucket(r[0]).push({
         chip: '⚾ K', who: pitcher, pick: (overBest ? 'Over ' : 'Under ') + line + ' K',
         p: p, odds: overBest ? r[6] : r[7], note: 'unanchored', hm: false,
+        team: String(r[4] || '').trim(), // pitch_team
       });
     });
   }
@@ -108,6 +109,7 @@ function mlbGameCardsCollect_(ss, cfg) {
       bucket(r[0]).push({
         chip: '🥎 HIT', who: batter, pick: 'Over ' + r[4] + ' (proj ' + (Math.round(proj * 100) / 100) + ')',
         p: mlbGameCardsNum_(r[9]), odds: r[5], note: onHm ? '⭐ Hit Machine' : '', hm: onHm,
+        team: String(r[3] || '').trim(), // bat_team
       });
     });
   }
@@ -270,6 +272,7 @@ function mlbGameCardsData_(ss, cfg) {
     if (!ia && ib) return 1;
     return 0;
   });
+  const wxOn = typeof mlbWeatherEnabled_ === 'function' ? mlbWeatherEnabled_(cfg) : true;
   const out = games.map(function (pk) {
     const m = meta[pk] || {};
     const t = timeIdx[pk] || {};
@@ -285,14 +288,35 @@ function mlbGameCardsData_(ss, cfg) {
         odds: leg.odds != null && leg.odds !== '' ? String(leg.odds) : '',
         note: String(leg.note || ''),
         hm: !!leg.hm,
+        team: typeof mlbCanonicalTeamAbbr_ === 'function' ? mlbCanonicalTeamAbbr_(leg.team) : String(leg.team || ''),
       };
     });
+    // Weather at first pitch (home park) — best-effort, never throws.
+    let wx = null;
+    if (wxOn && m.home && t.iso && typeof mlbWeatherParkForAbbr_ === 'function' && typeof mlbWeatherFetchAtFirstPitch_ === 'function') {
+      try {
+        const park = mlbWeatherParkForAbbr_(m.home);
+        const fp = new Date(t.iso);
+        const w = park ? mlbWeatherFetchAtFirstPitch_(park, fp) : null;
+        if (w && (isFinite(w.tempF) || isFinite(w.windMph))) {
+          wx = {
+            tempF: isFinite(w.tempF) ? Math.round(w.tempF) : null,
+            windMph: isFinite(w.windMph) ? Math.round(w.windMph) : null,
+            windFromDeg: isFinite(w.windFromDeg) ? Math.round(w.windFromDeg) : null,
+            dome: !!(park && park.dome),
+          };
+        }
+      } catch (e) {}
+    }
     return {
       pk: pk,
+      away: typeof mlbCanonicalTeamAbbr_ === 'function' ? mlbCanonicalTeamAbbr_(m.away) : String(m.away || ''),
+      home: typeof mlbCanonicalTeamAbbr_ === 'function' ? mlbCanonicalTeamAbbr_(m.home) : String(m.home || ''),
       teams: m.away && m.home ? m.away + ' @ ' + m.home : (m.matchup || 'Game ' + pk),
       matchup: m.matchup || '',
       when: t.hhmm ? t.hhmm + ' ET' : 'TBD',
       iso: t.iso || '',
+      wx: wx,
       legs: legs,
     };
   });
