@@ -72,22 +72,25 @@ function mlbGameCardsCollect_(ss, cfg) {
     });
   }
 
-  // ⚾ Pitcher K (either side)
-  const ksim = ss.getSheetByName(typeof MLB_PITCHER_K_SIM_TAB !== 'undefined' ? MLB_PITCHER_K_SIM_TAB : '⚡ Sim_Pitcher_K');
-  if (ksim && ksim.getLastRow() >= 4) {
-    ksim.getRange(4, 1, ksim.getLastRow() - 3, 19).getValues().forEach(function (r) {
+  // ⚾ Pitcher K — read the 🎰 card (UNANCHORED model p), not the anchored
+  // sim. This is the view the operator actually uses for K, and it carries
+  // more conviction (bigger market disagreements). Card cols: 3 pitcher,
+  // 5 fd_k_line, 6 fd_over, 7 fd_under, 11 p_over, 12 p_under, 18 flags.
+  const kcard = ss.getSheetByName(typeof MLB_PITCHER_K_CARD_TAB !== 'undefined' ? MLB_PITCHER_K_CARD_TAB : '🎰 Pitcher_K_Card');
+  if (kcard && kcard.getLastRow() >= 4) {
+    kcard.getRange(4, 1, kcard.getLastRow() - 3, 19).getValues().forEach(function (r) {
       const pitcher = String(r[3] || '').trim();
       if (!pitcher) return;
       if (String(r[18] || '').indexOf('injury') !== -1) return;
-      const pO = mlbGameCardsNum_(r[10]);
-      const pU = mlbGameCardsNum_(r[11]);
+      const pO = mlbGameCardsNum_(r[11]);
+      const pU = mlbGameCardsNum_(r[12]);
       const overBest = !(pU > pO);
       const p = overBest ? pO : pU;
       if (!(p >= minK)) return;
-      const line = r[4];
+      const line = r[5];
       bucket(r[0]).push({
         chip: '⚾ K', who: pitcher, pick: (overBest ? 'Over ' : 'Under ') + line + ' K',
-        p: p, odds: overBest ? r[5] : r[6], note: '', hm: false,
+        p: p, odds: overBest ? r[6] : r[7], note: 'unanchored', hm: false,
       });
     });
   }
@@ -173,7 +176,7 @@ function mlbGameCardsRender_(ss, games, byGame, meta, timeIdx) {
     .setVerticalAlignment('middle').setHorizontalAlignment('left');
   sh.setRowHeight(1, 38);
   sh.getRange(2, 2, 1, 5).merge()
-    .setValue('🚦 NRFI p≥.60   ⚾ K p≥.60   🥎 HIT proj≥1.00   ·   ⭐ gold = also on Hit Machine   ·   confidence shaded amber→green   ·   NOT staking advice')
+    .setValue('🚦 NRFI p≥.60   ⚾ K p≥.60 (unanchored 🎰 card)   🥎 HIT proj≥1.00   ·   ⭐ gold = also on Hit Machine   ·   confidence amber→green   ·   NOT staking advice')
     .setFontSize(9).setFontColor('#37474f').setVerticalAlignment('middle');
   sh.setRowHeight(2, 22);
 
