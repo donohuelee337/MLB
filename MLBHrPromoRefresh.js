@@ -11,6 +11,9 @@
 
 var MLB_BATTER_HR_PROMO_TAB = '📣 Batter_HR_Promo';
 var MLB_BATTER_HR_PROMO_NAMED_RANGE = 'MLB_BATTER_HR_PROMO';
+// SP IDs already warned about missing HR/9 this run — dedupe per pitcher
+// (GAS module globals reset per execution, so this is fresh each window).
+var __mlbHrPromoMissingSpWarned = {};
 
 function mlbHrPromoParseConfigNum_(cfg, key, def) {
   const x = parseFloat(String(cfg[key] != null ? cfg[key] : def).trim(), 10);
@@ -157,7 +160,15 @@ function mlbHrPromoRowForBatter_(ctx) {
   } else {
     const hr9 = mlbHrPromoFetchPitcherSeasonHr9_(spId, season, mlbOppSpMinIp_(cfg));
     if (hr9 == null) {
-      addPipelineWarning_('HR promo: missing SP HR/9 for pitcher ' + spId);
+      // Low-IP/rookie SP under the min-IP threshold → no HR/9; pitcherMult
+      // stays neutral (1). Warn ONCE per pitcher per run, not once per batter
+      // faced (was ~28 dup lines/game, burying every other warning).
+      const k = String(spId);
+      if (!__mlbHrPromoMissingSpWarned[k]) {
+        __mlbHrPromoMissingSpWarned[k] = true;
+        addPipelineWarning_('HR promo: no SP HR/9 for pitcher ' + spId + ' (under min IP) — neutral pitcher mult');
+      }
+      reason = reason ? reason + ';sp_hr9_missing' : 'sp_hr9_missing';
     } else {
       pitcherMult = mlbHrPromoPitcherMultFromHrPer9_(hr9, lgHr9, pmLo, pmHi);
     }
