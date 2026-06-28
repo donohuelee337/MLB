@@ -8,8 +8,20 @@
 // term is shrunk toward league average by the batter's sample vs that
 // pitch (pa/(pa+SHRINK)) — heat-map logic at a grain with real n.
 //
-// SHADOW ONLY this build: scores feed the 🎯 Hit Machine ranking/audit
-// columns. Nothing on the live 🃏 card reads them.
+// QUALITY GATE (build 59, SHADOW): the raw score treats the SP as a
+// delivery vehicle (how OFTEN he throws pitch T) and ignores how GOOD his
+// T is. A hitter's RV vs a pitch TYPE is a quality-weighted average over
+// the pitches he has actually seen — overwhelmingly ordinary stuff. So
+// "+3.9 RV/100 vs four-seamers" means "vs the MEDIAN four-seamer," and is
+// out of sample against a top-percentile one (the Goldschmidt-vs-Tolle
+// trap). The gate ranks each SP pitch within its own type league-wide
+// (from the pitcher map we already ingest) and scales the batter's term:
+//   scale = clamp(1 − K·z),  z = (qualityPctile − 0.5)·2 ∈ [−1,+1]
+//   elite pitch (z→+1): edge regresses toward 0 (K=1) or negative (K>1)
+//   weak  pitch (z→−1): edge AMPLIFIES — the green-light "feast" case
+// rvGated + a plain-English whyNote are returned ALONGSIDE the raw rv.
+// Nothing here moves λ yet: rvGated is shadow, graded vs raw rv in the
+// 🎯 why column / results log before promotion (same discipline as v3).
 //
 // Fetch policy matches MLBSavantIngest: two CSV fetches per run, muted,
 // best-effort; ARSENAL_*_CSV_URL config overrides the built-in URLs
@@ -21,14 +33,38 @@ const MLB_ARSENAL_B_TAB = '📊 Savant_Arsenal_B';
 const MLB_ARSENAL_NCOL = 6;
 const MLB_ARSENAL_LEAGUE_WHIFF = 24.5; // league whiff% baseline for shrinkage
 const MLB_ARSENAL_SHRINK_PA = 50;      // batter pitches-seen shrink constant
+const MLB_ARSENAL_QGATE_REF_MIN_N = 50; // min pitches for an SP pitch to count in the league ref dist
+
+// Pitch-type code → readable name (for the why blurb).
+const MLB_PITCH_NAME = {
+  FF: '4-seam', FA: 'fastball', SI: 'sinker', FT: '2-seam', FC: 'cutter',
+  SL: 'slider', ST: 'sweeper', SV: 'slurve', CU: 'curve', KC: 'knuckle-curve',
+  CS: 'slow curve', CH: 'change', FS: 'splitter', FO: 'forkball', SC: 'screwball',
+  EP: 'eephus', KN: 'knuckleball',
+};
+function mlbPitchName_(pt) {
+  return MLB_PITCH_NAME[String(pt || '').toUpperCase()] || (pt || 'pitch');
+}
+
+/** Ordinal suffix for a whole number: 82 → "82nd", 11 → "11th". */
+function mlbOrd_(n) {
+  n = Math.round(n);
+  const v = n % 100;
+  const s = (v >= 11 && v <= 13) ? 'th' : (['th', 'st', 'nd', 'rd'][n % 10] || 'th');
+  return n + s;
+}
 
 var __mlbArsenalPMap = null; // pid → [{pt, usage, whiff, rv100, n}]
 var __mlbArsenalBMap = null; // bid → {pt: {rv100, whiff, n}}
+var __mlbArsenalQRef = null; // pt → {rv:[sorted], whiff:[sorted]} league ref dist
+var __mlbArsenalQCfg = null; // cached quality-gate config
 var __mlbArsenalDiag = { pitcher: null, batter: null }; // last-fetch diagnostics
 
 function mlbResetArsenalCaches_() {
   __mlbArsenalPMap = null;
   __mlbArsenalBMap = null;
+  __mlbArsenalQRef = null;
+  __mlbArsenalQCfg = null;
 }
 
 function mlbArsenalDefaultUrl_(type, season) {
@@ -235,12 +271,125 @@ function mlbArsenalBatterMap_() {
 }
 
 /**
+ * Quality-gate config (cached). All keys are optional — defaults make the
+ * gate behave conservatively (elite stuff REGRESSES a hitter's type-edge
+ * to ~0 at K=1; it does not punish unless K>1). Tune from the 🎯 why
+ * column + results log before raising K or promoting rvGated into λ.
+ */
+function mlbArsenalQCfg_() {
+  if (__mlbArsenalQCfg !== null) return __mlbArsenalQCfg;
+  let c = {};
+  try { c = (typeof getConfig === 'function') ? getConfig() : {}; } catch (e) { c = {}; }
+  function num(k, d) { const v = parseFloat(String(c[k])); return isFinite(v) ? v : d; }
+  __mlbArsenalQCfg = {
+    enabled: String(c['ARSENAL_QGATE_ENABLED'] != null ? c['ARSENAL_QGATE_ENABLED'] : 'Y').toUpperCase() === 'Y',
+    k:       num('ARSENAL_QGATE_K', 1.0),        // overall gate strength multiplier
+    qscale:  num('ARSENAL_QGATE_QSCALE', 3.0),   // RV/100 swing across the full quality range (worst→best pitch of the type)
+    wRv:     num('ARSENAL_QGATE_W_RV', 0.6),     // blend weight: pitch run-value percentile
+    wWhiff:  num('ARSENAL_QGATE_W_WHIFF', 0.4),  // blend weight: pitch whiff percentile
+    refMinN: num('ARSENAL_QGATE_REF_MIN_N', MLB_ARSENAL_QGATE_REF_MIN_N),
+    alarmQ:  num('ARSENAL_QGATE_ALARM_Q', 0.70), // pitch-quality pctile that triggers an alarm/edge note
+    strong:  num('ARSENAL_QGATE_STRONG_RV', 0.5), // |batter RV/100 vs type| to count as a real read
+  };
+  return __mlbArsenalQCfg;
+}
+
+/**
+ * League reference distribution per pitch type, built from the pitcher map
+ * we already ingest (every qualified SP's per-pitch row). One pass, cached.
+ * Pitches under refMinN are excluded so a 6-pitch sample can't define the
+ * league. Arrays are sorted so percentile lookups are a binary search.
+ */
+function mlbArsenalQRef_() {
+  if (__mlbArsenalQRef !== null) return __mlbArsenalQRef;
+  __mlbArsenalQRef = {};
+  const cfg = mlbArsenalQCfg_();
+  const pMap = mlbArsenalPitcherMap_();
+  Object.keys(pMap).forEach(function (pid) {
+    pMap[pid].forEach(function (p) {
+      if (!p.pt || !(p.n >= cfg.refMinN)) return;
+      if (!__mlbArsenalQRef[p.pt]) __mlbArsenalQRef[p.pt] = { rv: [], whiff: [] };
+      if (isFinite(p.rv100)) __mlbArsenalQRef[p.pt].rv.push(p.rv100);
+      if (isFinite(p.whiff)) __mlbArsenalQRef[p.pt].whiff.push(p.whiff);
+    });
+  });
+  Object.keys(__mlbArsenalQRef).forEach(function (pt) {
+    __mlbArsenalQRef[pt].rv.sort(function (a, b) { return a - b; });
+    __mlbArsenalQRef[pt].whiff.sort(function (a, b) { return a - b; });
+  });
+  return __mlbArsenalQRef;
+}
+
+/** Percentile of v within a SORTED array: fraction of entries ≤ v (0..1). */
+function mlbArsenalPctile_(sortedArr, v) {
+  if (!sortedArr || !sortedArr.length || !isFinite(v)) return null;
+  let lo = 0, hi = sortedArr.length;
+  while (lo < hi) { const mid = (lo + hi) >> 1; if (sortedArr[mid] <= v) lo = mid + 1; else hi = mid; }
+  return lo / sortedArr.length;
+}
+
+/**
+ * Blended league quality percentile (0..1) for ONE of an SP's pitches.
+ * Higher = nastier: high run-value-saved AND high whiff both push it up.
+ * Returns null when the pitch type has no usable league reference.
+ */
+function mlbArsenalPitchQuality_(p) {
+  const cfg = mlbArsenalQCfg_();
+  const ref = mlbArsenalQRef_()[p.pt];
+  if (!ref) return null;
+  const qRv = mlbArsenalPctile_(ref.rv, p.rv100);    // higher rv100 = better pitch for the SP
+  const qWh = mlbArsenalPctile_(ref.whiff, p.whiff); // higher whiff = more misses
+  let acc = 0, wsum = 0;
+  if (qRv != null) { acc += cfg.wRv * qRv; wsum += cfg.wRv; }
+  if (qWh != null) { acc += cfg.wWhiff * qWh; wsum += cfg.wWhiff; }
+  if (wsum <= 0) return null;
+  return acc / wsum;
+}
+
+/**
+ * Plain-English signal for the 🎯 why column from the single most decisive
+ * pitch (where batter type-strength meets an extreme-quality SP pitch).
+ * Fires three ways: 🚨 strong batter into an ELITE pitch (edge out of
+ * sample — the Goldschmidt/Tolle trap), 🟢 strong batter into a WEAK,
+ * high-usage pitch (real, repeatable edge), ⚠️ weak batter into an elite
+ * pitch (stuff + matchup both against). Neutral → ''.
+ */
+function mlbArsenalWhyNote_(best, cfg) {
+  if (!best || best.q == null) return '';
+  const pctile = mlbOrd_(best.q * 100);
+  const name = mlbPitchName_(best.pt);
+  const usage = Math.round(best.usage);
+  const rvB = Math.round(best.rvB * 10) / 10;
+  const strong = best.rvB >= cfg.strong;
+  const weakBat = best.rvB <= -cfg.strong;
+  const elite = best.q >= cfg.alarmQ;
+  const soft = best.q <= (1 - cfg.alarmQ);
+  if (strong && elite) {
+    return '🚨 ' + name + ' (' + usage + '% usage) grades ' + pctile + '-pctile league-wide — batter +' +
+      rvB + ' RV/100 vs ' + name + ' is mostly off lesser stuff; edge likely out of sample';
+  }
+  if (strong && soft) {
+    return '🟢 ' + name + ' (' + usage + '% usage) only ' + pctile + '-pctile quality — batter +' +
+      rvB + ' RV/100 vs it; real, repeatable edge';
+  }
+  if (weakBat && elite) {
+    return '⚠️ ' + name + ' (' + usage + '% usage) grades ' + pctile + '-pctile and batter is ' +
+      rvB + ' RV/100 vs ' + name + ' — stuff and matchup both against';
+  }
+  return '';
+}
+
+/**
  * Batter-vs-arsenal matchup score.
- * rv:    usage-weighted batter run value per 100 pitches vs this SP's mix,
- *        shrunk toward 0 (league avg RV is 0 by construction). + = batter edge.
- * whiff: usage-weighted batter whiff% vs the mix, shrunk toward league 24.5.
- * cover: fraction of the SP's usage the batter has data for (low cover =
- *        score is mostly prior — treat as weak signal).
+ * rv:      usage-weighted batter run value per 100 pitches vs this SP's mix,
+ *          shrunk toward 0 (league avg RV is 0 by construction). + = batter edge.
+ * rvGated: rv after the pitch-QUALITY gate (shadow) — the batter's edge on
+ *          each pitch is scaled by where that SP's pitch ranks in its type
+ *          league-wide. Equals rv when the gate is disabled.
+ * whiff:   usage-weighted batter whiff% vs the mix, shrunk toward league 24.5.
+ * cover:   fraction of the SP's usage the batter has data for (low cover =
+ *          score is mostly prior — treat as weak signal).
+ * whyNote: plain-English alarm/edge string for the why column ('' = neutral).
  * Returns nulls when either side is missing from the tables.
  */
 function mlbArsenalMatchupScore_(spId, batterId) {
@@ -248,11 +397,16 @@ function mlbArsenalMatchupScore_(spId, batterId) {
   const bMap = mlbArsenalBatterMap_();
   const arsenal = pMap[String(parseInt(spId, 10) || 0)];
   const bat = bMap[String(parseInt(batterId, 10) || 0)];
-  if (!arsenal || !arsenal.length || !bat) return { rv: null, whiff: null, cover: null };
+  if (!arsenal || !arsenal.length || !bat) {
+    return { rv: null, whiff: null, cover: null, rvGated: null, whyNote: '' };
+  }
+  const qcfg = mlbArsenalQCfg_();
   let rvSum = 0;
+  let rvGatedSum = 0;
   let whiffSum = 0;
   let usageSum = 0;
   let coverSum = 0;
+  let best = null; // most decisive gated pitch, for the why blurb
   arsenal.forEach(function (p) {
     if (!p.usage || p.usage <= 0) return;
     usageSum += p.usage;
@@ -261,14 +415,45 @@ function mlbArsenalMatchupScore_(spId, batterId) {
     const w = n / (n + MLB_ARSENAL_SHRINK_PA); // shrink weight toward league
     const rvB = b && isFinite(b.rv100) ? b.rv100 : 0;
     const whB = b && isFinite(b.whiff) ? b.whiff : MLB_ARSENAL_LEAGUE_WHIFF;
-    rvSum += p.usage * (w * rvB);
+    const term = w * rvB; // batter edge on this pitch, sample-shrunk
+    rvSum += p.usage * term;
     whiffSum += p.usage * (w * whB + (1 - w) * MLB_ARSENAL_LEAGUE_WHIFF);
     if (b) coverSum += p.usage * w;
+
+    // --- pitch-quality gate (shadow, additive & sign-safe) ---
+    // Quality-adjusted batter rate vs THIS pitch = his vs-type rate minus the
+    // pitch's quality premium (in RV/100). z>0 (elite specimen) drags it down,
+    // z<0 (weak specimen) lifts it — correct whether his type-rate is + or −.
+    // Shrunk by the same batter-sample weight w, so a pitch he has no read on
+    // (w→0) gets no fabricated shift.
+    let gTerm = term;
+    let q = null;
+    if (qcfg.enabled) {
+      q = mlbArsenalPitchQuality_(p); // 0..1 league pctile of THIS pitch's quality
+      if (q != null) {
+        const z = (q - 0.5) * 2; // -1 worst … +1 elite specimen of the type
+        gTerm = w * (rvB - qcfg.k * z * qcfg.qscale);
+      }
+    }
+    rvGatedSum += p.usage * gTerm;
+
+    // Most decisive pitch = largest swing the gate applied to a real read
+    // (batter has data on this pitch). Surfaces both 🚨 traps and 🟢 edges.
+    if (q != null && b) {
+      const moved = Math.abs(p.usage * (term - gTerm));
+      if (!best || moved > best.moved) {
+        best = { pt: p.pt, usage: p.usage, q: q, rvB: rvB, moved: moved };
+      }
+    }
   });
-  if (usageSum <= 0) return { rv: null, whiff: null, cover: null };
+  if (usageSum <= 0) return { rv: null, whiff: null, cover: null, rvGated: null, whyNote: '' };
+  const rv = Math.round((rvSum / usageSum) * 100) / 100;
+  const rvGated = qcfg.enabled ? Math.round((rvGatedSum / usageSum) * 100) / 100 : rv;
   return {
-    rv: Math.round((rvSum / usageSum) * 100) / 100,
+    rv: rv,
     whiff: Math.round((whiffSum / usageSum) * 10) / 10,
     cover: Math.round((coverSum / usageSum) * 100) / 100,
+    rvGated: rvGated,
+    whyNote: qcfg.enabled ? mlbArsenalWhyNote_(best, qcfg) : '',
   };
 }

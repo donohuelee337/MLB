@@ -247,6 +247,14 @@ function buildConfigTab() {
   row_('ARSENAL_INGEST_ENABLED', 'Y', '📊 Y/N — fetch Savant pitch-arsenal-stats CSVs (pitcher + batter, 2 fetches/run) for 🎯 matchup scores. Shadow only.');
   row_('ARSENAL_P_CSV_URL', '', '📊 Override URL for the pitcher arsenal CSV. Blank = built-in Savant leaderboard export URL.');
   row_('ARSENAL_B_CSV_URL', '', '📊 Override URL for the batter arsenal CSV. Blank = built-in Savant leaderboard export URL.');
+  row_('ARSENAL_QGATE_ENABLED', 'Y', '📊 Y/N — pitch-QUALITY gate (build 59, SHADOW). Scales the batter\'s per-pitch RV by where the SP\'s pitch ranks in its type league-wide, so "+RV vs four-seamers" doesn\'t credit a hitter against an ELITE four-seamer (the Goldschmidt-vs-Tolle trap). Emits rvGated + a 🚨/🟢/⚠️ why note. Does NOT move λ yet — graded vs raw rv first.');
+  row_('ARSENAL_QGATE_K', '1.0', '📊 Overall quality-gate strength multiplier. Quality-adjusted batter rate vs a pitch = rv_vs_type − K·z·QSCALE, z = (qualityPctile−0.5)·2 ∈ [−1,+1]. K=1 = full effect; 0 = off; >1 over-weights stuff. Tune from the 🎯 why column / results log.');
+  row_('ARSENAL_QGATE_QSCALE', '3.0', '📊 RV/100 swing across the FULL quality range (worst→best specimen of a pitch type). At z=+1 (elite) the batter\'s rate vs that pitch is docked K·QSCALE RV/100; z=−1 (weak) adds it. Raise to make elite stuff erase a hitter\'s type-edge harder (the Goldschmidt/Tolle case).');
+  row_('ARSENAL_QGATE_W_RV', '0.6', '📊 Quality blend weight on the SP pitch\'s run-value-per-100 percentile (overall pitch quality). Pairs with ARSENAL_QGATE_W_WHIFF.');
+  row_('ARSENAL_QGATE_W_WHIFF', '0.4', '📊 Quality blend weight on the SP pitch\'s whiff% percentile (bat-missing / contact suppression — matters for 1+H).');
+  row_('ARSENAL_QGATE_REF_MIN_N', '50', '📊 Min pitches thrown for an SP pitch to count in the league reference distribution (keeps tiny samples from defining percentiles).');
+  row_('ARSENAL_QGATE_ALARM_Q', '0.70', '📊 Pitch-quality percentile that triggers a 🚨 (elite) or, at 1−this, a 🟢 (weak) why-column note when the batter has a real read on that pitch.');
+  row_('ARSENAL_QGATE_STRONG_RV', '0.5', '📊 |batter RV/100 vs a pitch type| needed to count as a genuine strength/weakness for the why note.');
   row_('HM_ENABLED', 'Y', '🎯 Y/N — Hit Machine 2-leg 1+H parlay board + SHADOW paper log. No real stakes until promoted.');
   row_('HM_MIN_P', '0.65', '🎯 Min model P(1+ hit) for PARLAY LEGS only (post-shrink scale, 0.65 ≈ 0.79 raw). The candidate list always shows the top-N most likely hitters regardless.');
   row_('HM_LIST_N', '10', '🎯 Candidate list size — "here are the N guys most likely to get a hit" (BvP/arsenal context fetched for these only). Odds NOT required to make the list.');
@@ -520,6 +528,12 @@ function validateMlbPipelineConfig_(cfg) {
   warnRange('HM_PAPER_STAKE', c['HM_PAPER_STAKE'], 1, 7.5);
   warnRange('HM_MIN_SEASON_AB', c['HM_MIN_SEASON_AB'], 10, 250);
   warnRange('HM_SGP_RHO', c['HM_SGP_RHO'], 0, 0.3);
+  warnRange('ARSENAL_QGATE_K', c['ARSENAL_QGATE_K'], 0, 2);
+  warnRange('ARSENAL_QGATE_QSCALE', c['ARSENAL_QGATE_QSCALE'], 0, 8);
+  warnRange('ARSENAL_QGATE_W_RV', c['ARSENAL_QGATE_W_RV'], 0, 1);
+  warnRange('ARSENAL_QGATE_W_WHIFF', c['ARSENAL_QGATE_W_WHIFF'], 0, 1);
+  warnRange('ARSENAL_QGATE_ALARM_Q', c['ARSENAL_QGATE_ALARM_Q'], 0.5, 0.95);
+  warnRange('ARSENAL_QGATE_REF_MIN_N', c['ARSENAL_QGATE_REF_MIN_N'], 10, 200);
   warnRange('HM_SGP_HAIRCUT', c['HM_SGP_HAIRCUT'], 0, 0.3);
   warnRange('K_PROB_BLEND_MARKET_W', c['K_PROB_BLEND_MARKET_W'], 0, 1);
   warnRange('ANCHOR_WEIGHT_BATTER_HITS', c['ANCHOR_WEIGHT_BATTER_HITS'], 0, 1);

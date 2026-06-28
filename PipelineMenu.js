@@ -18,6 +18,7 @@ function onOpen() {
     .addItem('🔒 Run Final  (full refresh + snapshot)', 'runFinalWindowMLB')
     .addItem('🚑 Re-check health signals (card players)', 'mlbFlagBetCardHealthSignals_')
     .addItem('🎯 Refresh Hit Machine (shadow parlay)', 'refreshHitMachine_')
+    .addItem('🧪 Gate shadow report (raw vs gated)', 'mlbHmQGateShadowReport_')
     .addItem('🎴 Refresh Game Cards', 'refreshMLBGameCards')
     .addItem('🎴 Open Game Cards (web)', 'mlbOpenGameCardsApp_')
     .addItem('🎴 Open Game Cards (tab)', 'mlbActivateGameCardsTab_')
@@ -203,6 +204,26 @@ function onOpen() {
       .addItem('📋 Snapshot F5 picks → log', 'mlbSnapshotF5Midday_')
       .addItem('📊 Grade pending F5 rows', 'gradeF5PendingResults_')
       .addItem('📋 Open F5 Results Log', 'mlbActivateF5ResultsLogTab_')
+  );
+
+  menu.addSubMenu(
+    ui.createMenu('🩹 Edge Signals')
+      .addItem('🩹 Refresh Bullpen Status', 'refreshBullpenStatus_')
+      .addItem('🩹 Open Bullpen Status', 'mlbActivateBullpenStatusTab_')
+      .addSeparator()
+      .addItem('✅ Bullpen self-test', 'mlbBullpenSelfTestMenu_')
+  );
+
+  menu.addSubMenu(
+    ui.createMenu('🧹 Maintenance')
+      .addItem('🔬 Refresh Shadow Monitor', 'refreshShadowMonitor_')
+      .addItem('🔬 Open Shadow Monitor', 'mlbActivateShadowMonitorTab_')
+      .addSeparator()
+      .addItem('🧹 Audit tabs (report only)', 'mlbTabAudit_')
+      .addItem('🧹 Cleanup dead tabs (dry-run)', 'mlbTabCleanupDryRun_')
+      .addItem('🗑️ Cleanup APPLY (needs TAB_CLEANUP_ARMED=Y)', 'mlbTabCleanupApply_')
+      .addSeparator()
+      .addItem('✅ Tab janitor self-test', 'mlbTabJanitorSelfTestMenu_')
   );
 
   menu.addToUi();

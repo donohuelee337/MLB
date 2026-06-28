@@ -21,7 +21,7 @@
 
 const MLB_HIT_MACHINE_TAB = '🎯 Hit_Machine';
 const MLB_HIT_MACHINE_LOG_TAB = '📋 HitMachine_Log';
-const MLB_HIT_MACHINE_LOG_NCOL = 27;
+const MLB_HIT_MACHINE_LOG_NCOL = 31;
 
 const MLB_HIT_MACHINE_LOG_HEADERS = [
   'Logged At', 'Slate',
@@ -29,14 +29,20 @@ const MLB_HIT_MACHINE_LOG_HEADERS = [
   'leg2_player', 'leg2_id', 'leg2_gamePk', 'leg2_odds', 'leg2_p', 'leg2_arsenal_rv', 'leg2_bvp',
   'parlay_american', 'parlay_p', 'ev_$1', 'stake $',
   'leg_results', 'result', 'pnl $', 'grade_notes', 'bet_key', 'Window', 'flags',
+  // 🧪 build 59 — pitch-quality gate SHADOW columns (appended; never read by the
+  // grader, which only touches cols 1–24). leg_results grades each leg WIN/LOSS
+  // on 1+H, so these give raw-vs-gated-vs-outcome per leg for free.
+  'leg1_arsenal_rv_gated', 'leg1_q_flag', 'leg2_arsenal_rv_gated', 'leg2_q_flag',
 ];
 
 var __mlbHmBvpCache = {}; // 'bid|spId' → {pa, h, avg} | null
 var __mlbHmLastGmCache = {}; // bid → {h, ab} | null
+var __mlbHmBatSideCache = {}; // bid → 'L' | 'R' | 'S' | '' (one /people fetch, cached)
 
 function mlbResetHitMachineCaches_() {
   __mlbHmBvpCache = {};
   __mlbHmLastGmCache = {};
+  __mlbHmBatSideCache = {};
 }
 
 /**
@@ -76,6 +82,53 @@ function mlbHmLastGameLine_(batterId, season) {
   }
   __mlbHmLastGmCache[key] = out;
   return out;
+}
+
+/**
+ * Batter's listed plate side from statsapi: 'L' | 'R' | 'S' (switch) | ''.
+ * One cached /people fetch per candidate (short list only). This is DISPLAY
+ * sugar — the model never reads the batter's own stand; it platoons off the
+ * SP's hand via the vs-L/vs-R H/PA split (so switch hitters are already
+ * handled correctly in the math). We only need the stand to render the board.
+ */
+function mlbHmBatSide_(batterId) {
+  const key = String(batterId);
+  if (key in __mlbHmBatSideCache) return __mlbHmBatSideCache[key];
+  let out = '';
+  try {
+    const url = mlbStatsApiBaseUrl_() + '/people/' + parseInt(batterId, 10);
+    const resp = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+    if (resp.getResponseCode() === 200) {
+      const json = JSON.parse(resp.getContentText());
+      const p = json && json.people && json.people[0];
+      out = String((p && p.batSide && p.batSide.code) || '').trim().toUpperCase();
+    }
+    Utilities.sleep(150);
+  } catch (e) {
+    Logger.log('mlbHmBatSide_: ' + (e.message || e));
+  }
+  __mlbHmBatSideCache[key] = out;
+  return out;
+}
+
+/**
+ * Effective plate side tonight, switch-hitter aware, for the board.
+ *   L/R batter → that side (constant).
+ *   S (switch) → opposite the SP's hand: S vs RHP → bats L; S vs LHP → bats R.
+ * Annotated with the SP hand so the platoon reads at a glance, e.g.
+ * "S→L v RHP", "R v LHP". SP hand unknown → side alone; stand unknown but SP
+ * known → just the matchup tag.
+ */
+function mlbHmEffectiveSideDisp_(stand, spThrows) {
+  const s = String(stand || '').trim().toUpperCase();
+  const t = String(spThrows || '').trim().toUpperCase();
+  const vs = t === 'R' ? ' v RHP' : t === 'L' ? ' v LHP' : '';
+  if (s === 'S') {
+    const eff = t === 'L' ? 'R' : t === 'R' ? 'L' : '';
+    return (eff ? 'S→' + eff : 'S') + vs;
+  }
+  if (s === 'L' || s === 'R') return s + vs;
+  return vs ? vs.trim() : '';
 }
 
 /** Career batter-vs-pitcher line from statsapi. null = no data / fetch fail. */
@@ -220,7 +273,8 @@ function refreshHitMachine_() {
       batter: batter, batterId: batterId, gamePk: gamePk,
       matchup: String(r[1] || ''), odds: isNaN(odds) ? '' : odds, p: Math.round(p * 1000) / 1000,
       lam: Math.round(lamModel * 100) / 100, estPa: estPa,
-      oppSpName: String(r[27] || ''), lineupNote: lineupNote, flags: isNaN(odds) ? 'no_price' : '',
+      oppSpName: String(r[27] || ''), oppSpThrows: String(r[28] || ''),
+      lineupNote: lineupNote, flags: isNaN(odds) ? 'no_price' : '',
     });
   });
   pool.sort(function (a, b) { return b.p - a.p; });
@@ -257,11 +311,27 @@ function refreshHitMachine_() {
   cands.forEach(function (c) {
     const spId = mlbHmSpIdForRow_(ss, c.gamePk, c.oppSpName);
     c.spId = spId;
+    // Team + effective plate side — SURFACE the platoon the model already used
+    // (vs-hand H/PA is the base λ); the operator was re-deriving this by hand.
+    try {
+      c.team = typeof mlbSharedFetchBatterTeamAbbr_ === 'function'
+        ? (mlbSharedFetchBatterTeamAbbr_(c.batterId) || '') : '';
+    } catch (e) { c.team = ''; }
+    c.stand = mlbHmBatSide_(c.batterId);
+    let spThrows = String(c.oppSpThrows || '').trim().toUpperCase();
+    if (spThrows !== 'L' && spThrows !== 'R' && spId &&
+        typeof mlbSharedFetchPitcherThrows_ === 'function') {
+      try { spThrows = String(mlbSharedFetchPitcherThrows_(spId) || '').trim().toUpperCase(); } catch (e) {}
+    }
+    c.spThrows = spThrows;
+    c.sideDisp = mlbHmEffectiveSideDisp_(c.stand, spThrows);
     const ars = spId && typeof mlbArsenalMatchupScore_ === 'function'
       ? mlbArsenalMatchupScore_(spId, c.batterId)
       : { rv: null, whiff: null, cover: null };
     c.arsRv = ars.rv;
     c.arsCover = ars.cover;
+    c.arsRvGated = ars.rvGated != null ? ars.rvGated : ars.rv; // shadow: quality-gated rv
+    c.arsNote = ars.whyNote || '';                              // 🚨/🟢/⚠️ pitch-quality signal
     const bvp = spId ? mlbHmBvpCareer_(c.batterId, spId) : null;
     c.bvp = bvp ? bvp.h + '-' + bvp.pa : '';
     // One-way stay-away veto: enough career PA and basically hitless.
@@ -396,6 +466,9 @@ function mlbHmWhyForCandidate_(c) {
       ' — unanchored model, one-sided shrink'
     );
   }
+  if (c.sideDisp) {
+    lines.push('bats ' + c.sideDisp + ' — vs-hand H/PA is the base λ (platoon already priced in)');
+  }
   const imp = mlbAmericanImplied_(c.odds);
   const impN = parseFloat(String(imp));
   if (isFinite(impN) && isFinite(c.p)) {
@@ -408,14 +481,23 @@ function mlbHmWhyForCandidate_(c) {
     lines.push('P(1+H) ' + Math.round(c.p * 1000) / 10 + '% — no live 0.5-line price (list-only, not parlay-eligible)');
   }
   if (c.arsRv != null) {
-    lines.push(
+    let arsLine =
       'arsenal ' + (c.arsRv >= 0 ? '+' : '') + c.arsRv + ' RV/100 vs ' + (c.oppSpName || 'SP') + '’s mix' +
       (c.arsCover != null
         ? ' (cover ' + Math.round(c.arsCover * 100) + '%' + (c.arsCover < 0.4 ? ' — mostly prior, weak signal' : '') + ')'
-        : '')
-    );
+        : '');
+    // Shadow: show the pitch-quality-gated rv when it diverges materially
+    // from the raw type-only rv (graded vs raw before promotion into λ).
+    if (c.arsRvGated != null && Math.abs(c.arsRvGated - c.arsRv) >= 0.3) {
+      arsLine += ' → quality-gated ' + (c.arsRvGated >= 0 ? '+' : '') + c.arsRvGated + ' (shadow)';
+    }
+    lines.push(arsLine);
   } else {
     lines.push('arsenal: no data — ranked on P alone');
+  }
+  // Pitch-quality alarm/edge — the "soft news / why / alarm bells" signal.
+  if (c.arsNote) {
+    lines.push(c.arsNote);
   }
   if (c.bvp) {
     lines.push('BvP ' + c.bvp + (c.bvpCold ? ' → STAY-AWAY (cold at sample, one-way veto)' : ' career vs this SP'));
@@ -438,16 +520,13 @@ function mlbHmWriteBoard_(ss, cands, parlay, hint, diag) {
   }
   sh.setTabColor('#f9a825');
   const builtAt = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'EEE M/d h:mm a');
-  sh.getRange(1, 1, 1, 12)
-    .merge()
-    .setValue(
-      '🎯 Hit Machine — 2-leg 1+H parlay · SHADOW (paper $) · legs = top-2 by P(1+H) (cross-game preferred, SGP fallback), arsenal rv tiebreak, BvP-cold vetoed · built ' + builtAt
-    )
-    .setFontWeight('bold')
-    .setBackground('#f57f17')
-    .setFontColor('#ffffff')
-    .setWrap(true);
-  sh.setRowHeight(1, 34);
+  // House style (MLBFormat) — 🎯 amber kept as the tab's identity accent.
+  mlbFmtTitle_(
+    sh,
+    '🎯 Hit Machine — 2-leg 1+H parlay · SHADOW (paper $) · legs = top-2 by P(1+H) (cross-game preferred, SGP fallback), arsenal rv tiebreak, BvP-cold vetoed · built ' + builtAt,
+    14,
+    { accent: '#f57f17', rowHeight: 34 }
+  );
 
   if (hint) {
     sh.getRange(2, 1).setValue(hint);
@@ -460,7 +539,7 @@ function mlbHmWriteBoard_(ss, cands, parlay, hint, diag) {
       Math.round(parlay.p * 1000) / 10 + '%  ·  EV $' + parlay.ev + '/$1  ·  paper stake $' + parlay.stake +
       '  ·  hover for why'
     : '🎟️ No qualifying parlay (need 2 eligible legs past the gates)';
-  const banner = sh.getRange(2, 1, 1, 12).merge().setValue(parlayLine).setFontWeight('bold')
+  const banner = sh.getRange(2, 1, 1, 14).merge().setValue(parlayLine).setFontWeight('bold')
     .setBackground(parlay ? '#fff8e1' : '#fbe9e7');
   if (parlay) {
     banner.setNote(
@@ -481,38 +560,46 @@ function mlbHmWriteBoard_(ss, cands, parlay, hint, diag) {
 
   // Diag row: the board can never be silently blank — the gate tally always
   // says what was scanned and where every row fell out.
-  sh.getRange(3, 1, 1, 12).merge()
+  sh.getRange(3, 1, 1, 14).merge()
     .setValue(diag || '')
     .setFontSize(9)
     .setFontColor('#616161');
 
-  sh.getRange(4, 1, 1, 12)
-    .setValues([['rank', 'batter', 'matchup', 'opp SP', 'odds', 'p_1H', 'arsenal_rv', 'arsenal_cover', 'bvp (H-PA)', 'lineup', 'flags', 'why (what the math is signaling)']])
-    .setFontWeight('bold')
-    .setBackground('#f9a825')
-    .setFontColor('#000000');
+  mlbFmtHeader_(
+    sh, 4,
+    ['rank', 'batter', 'team', 'matchup', 'side', 'opp SP', 'odds', 'p_1H', 'arsenal_rv', 'arsenal_cover', 'bvp (H-PA)', 'lineup', 'flags', 'why (what the math is signaling)'],
+    { accent: '#f9a825', textColor: '#000000' }
+  );
   const out = cands.map(function (c, i) {
     return [
-      i + 1, c.batter, c.matchup, c.oppSpName, c.odds, c.p,
+      i + 1, c.batter, c.team || '', c.matchup, c.sideDisp || '', c.oppSpName, c.odds, c.p,
       c.arsRv != null ? c.arsRv : '', c.arsCover != null ? c.arsCover : '',
       c.bvp, c.lineupNote, c.flags, mlbHmWhyForCandidate_(c),
     ];
   });
   if (out.length) {
-    sh.getRange(5, 1, out.length, 12).setValues(out);
-    sh.getRange(5, 12, out.length, 1).setWrap(true).setFontSize(9);
+    sh.getRange(5, 1, out.length, 14).setValues(out);
+    // House style: Inter + hairline grid, then the shared heat map on p_1H
+    // (same 10%-bands the 🃏 card uses) so probabilities read identically.
+    mlbFmtBody_(sh, 5, out.length, 14);
+    mlbFmtHeatColumn_(sh, 5, 8, out.length); // col 8 = p_1H (0..1)
+    sh.getRange(5, 14, out.length, 1).setWrap(true).setFontSize(9);
     for (let i = 0; i < out.length; i++) {
-      if (String(out[i][10]).indexOf('bvp_cold') !== -1) {
-        sh.getRange(5 + i, 1, 1, 12).setBackground('#eceff1').setFontColor('#90a4ae');
-      } else if (String(out[i][10]).indexOf('hitless_last_gm') !== -1) {
+      // flags is now column 13 (0-based index 12) after the team/side inserts.
+      // These tints run AFTER body + heat so a cold/veto row reads grey.
+      if (String(out[i][12]).indexOf('bvp_cold') !== -1) {
+        sh.getRange(5 + i, 1, 1, 14).setBackground('#eceff1').setFontColor('#90a4ae');
+      } else if (String(out[i][12]).indexOf('hitless_last_gm') !== -1) {
         // Pay-attention tint (operator rule): hitless yesterday — not a
         // veto, just don't let it slide past the eye.
-        sh.getRange(5 + i, 11).setBackground('#e3f2fd');
+        sh.getRange(5 + i, 13).setBackground('#e3f2fd');
       }
     }
   }
-  sh.setColumnWidth(12, 460);
-  sh.setFrozenRows(4);
+  sh.setColumnWidth(3, 56);   // team
+  sh.setColumnWidth(5, 104);  // side (switch-hitter aware)
+  sh.setColumnWidth(14, 460); // why
+  mlbFmtFreeze_(sh, 4);
 }
 
 /**
@@ -588,6 +675,9 @@ function mlbHmUpsertLog_(ss, parlay) {
     '', 'PENDING', '', '', betKey, '',
     'SHADOW(paper)' + (parlay.sgp ? '·SGP' : '') +
       (l1.lastGm ? '·L1 ' + l1.lastGm : '') + (l2.lastGm ? '·L2 ' + l2.lastGm : ''),
+    // 🧪 pitch-quality gate shadow (graded-vs-raw per leg)
+    l1.arsRvGated != null ? l1.arsRvGated : '', mlbHmQFlag_(l1.arsNote),
+    l2.arsRvGated != null ? l2.arsRvGated : '', mlbHmQFlag_(l2.arsNote),
   ];
 
   // Find today's row (PENDING only — never disturb a graded parlay).
@@ -676,4 +766,86 @@ function gradeHitMachinePendingResults_() {
   if (graded > 0) {
     try { ss.toast('Graded ' + graded + ' Hit Machine parlay(s)', 'MLB-BOIZ', 6); } catch (e) {}
   }
+}
+
+/** Leading quality-gate emoji from an arsenal whyNote ('' = neutral). */
+function mlbHmQFlag_(note) {
+  const s = String(note || '');
+  if (s.indexOf('🚨') !== -1) return '🚨';
+  if (s.indexOf('🟢') !== -1) return '🟢';
+  if (s.indexOf('⚠️') !== -1) return '⚠️';
+  return '';
+}
+
+/**
+ * 🧪 Pitch-quality gate SHADOW grading report. Reads the graded HitMachine_Log,
+ * buckets every GRADED leg (each leg is win/loss on 1+H) by its quality flag,
+ * and writes a small scoreboard: per flag → n legs, 1+H hit%, avg raw rv, avg
+ * gated rv. The promotion test: do 🚨-flagged legs (raw says edge, gate says
+ * fade) hit at a LOWER rate than neutral legs, and 🟢 legs HIGHER? When the
+ * spread holds over enough legs, promote rvGated into λ. Read-only on the log;
+ * writes one report tab. Safe to run any time.
+ */
+function mlbHmQGateShadowReport_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const logSh = ss.getSheetByName(MLB_HIT_MACHINE_LOG_TAB);
+  if (!logSh || logSh.getLastRow() < 4) {
+    try { ss.toast('No Hit Machine log rows yet', '🧪 Gate grading', 6); } catch (e) {}
+    return;
+  }
+  const data = logSh.getRange(4, 1, logSh.getLastRow() - 3, MLB_HIT_MACHINE_LOG_NCOL).getValues();
+  const buckets = {}; // flag → {n, win, rawSum, rawN, gatedSum, gatedN}
+  function ensure(f) {
+    if (!buckets[f]) buckets[f] = { n: 0, win: 0, rawSum: 0, rawN: 0, gatedSum: 0, gatedN: 0 };
+    return buckets[f];
+  }
+  let legsGraded = 0;
+  data.forEach(function (row) {
+    const res = String(row[21] || '').trim().toUpperCase();
+    if (res !== 'WIN' && res !== 'LOSS' && res !== 'VOID') return; // graded rows only
+    const parts = String(row[20] || '').split('/');
+    const legs = [
+      { o: String(parts[0] || '').trim().toUpperCase(), raw: row[7], gated: row[27], flag: String(row[28] || '') },
+      { o: String(parts[1] || '').trim().toUpperCase(), raw: row[14], gated: row[29], flag: String(row[30] || '') },
+    ];
+    legs.forEach(function (L) {
+      if (L.o !== 'WIN' && L.o !== 'LOSS') return; // skip VOID / blank
+      const b = ensure(L.flag || '—');
+      b.n++;
+      if (L.o === 'WIN') b.win++;
+      const rv = parseFloat(L.raw); if (isFinite(rv)) { b.rawSum += rv; b.rawN++; }
+      const gv = parseFloat(L.gated); if (isFinite(gv)) { b.gatedSum += gv; b.gatedN++; }
+      legsGraded++;
+    });
+  });
+
+  const tab = '📋 HitMachine_QGate_Shadow';
+  let sh = ss.getSheetByName(tab);
+  if (sh) sh.clearContents(); else sh = ss.insertSheet(tab);
+  sh.setTabColor('#6a1b9a');
+  const label = {
+    '🚨': '🚨 strong bat vs ELITE pitch (gate fades it)',
+    '🟢': '🟢 strong bat vs WEAK pitch (gate confirms edge)',
+    '⚠️': '⚠️ weak bat vs elite pitch (stuff+matchup against)',
+    '—': '— neutral / no flag',
+  };
+  const W = 6;
+  const out = [];
+  out.push(['📋 Hit Machine — pitch-quality gate SHADOW grading · per graded leg (1+H) · n=' + legsGraded + ' legs', '', '', '', '', '']);
+  out.push(['flag', 'meaning', 'legs', '1+H hit%', 'avg raw rv', 'avg gated rv']);
+  function avg(s, n) { return n > 0 ? Math.round((s / n) * 100) / 100 : ''; }
+  function pushBucket(f) {
+    const b = buckets[f]; if (!b || !b.n) return;
+    out.push([f, label[f] || '', b.n, Math.round((b.win / b.n) * 1000) / 10 + '%', avg(b.rawSum, b.rawN), avg(b.gatedSum, b.gatedN)]);
+  }
+  ['🚨', '⚠️', '🟢', '—'].forEach(pushBucket);
+  Object.keys(buckets).forEach(function (f) { if (['🚨', '⚠️', '🟢', '—'].indexOf(f) === -1) pushBucket(f); });
+  out.push(['', '', '', '', '', '']);
+  out.push(['Read: 🚨 legs should hit BELOW neutral (gate correctly fading traps), 🟢 ABOVE (gate finding edges). When the spread holds over enough legs, promote rvGated into λ.', '', '', '', '', '']);
+  const norm = out.map(function (r) { while (r.length < W) r.push(''); return r.slice(0, W); });
+  sh.getRange(1, 1, norm.length, W).setValues(norm);
+  sh.getRange(1, 1, 1, W).merge().setFontWeight('bold').setBackground('#4a148c').setFontColor('#ffffff');
+  sh.getRange(2, 1, 1, W).setFontWeight('bold').setBackground('#6a1b9a').setFontColor('#ffffff');
+  sh.setFrozenRows(2);
+  try { ss.toast('QGate shadow: ' + legsGraded + ' graded legs bucketed', '🧪 Gate grading', 8); } catch (e) {}
 }
