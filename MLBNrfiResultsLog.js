@@ -1,4 +1,12 @@
 // ============================================================
+// CHANGELOG (newest on top)
+// ------------------------------------------------------------
+// 2026-10-31 · v1.0 (changelog seeded)
+//   WHAT: mlbNRFIDefaultStake_ fallback 7.50 → 15.00.
+//   WHY:  Lee's real unit is $5 (1u/2u/3u = $5/$10/$15) on a $1,000 roll; old $2.50 ladder undersized every card.
+//   NOTE: Stake is written only when a log row's stake cell is blank — existing graded rows keep their original stake.
+// ============================================================
+// ============================================================
 // 📋 NRFI Results Log — snapshots from 🌅 NRFI_Card
 // ============================================================
 // One row per game pick (NRFI or YRFI) per window. Graded via
@@ -126,10 +134,9 @@ function _mlbNrfiFindLogRow_(logSh, slate, gamePk, side) {
 }
 
 function mlbNrfiDefaultStake_(cfg) {
-  // Default = the bankroll policy max bet (tier 3, $7.50 of a $500 roll).
-  // The old $10 default silently exceeded the staking policy cap.
-  const raw = parseFloat(String(cfg && cfg['NRFI_DEFAULT_STAKE'] != null ? cfg['NRFI_DEFAULT_STAKE'] : '7.50').trim());
-  return !isNaN(raw) && raw > 0 ? raw : 7.5;
+  // Default = the bankroll policy max bet (tier 3, $15 = 3u of a $1,000 roll).
+  const raw = parseFloat(String(cfg && cfg['NRFI_DEFAULT_STAKE'] != null ? cfg['NRFI_DEFAULT_STAKE'] : '15.00').trim());
+  return !isNaN(raw) && raw > 0 ? raw : 15;
 }
 
 /**

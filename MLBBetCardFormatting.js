@@ -1,4 +1,12 @@
 // ============================================================
+// CHANGELOG (newest on top)
+// ------------------------------------------------------------
+// 2026-10-31 · v1.0 (changelog seeded)
+//   WHAT: mlbStakeTiersFromConfig_ fallbacks → $5/$10/$15 ladder, $1,000 bankroll.
+//   WHY:  Lee's real unit is $5 (1u/2u/3u = $5/$10/$15) on a $1,000 roll; old $2.50 ladder undersized every card.
+//   NOTE: Fallbacks only fire when a Config key is missing; live values come from ⚙️ Config.
+// ============================================================
+// ============================================================
 // 🎨 MLB Bet Card formatting — rendering only, insulated from model logic
 // ============================================================
 // All visual styling for 🃏 MLB_Bet_Card lives here so model rollbacks
@@ -84,7 +92,7 @@ function mlbKellyFraction_(p, american, fraction) {
 
 /**
  * Read tier-staking config with sane defaults. Pulled once per card build.
- * Falls back to a $2.50/$5/$7.50 ladder anchored at 0.5/1.0/1.5% of bankroll.
+ * Falls back to a $5/$10/$15 ladder anchored at 0.5/1.0/1.5% of a $1,000 bankroll.
  */
 function mlbStakeTiersFromConfig_(cfg) {
   function num(k, dflt) {
@@ -92,11 +100,11 @@ function mlbStakeTiersFromConfig_(cfg) {
     return isNaN(v) ? dflt : v;
   }
   return {
-    bankroll: num('BANKROLL', 500),
+    bankroll: num('BANKROLL', 1000),
     kellyFraction: num('KELLY_FRACTION', 0.25),
-    tier1Usd: num('STAKE_TIER_1_USD', 2.50),
-    tier2Usd: num('STAKE_TIER_2_USD', 5.00),
-    tier3Usd: num('STAKE_TIER_3_USD', 7.50),
+    tier1Usd: num('STAKE_TIER_1_USD', 5.00),
+    tier2Usd: num('STAKE_TIER_2_USD', 10.00),
+    tier3Usd: num('STAKE_TIER_3_USD', 15.00),
     tier1Pct: num('STAKE_TIER_1_KELLY_PCT', 0.5) / 100,
     tier2Pct: num('STAKE_TIER_2_KELLY_PCT', 1.0) / 100,
     tier3Pct: num('STAKE_TIER_3_KELLY_PCT', 1.5) / 100,

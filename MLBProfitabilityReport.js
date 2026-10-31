@@ -1,4 +1,12 @@
 // ============================================================
+// CHANGELOG (newest on top)
+// ------------------------------------------------------------
+// 2026-10-31 · v1.0 (changelog seeded)
+//   WHAT: BANKROLL fallback 500 → 1000.
+//   WHY:  Lee's real unit is $5 (1u/2u/3u = $5/$10/$15) on a $1,000 roll; old $2.50 ladder undersized every card.
+//   NOTE: Bankroll curve starts from Config BANKROLL — after this change the curve's starting balance reads $1,000, so historical drawdown % shrinks by half.
+// ============================================================
+// ============================================================
 // 💰 MLB profitability report — live Bet Card results log
 // ============================================================
 // Summarizes graded 📋 MLB_Results_Log rows: ROI, hit rate vs break-even,
@@ -189,10 +197,10 @@ function mlbBuildProfitabilityReport_(ss) {
   });
 
   // Bankroll curve from per-slate P/L (chronological): running balance,
-  // peak, and max drawdown — risk-of-ruin visibility for the $500 roll.
+  // peak, and max drawdown — risk-of-ruin visibility for the $1,000 roll.
   const cfgBr = typeof getConfig === 'function' ? getConfig() : {};
   const startBankroll =
-    parseFloat(String(cfgBr['BANKROLL'] != null ? cfgBr['BANKROLL'] : '500')) || 500;
+    parseFloat(String(cfgBr['BANKROLL'] != null ? cfgBr['BANKROLL'] : '1000')) || 1000;
   let runBal = startBankroll;
   let peakBal = startBankroll;
   let maxDdUsd = 0;

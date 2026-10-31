@@ -1,4 +1,12 @@
 // ============================================================
+// CHANGELOG (newest on top)
+// ------------------------------------------------------------
+// 2026-10-31 · v1.0 (changelog seeded; build 60 code)
+//   WHAT: Stake ladder defaults $2.50/$5/$7.50 → $5/$10/$15; BANKROLL 500 → 1000; NRFI/F5_DEFAULT_STAKE 7.50 → 15.00.
+//   WHY:  Lee's real unit is $5 (1u/2u/3u = $5/$10/$15) on a $1,000 roll; old $2.50 ladder undersized every card.
+//   NOTE: buildConfigTab() rewrites the whole ⚙️ Config tab — re-running '0. Build Config tab' applies these AND resets any other hand-edited keys (only SLATE_DATE survives). LEGACY_UNIT_USD stays 2.50 on purpose (historical backfill).
+// ============================================================
+// ============================================================
 // ⚙️ CONFIG — MLB-BOIZ (AI-BOIZ philosophy, MLB data)
 // ============================================================
 // Secrets: Script Properties — ODDS_API_KEY (the-odds-api.com), ANTHROPIC_API_KEY (Claude K deep dive).
@@ -230,11 +238,11 @@ function buildConfigTab() {
   row_('K_PROXY_LINE_NOISE', '0.0', 'Optional ±0.5 noise on proxy lines in sensitivity pass (0 or 0.5).');
   row_('K_LOGS_DUMP_MIN_IP', '20', 'Min season IP for 🗄️ Pitcher_K_Cache overnight dump (starters + bulk relievers).');
   row_('K_LOGS_DUMP_INTERVAL_MIN', '10', 'Minutes between processPitcherKLogsChunk trigger runs during overnight dump.');
-  row_('BANKROLL', '500', 'Bankroll in $ for Kelly stake column on 🃏 card. Default $500 = max bet $7.50 ≈ 1.5% of roll. Edit to your actual roll as it grows.');
+  row_('BANKROLL', '1000', 'Bankroll in $ for Kelly stake column on 🃏 card. Default $1,000 = max bet $15 (3u) ≈ 1.5% of roll. Edit to your actual roll as it grows.');
   row_('KELLY_FRACTION', '0.25', 'Fractional-Kelly multiplier (0..1). Default 0.25 = quarter-Kelly (conservative, survives model overconfidence). Full-Kelly (1) is aggressive.');
-  row_('STAKE_TIER_1_USD', '2.50', '1u stake size in $. With $7.50 cap and 1:2:3 ladder → 1u/2u/3u = $2.50/$5/$7.50.');
-  row_('STAKE_TIER_2_USD', '5.00', '2u stake size in $. Edit together with TIER_1 / TIER_3 as your cap grows.');
-  row_('STAKE_TIER_3_USD', '7.50', '3u stake size in $ — your effective max bet. Raise as bankroll grows and your model proves +EV.');
+  row_('STAKE_TIER_1_USD', '5.00', '1u stake size in $. With $15 cap and 1:2:3 ladder → 1u/2u/3u = $5/$10/$15.');
+  row_('STAKE_TIER_2_USD', '10.00', '2u stake size in $. Edit together with TIER_1 / TIER_3 as your cap grows.');
+  row_('STAKE_TIER_3_USD', '15.00', '3u stake size in $ — your effective max bet. Raise as bankroll grows and your model proves +EV.');
   row_('STAKE_TIER_1_KELLY_PCT', '0.5', 'Kelly% of bankroll → 1u tier. Default 0.5%: if quarter-Kelly says risk ≥0.5% of roll, place 1u. Below this floor → no bet.');
   row_('STAKE_TIER_2_KELLY_PCT', '1.0', 'Kelly% of bankroll → 2u tier. Default 1.0%.');
   row_('STAKE_TIER_3_KELLY_PCT', '1.5', 'Kelly% of bankroll → 3u tier. Default 1.5%: any Kelly recommendation ≥1.5% of roll is a max-bet conviction play.');
@@ -388,10 +396,10 @@ function buildConfigTab() {
   row_('NRFI_PICK_MIN_EV', '-0.05', "Outcome mode only: price guardrail — skip a pick if its EV/$1 is below this even when confidence clears the floor. Negative-tolerant so we'll lay modest juice on strong winners, but won't light money on fire.");
   row_('NRFI_SNAPSHOT_TOP_N', '10', 'Max games snapshotted from 🌅 NRFI_Card to 📋 NRFI_Results_Log per window. Ranked by win probability (outcome mode) or EV (legacy mode).');
   row_('NRFI_SNAPSHOT_MIN_EV', '0.03', 'Legacy ev-mode only: minimum best_ev_$1 on 🌅 NRFI_Card to snapshot into results log. Ignored in outcome mode (NRFI_PICK_MIN_EV guards price there).');
-  row_('NRFI_DEFAULT_STAKE', '7.50', 'Default $ stake for NRFI results-log PnL column. Capped at the tier-3 max bet ($7.50 of $500 roll) — keep ≤ TIER_3_USD.');
+  row_('NRFI_DEFAULT_STAKE', '15.00', 'Default $ stake for NRFI results-log PnL column. Capped at the tier-3 max bet ($15 = 3u of $1,000 roll) — keep ≤ TIER_3_USD.');
   row_('F5_SNAPSHOT_TOP_N', '8', 'Max F5 total picks snapshotted from ⚾ F5_Card to 📋 F5_Results_Log per window.');
   row_('F5_SNAPSHOT_MIN_EV', '0.03', 'Minimum best_ev_$1 on ⚾ F5_Card to snapshot into results log.');
-  row_('F5_DEFAULT_STAKE', '7.50', 'Default $ stake for F5 results-log PnL column. Capped at the tier-3 max bet ($7.50 of $500 roll) — keep ≤ TIER_3_USD.');
+  row_('F5_DEFAULT_STAKE', '15.00', 'Default $ stake for F5 results-log PnL column. Capped at the tier-3 max bet ($15 = 3u of $1,000 roll) — keep ≤ TIER_3_USD.');
   ss.getNamedRanges().forEach(function (nr) {
     if (nr.getName() === 'CONFIG') nr.remove();
   });
