@@ -1,5 +1,9 @@
 <!--
 CHANGELOG (newest on top)
+2026-10-31 · v1.2
+  WHAT: Added live NBA-BOIZ Drive data folder as the primary pick source + card-reading rules (💎, SUSPECT, pick'em leg selection, boost-on-alt-rung rule).
+  WHY:  Live NBA work isn't in any GitHub repo; it lives in Drive. Tout-sourced picks contradicted the model on 4 of 6 legs today.
+  NOTE: Drive text files come back base64; nba_card.json is ~150KB — parse with get_file_metadata MAX_ALLOWED snippet + jq/python, unescape markdown backslashes.
 2026-10-31 · v1.1
   WHAT: Added NBA AI-BOIZ rules section (gates, singles band, card shape, SGP/parlay rules, push grading, live card URL).
   WHY:  Lee asked to ingest the NBA folder's rules so every session applies them.
@@ -43,6 +47,22 @@ Apply these when building NBA plays, and as the default shape for any sport with
 - **Parlay ladders:** conservative 4–6 legs (≥ +400) · medium 7–10 (≥ +800) · moon 11–20 (≥ +1500).
 - **Grading:** a push (`actual === line`) is **not** a win.
 - **Live NBA card:** https://donohuelee337.github.io/nba-boiz/ (results: `/results.html`), refreshed every 5 min. Use this card's legs for NBA promos before any outside source.
+
+## Live NBA-BOIZ data (Google Drive) — check here FIRST
+
+Folder: https://drive.google.com/drive/folders/1I1lFoL5pGQBoUbn9LBAuKQaXauZQKdJo (refreshed every few minutes on game days)
+
+- `nba_card.json` — tonight's full model card: per prop `line, side, over/under price, proj, modelP, mktP, edge, ev, l10, badges, suspect`.
+- `nba_status.txt` — injury/status watch + latest changes. `nba_pulled.txt` — props both books pulled (likely OUT).
+- `picks.json` — Lee's curated card for the day (any sport; CFB on Saturdays) with units and boost assignments.
+- Also: `nba_projections.txt`, `nba_game_lines.txt`, `nba_alt_ladders.txt`, `nba_injuries.txt`, `bets.json`, `odds/<date>/`.
+
+Card-reading rules:
+- **💎 = passed every filter** — only build from 💎 rows.
+- **`suspect: true` = kill.** Edge too large to be real (e.g. 20–30%); the model is probably missing news.
+- Never override the card's side with an outside source. If a tout says OVER and the card says UNDER, the card wins.
+- **Pick'em (no juice):** rank legs by the *lower* of modelP and mktP; heavy-juice sides (−140 to −230) the model agrees with are the best pick'em legs because the market already says 58–65%.
+- **Sportsbook profit boosts (Lee's house rule from picks.json):** put the boost on an alt spread/rung priced nearest the promo's minimum odds (≈ −200) — highest win probability that still qualifies. Plus-money boosts only when the card says so.
 
 ## Delivering picks (Lee is usually on his phone)
 
